@@ -11,6 +11,8 @@ compositor as native Wayland surfaces.
 > **Status: early-stage / pre-alpha.** It boots a real Arch Linux guest and renders the
 > Hyprland and KDE Plasma desktops, but there is still a lot to harden, document, and polish.
 > Expect rough edges. This is a development preview, not a product.
+>
+> **Tested on:** Apple M2 Max, 96 GB MacBook Pro, macOS 26.5.1 (arm64e).
 
 ## Contents
 
