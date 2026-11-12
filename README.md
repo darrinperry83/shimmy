@@ -47,14 +47,15 @@ so it feels like Linux was installed on the hardware, while the mac stays fully 
 | Area | Status | Notes |
 |---|---|---|
 | Arch Linux (aarch64, glibc) | ✅ | bootstrapped locally, stock `pacman` packages |
-| **rdmetal** graphics driver | ✅ | Mesa Gallium + DRM/GBM node, installed as the default GL driver |
-| Hyprland desktop | ✅ | stock `hyprland` package, renders + input |
+| **rdmetal** graphics driver | ✅ | Mesa Gallium + DRM/GBM node, installed as the default GL driver (no env vars) |
+| Hyprland desktop | ✅ | stock `hyprland` package, renders + input + cursor |
 | KDE Plasma desktop | ✅ | stock `plasma-meta`, kwin_wayland + plasmashell |
-| Audio | ✅ | PipeWire/ALSA → CoreAudio, auto sink + RUNNING graph |
-| mac apps as native windows | ✅ | owned by the compositor as Wayland surfaces |
-| TTY / virtual console | 🚧 | `/dev/ttyN` + getty + Ctrl+Alt+Fn (in progress) |
-| Full-display takeover | 🚧 | suppress WindowServer, flip directly to all displays |
-| Metal-backed rendering | 🚧 | clear+draw done; textures in progress |
+| Audio | ✅ | PipeWire/ALSA → CoreAudio, shim-generated card, auto sink + RUNNING graph |
+| mac apps as native windows | ✅ | owned by the compositor as Wayland surfaces (launch + IOSurface content) |
+| TTY / virtual console | ✅ | `/dev/ttyN` + getty login + Ctrl+Alt+Fn switching |
+| Metal-backed rendering | 🚧 | clear + draw + texture sampling through Metal; vertex/index/uniform in progress (softpipe fallback until done) |
+| Full-display takeover | 🚧 | `present_iosurface` flip fires (ret=1); repeatable-frame stability in progress |
+| Omarchy rootfs | 🚧 | optional `--rootfs omarchy` (Hyprland + Quickshell) in progress |
 
 ## Architecture
 
@@ -125,9 +126,10 @@ When a release is cut, `develop` is merged to `main` and tagged. See
 
 | Item | Priority |
 |---|---|
-| Metal-backed GLES (textures → shaders → index buffers) | high |
-| TTY/VT console (getty + switching) | high |
-| Full-display takeover (dual output + flip) | high |
+| Repeatable scanout flip (frame 1..N stability) | high |
+| Metal vertex/index/uniform (finish the acceleration) | high |
+| Native DRM/atomic backend (retire wlsrv presentation) | high |
+| Omarchy rootfs (`--rootfs omarchy`) | medium |
 | Cross-process dma-buf (accelerated clients) | medium |
 | Workspaces across displays | medium |
 | System tray + mac integration | medium |
