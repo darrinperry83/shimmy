@@ -55,3 +55,9 @@ Please read [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 ## License
 
 By contributing, you agree your work is licensed under the [MIT License](LICENSE).
+
+## Commit messages
+
+We use [Conventional Commits](https://www.conventionalcommits.org/). Prefixes: `feat:`, `fix:`,
+`docs:`, `chore:`, `refactor:`, `test:`, `ci:`. This drives the automated changelog and
+semver (release-please).
