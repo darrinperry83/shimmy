@@ -62,6 +62,53 @@ cd shimmy
 desktop with the standard Arch commands (`pacman -S hyprland` / `pacman -S plasma`), and
 installs rdmetal as the default GL driver.
 
+## Host setup — SIP + the scanout injection (one-time)
+
+The direct-to-display scanout injects a small payload into WindowServer. That needs two
+one-time host prerequisites, fully automated by `./setup.sh`:
+
+### 1. Disable System Integrity Protection (SIP)
+
+The injector uses `task_for_pid(WindowServer)` to hand a Mach receive-right into
+WindowServer, which macOS blocks while SIP is on.
+
+1. Shut down, then boot into **macOS Recovery**:
+   - Apple silicon: hold the power button until "Loading startup options", choose Options → Continue.
+2. In Recovery, open **Terminal** (Utilities menu) and run:
+   ```sh
+   csrutil disable
+   ```
+3. Reboot normally.
+
+> Re-enable later with `csrutil enable` in Recovery. This is a real security trade-off —
+> only do it if you accept it.
+
+### 2. Passwordless sudo for the injector
+
+The injector must run as root. Add a single NOPASSWD rule (substitute your user and the
+repo path):
+
+```sh
+sudo visudo
+# add:
+#   <youruser> ALL=(ALL) NOPASSWD: /path/to/shimmy/scanout/ws_inject_manual_d2
+```
+
+### 3. Inject (and after every WindowServer restart)
+
+`./setup.sh` does the SIP check, verifies the sudo rule, and injects the payload for the
+current macOS version:
+
+```sh
+./setup.sh
+# equivalent:
+#   sudo ./scanout/ws_inject_manual_d2 --register ./scanout/payload/rdgpu-scanout-server18-payload
+```
+
+WindowServer restarts (login, `sudo killall WindowServer`, a crash) clear the injection, so
+re-run `./setup.sh` after any of those. The payload is pinned to an exact macOS version —
+see `scanout/` for the tags.
+
 ## Development
 
 Build the shim:
