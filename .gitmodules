@@ -1,0 +1,6 @@
+[submodule "rdmetal"]
+	path = rdmetal
+	url = https://github.com/darrinperry83/shimmy-rdmetal.git
+[submodule "scanout"]
+	path = scanout
+	url = https://github.com/darrinperry83/shimmy-scanout.git

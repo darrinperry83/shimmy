@@ -67,11 +67,11 @@ run_pacman -S --noconfirm mesa mesa-utils libglvnd wayland wayland-protocols \
 
 # --- 5. install the rdmetal driver (so the desktop renders) -------------------
 echo "==> installing the rdmetal driver"
-if [ -d "$HERE/rdmetal-libs" ]; then
+if [ -d "$HERE/rdmetal/rdmetal-libs" ]; then
   install -d "$ROOTFS/usr/lib/dri"
-  install -m 644 "$HERE/rdmetal-libs/dri/rdmetal_dri.so" "$ROOTFS/usr/lib/dri/rdmetal_dri.so"
+  install -m 644 "$HERE/rdmetal/rdmetal-libs/dri/rdmetal_dri.so" "$ROOTFS/usr/lib/dri/rdmetal_dri.so"
   for lib in libEGL.so.1.0.0 libGLESv2.so.2.0.0 libgbm.so.1.0.0 libglapi.so.0.0.0; do
-    [ -f "$HERE/rdmetal-libs/$lib" ] && install -m 644 "$HERE/rdmetal-libs/$lib" "$ROOTFS/usr/lib/$lib"
+    [ -f "$HERE/rdmetal/rdmetal-libs/$lib" ] && install -m 644 "$HERE/rdmetal/rdmetal-libs/$lib" "$ROOTFS/usr/lib/$lib"
   done
   # repoint the versioned symlinks to our libs
   ln -sf libEGL.so.1.0.0   "$ROOTFS/usr/lib/libEGL.so.1"
@@ -80,7 +80,7 @@ if [ -d "$HERE/rdmetal-libs" ]; then
   ln -sf libglapi.so.0.0.0 "$ROOTFS/usr/lib/libglapi.so.0"
   echo "    -> rdmetal_dri.so + EGL/GLES/gbm libs installed; default driver (no env vars)"
 else
-  echo "    ! rdmetal-libs/ not found — run the rdmetal build first (see shimmy-rdmetal)"
+  echo "    ! rdmetal/rdmetal-libs/ not found — run the rdmetal build first (see shimmy-rdmetal)"
 fi
 
 echo ""
