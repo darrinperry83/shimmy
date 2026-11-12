@@ -1,0 +1,10 @@
+*.o
+obj/
+logs/
+*.pch
+shim_gui
+shim_cli
+shim_wlh
+rd_mac_app
+rd_mac_probe
+rdmetal-libs/
