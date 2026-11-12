@@ -25,6 +25,7 @@ metal.
 
 - [Why shimmy](#why-shimmy)
 - [Features](#features)
+- [How it works (technical)](docs/HOW_IT_WORKS.md)
 - [Architecture](#architecture)
 - [Quick start](#quick-start)
 - [Presentation modes](#presentation-modes)
