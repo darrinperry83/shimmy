@@ -1,14 +1,20 @@
-## What
+## What does this change do and why?
 
-<!-- Describe what this PR does and why. -->
+<!-- Summarize the change and the motivation. -->
 
-## How tested
+## How was this tested?
 
-<!-- How did you verify it? Commands, log excerpts, screenshots. -->
+<!-- Commands run, results, log excerpts, screenshots. -->
+
+## Possible drawbacks / alternatives
+
+<!-- Anything a reviewer should weigh. -->
 
 ## Checklist
 
-- [ ] Built clean (`./build.sh gui` / `./build.sh cli`)
+- [ ] Built clean (`./build.sh gui` and `./build.sh cli`)
 - [ ] No new warnings
-- [ ] Updated docs if behavior changed
-- [ ] Issue linked (if any): #
+- [ ] Docs updated if behavior changed
+
+Part-of: <!-- #issue or #MR this belongs to -->
+Closes: <!-- #issue this fixes, if any -->

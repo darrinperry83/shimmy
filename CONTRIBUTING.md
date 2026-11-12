@@ -61,3 +61,22 @@ By contributing, you agree your work is licensed under the [MIT License](LICENSE
 We use [Conventional Commits](https://www.conventionalcommits.org/). Prefixes: `feat:`, `fix:`,
 `docs:`, `chore:`, `refactor:`, `test:`, `ci:`. This drives the automated changelog and
 semver (release-please).
+
+## Commit style (Mesa-style)
+
+Write commit subjects as `component: description`, e.g.:
+
+```
+wlsrv: composite the hardware cursor surface
+rdmetal: wire texture upload through the broker
+drmasahi: generate the sound-card sysfs at boot
+```
+
+Use the standard trailers to link work:
+
+- `Part-of: #123` — this is part of a larger change/topic.
+- `Closes: #123` / `Fixes: #123` — this closes the issue.
+- `Reviewed-by: Name <email>` — after review.
+
+One logical change per commit; keep the subject under ~72 characters and put the
+"why" in the body.
