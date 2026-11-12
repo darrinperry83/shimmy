@@ -1,5 +1,8 @@
 # shimmy
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![rdmetal build](https://github.com/darrinperry83/shimmy-rdmetal/actions/workflows/build.yml/badge.svg)](https://github.com/darrinperry83/shimmy-rdmetal/actions)
+
 Run Linux on macOS — a real Arch Linux (aarch64) desktop rendered by the **rdmetal**
 driver and presented on screen by the shim's Metal path, with mac apps owned by the
 compositor as native Wayland surfaces.
@@ -135,6 +138,16 @@ The full working step-by-step (the reverse-engineering and the migration notes) 
 - [ ] rdmetal as a proper `PKGBUILD` (`pacman -U rdmetal-dri.pkg.tar.zst`).
 - [ ] Foreign mac-app pixels (TCC/entitlement path).
 
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Report bugs and request features via the issue
+templates. Security issues should be reported privately per [SECURITY.md](SECURITY.md).
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
+
 ## License
 
-TBD — early stage, not yet decided.
+[MIT](LICENSE).
