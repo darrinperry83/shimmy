@@ -8,3 +8,11 @@ shim_wlh
 rd_mac_app
 rd_mac_probe
 rdmetal-libs/
+*.log
+*.srcsha
+shim_gui
+shim_cli
+shim_wlh
+rd_mac_app
+rd_mac_probe
+shim_gui.pre-fullscreen-split
