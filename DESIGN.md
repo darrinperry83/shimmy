@@ -1,0 +1,64 @@
+# Design — shimmy
+
+The goal: run Linux on macOS **indistinguishably from a native machine**. Boot → TTY login →
+desktop → workspaces, with two presentation modes (windowed / full-display takeover), all
+rendered by the **rdmetal** driver and presented by the shim.
+
+## Layers
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Linux guest (Arch, aarch64, glibc)                          │
+│  TTY console (getty)  →  Hyprland / KDE Plasma  →  apps     │
+└───────────────────────────────┬─────────────────────────────┘
+                                │ syscalls / Wayland / DRM
+┌───────────────────────────────▼─────────────────────────────┐
+│  shim (macOS)                                                │
+│  • syscall translation + /dev/ttyN + /dev/dri + /dev/snd    │
+│  • Wayland server (wlsrv) — windowed mode                    │
+│  • input (cursor, keyboard, VT switching)                    │
+│  • Metal present path (CAMetalLayer)                         │
+└───────────────────────────────┬─────────────────────────────┘
+                                │ IOSurface handoff
+┌───────────────────────────────▼─────────────────────────────┐
+│  rdmetal (Mesa Gallium driver + DRM/GBM node)               │
+│  • renders the compositor's GL/EGL through the Metal host-call│
+│  • presents /dev/dri/renderD128 as the guest GPU             │
+└───────────────────────────────┬─────────────────────────────┘
+                                │
+┌───────────────────────────────▼─────────────────────────────┐
+│  scanout (WindowServer injection)                            │
+│  • takeover mode: suppress WindowServer, present_iosurface   │
+│    flips each frame directly to the display(s)               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## The two presentation modes
+
+| Mode | Behavior |
+|---|---|
+| **Windowed** (default) | The desktop runs in a normal CAMetalLayer window; WindowServer present as usual. |
+| **Takeover** | Suppress WindowServer; `present_iosurface` flips the frame directly to **all** displays (dual-handoff, dual flip). |
+
+## Target experience (native-equivalent)
+
+1. **Boot** → the guest boots to the TTY console.
+2. **TTY / VT** → real `/dev/tty1…ttyN` virtual consoles with `getty` login and
+   `Ctrl+Alt+F1…F6` switching.
+3. **Login → desktop** → log in, then `Hyprland` / `startplasma-wayland` (or auto-start).
+4. **Workspaces** → the compositor's virtual desktops + shortcuts work across the display(s).
+5. **Audio / input / GPU** → PipeWire→CoreAudio, native cursor/keyboard, rdmetal rendering.
+
+## Current state vs target
+
+Working: Arch boot, rdmetal driver (default GL, no env vars), stock Hyprland + KDE desktops,
+windowed presentation, mac apps owned by the compositor, ALSA/PipeWire→CoreAudio, D-Bus session.
+
+Remaining (the native-feel gap):
+
+1. **TTY/VT console** — `/dev/ttyN` + getty + VT switching + a text-console renderer.
+2. **Takeover mode** — dual-output (per-display size), dual handoff, dual `present_iosurface` flip.
+3. **Windowed/takeover switch** — a clean mode flag.
+4. **Metal-backed GLES** — replace CPU softpipe with the Metal host-call renderer (perf).
+5. **Cross-process dma-buf** — client apps render accelerated (no software QtQuick).
+6. **App layer polish** — Chromium `/proc` gap, system tray with mac integration.

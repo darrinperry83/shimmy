@@ -16,6 +16,7 @@ compositor as native Wayland surfaces.
 
 ## Contents
 
+- [Design](DESIGN.md)
 - [What it does](#what-it-does)
 - [Current features](#current-features)
 - [Architecture](#architecture)
