@@ -1,6 +1,7 @@
 # shimmy
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![shim CI](https://github.com/darrinperry83/shimmy/actions/workflows/ci.yml/badge.svg)](https://github.com/darrinperry83/shimmy/actions)
 [![rdmetal build](https://github.com/darrinperry83/shimmy-rdmetal/actions/workflows/build.yml/badge.svg)](https://github.com/darrinperry83/shimmy-rdmetal/actions)
 
 Run Linux on macOS — a real Arch Linux (aarch64) desktop rendered by the **rdmetal**
@@ -10,6 +11,18 @@ compositor as native Wayland surfaces.
 > **Status: early-stage / pre-alpha.** It boots a real Arch Linux guest and renders the
 > Hyprland and KDE Plasma desktops, but there is still a lot to harden, document, and polish.
 > Expect rough edges. This is a development preview, not a product.
+
+## Contents
+
+- [What it does](#what-it-does)
+- [Current features](#current-features)
+- [Architecture](#architecture)
+- [Install](#install-streamlined)
+- [Host setup — SIP + the scanout injection](#host-setup--sip--the-scanout-injection-one-time)
+- [Development](#development)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## What it does
 
@@ -36,8 +49,8 @@ Working today:
 - **rdmetal driver** installed as the default GL driver (no env vars needed).
 - **mac apps owned by the compositor** — window creation + ownership wiring; real pixels
   via the app's IOSurface (foreign-app pixels still gated by macOS TCC).
-- **PipeWire / ALSA → CoreAudio** — a synthetic ALSA card + host AudioUnit; PCM flows to
-  CoreAudio (WirePlumber session handshake still in progress).
+- **PipeWire / ALSA → CoreAudio** — a synthetic ALSA card + host AudioUnit; WirePlumber
+  auto-creates the sink and `pw-cat` drives a RUNNING graph into CoreAudio.
 - **Direct scanout** — injection payload built (present flips), final wiring in progress.
 
 ## Architecture
@@ -132,10 +145,8 @@ The full working step-by-step (the reverse-engineering and the migration notes) 
 ## Roadmap
 
 - [ ] Metal-backed GLES rendering for rdmetal (currently CPU/softpipe).
-- [ ] WirePlumber session handshake (auto-sink).
 - [ ] Direct-scanout flip landed and stable.
 - [ ] System tray with mac integration.
-- [ ] rdmetal as a proper `PKGBUILD` (`pacman -U rdmetal-dri.pkg.tar.zst`).
 - [ ] Foreign mac-app pixels (TCC/entitlement path).
 
 ## Contributing

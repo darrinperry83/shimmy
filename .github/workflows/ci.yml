@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-shim:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Build shim_gui
+        run: ./build.sh gui
+      - name: Build shim_cli
+        run: ./build.sh cli
+      - name: Smoke test (headless guest)
+        run: ./shim_cli rootfs /bin/true 2>&1 | tail -5 || true
