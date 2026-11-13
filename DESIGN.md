@@ -73,16 +73,23 @@ and the shim maps each covered display to a Linux monitor:
 
 Works with any number of mac displays, like a Citrix/RDP client. macOS keeps running normally.
 
-### `takeover` — own the displays
+### `takeover` — own the external display, keep the builtin as macOS
 
-Linux owns the displays and macOS compositing is suppressed. Each monitor's frame flips
-directly to its display via `present_iosurface` → IOMFB, bypassing WindowServer:
+The first takeover mode is a **split**: the builtin display stays macOS (menu bar, Dock, mac
+apps all keep working normally), while the external display is taken over by Linux and **removed
+from macOS entirely** (a virtual unplug). The Linux compositor owns the external as its own
+monitor and flips its frames directly to it via `present_iosurface` → IOMFB, bypassing
+WindowServer:
 
-1. The scanout injection suppresses WindowServer's present per display.
-2. Each monitor's frame → its display's IOMFB swap → the hardware scanout.
-3. macOS UI is hidden; Linux is the only thing on screen, at native full-screen speed.
+1. The scanout injection suppresses WindowServer's present on the external display.
+2. The external drops out of macOS's active display set (no macOS UI on it).
+3. The Linux frame flips directly to the external's IOMFB swap → the hardware scanout.
 
-That's the "faster and better, like a real machine" mode.
+Result: macOS on the builtin, a full Linux desktop on the external, side by side. The external
+is "faster and better, like a real machine"; the builtin is untouched macOS.
+
+(This generalizes to any number of taken-over displays; the builtin is simply the one left to
+macOS in the default single-external setup.)
 
 ### Shape
 
