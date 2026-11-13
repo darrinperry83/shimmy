@@ -22,5 +22,6 @@ jobs:
       - uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
-      - uses: github/codeql-action/autobuild@v3
+      - name: Build (manual)
+        run: ./build.sh cli
       - uses: github/codeql-action/analyze@v3
