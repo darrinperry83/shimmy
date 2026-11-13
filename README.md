@@ -13,11 +13,12 @@ they are real tasks scheduled by the Mac's own **Mach kernel**. Graphics render 
 compositor and display controller. It is a thin translation layer over the scheduler and
 drivers you already have: **no CPU emulation, no virtual hardware**.
 
-> **What it's going to bring:** a real Linux desktop on the Mac. Boot to a TTY, log in, and
-> you're in Hyprland, KDE, or Omarchy: with displays, hotplug, workspaces, audio, and input
-> all working like it's installed on the hardware. And macOS keeps running underneath, so you
-> lose nothing: mac apps appear as windows inside that Linux desktop, and the Mac is still the
-> Mac whenever you want it.
+> **What it's going to bring:** real Linux on the Mac. Boot to a TTY, log in, and run the
+> **window manager of your choice** — Hyprland, KDE, Sway, GNOME, i3, whatever is in the Arch
+> repos — and **all the ARM64 packages you can get your hands on**, installed with plain
+> `pacman`. Displays, hotplug, workspaces, audio, and input all work like it's on the hardware.
+> And macOS keeps running underneath, so you lose nothing: mac apps appear as windows inside
+> that Linux desktop, and the Mac is still the Mac whenever you want it.
 >
 > **Status: pre-alpha.** It boots real Arch and renders Hyprland/KDE/Omarchy with working
 > audio, input, and a TTY console; the native DRM-master compositor path is landed. Metal
