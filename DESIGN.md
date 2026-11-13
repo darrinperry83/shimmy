@@ -55,19 +55,43 @@ To get there:
 
 ## Presentation modes
 
-Two modes:
+The compositor runs natively as the **DRM master** and renders N monitors (one per mac
+display, hotplug-aware). That core is mode-independent. The only difference is the **present
+sink** for each monitor's frame.
 
-- **`windowed`**: Linux runs as a normal mac window inside macOS, without interrupting the
-  current macOS flow (WindowServer, the Dock, other apps all keep running normally). This is
-  the safe, coexist-with-macOS mode.
+### `windowed` — the Citrix-client model
 
-- **`takeover`**: Linux takes over the whole display and suppresses the macOS compositing
-  (WindowServer's present path), so it runs faster and better, like a real machine. The shim
-  drives the display directly via `present_iosurface` → IOMFB, bypassing WindowServer.
+Linux runs inside a resizable macOS window. Stretch it across N mac displays and maximize it,
+and the shim maps each covered display to a Linux monitor:
 
-Takeover is the primary performance mode; windowed is the coexist/development mode. The
-native DRM-master compositor is the core of both: it renders the frame; the mode only changes
-how that frame is presented (into a window vs. directly to the display).
+1. The shim's `NSWindow` is a borderless resizable container.
+2. On resize/move, the shim reads which `NSScreen`s the window intersects + their scale.
+3. It advertises that many Linux outputs (the rdmetal connectors), each = the covered display.
+4. Each monitor's frame is presented into the matching region of the window (or a per-display
+   sub-window), so the desktop is continuous across the displays.
+5. Move/resize across a different display = re-advertise + re-modeset (window-driven hotplug).
+
+Works with any number of mac displays, like a Citrix/RDP client. macOS keeps running normally.
+
+### `takeover` — own the displays
+
+Linux owns the displays and macOS compositing is suppressed. Each monitor's frame flips
+directly to its display via `present_iosurface` → IOMFB, bypassing WindowServer:
+
+1. The scanout injection suppresses WindowServer's present per display.
+2. Each monitor's frame → its display's IOMFB swap → the hardware scanout.
+3. macOS UI is hidden; Linux is the only thing on screen, at native full-screen speed.
+
+That's the "faster and better, like a real machine" mode.
+
+### Shape
+
+**One native compositor, two present sinks**: a window (windowed, any N displays) or the raw
+displays (takeover). A single `windowed | takeover` flag switches the sink; the DRM-master and
+connector discovery are shared.
+
+Plan: (1) per-CRTC present (shared core), (2) window-geometry → Linux-output mapping, (3)
+takeover flip stability, (4) the mode flag.
 
 ## Target experience (native-equivalent)
 
