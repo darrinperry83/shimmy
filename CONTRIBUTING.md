@@ -54,7 +54,7 @@ Please read [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ## License
 
-By contributing, you agree your work is licensed under the [MIT License](LICENSE).
+By contributing, you agree your work is licensed under the [GPLv3 License](LICENSE), including the attribution requirement in Section 7(b).
 
 ## Commit messages
 
