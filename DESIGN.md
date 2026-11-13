@@ -33,12 +33,38 @@ rendered by the **rdmetal** driver and presented by the shim.
 └─────────────────────────────────────────────────────────────┘
 ```
 
+## Architectural north star: native compositor, no custom Wayland server
+
+The long-term target is for the compositor to run **natively**, not as a nested client of a
+custom server:
+
+```
+Hyprland / KDE  (native DRM master + its own Wayland server)
+   → /dev/dri/card0 (rdmetal)  → GBM  → render
+   → KMS/atomic page-flip      → rdmetal → Metal → display
+```
+
+This retires `wlsrv.c`'s *presentation* role (the nested-Wayland dmabuf import). The shim keeps
+its other roles: input routing, cursor compositing, and the mac-app-window→Wayland-surface
+bridge (the shim acting as a Wayland *client* of the native compositor).
+
+To get there:
+1. rdmetal's DRM node becomes a full KMS/atomic device (modeset, page-flip).
+2. A `libseat` shim so the compositor's DRM backend can take the seat.
+3. Remove `wlsrv`'s presentation path; keep input/cursor/mac-window.
+
 ## The two presentation modes
 
-| Mode | Behavior |
-|---|---|
-| **Windowed** (default) | The desktop runs in a normal CAMetalLayer window; WindowServer present as usual. |
-| **Takeover** | Suppress WindowServer; `present_iosurface` flips the frame directly to **all** displays (dual-handoff, dual flip). |
+The user chooses the mode **and** the displays:
+
+- **`windowed`** — the desktop runs in a normal window; WindowServer present.
+- **`takeover`** — suppress WindowServer; `present_iosurface` flips directly to the displays.
+
+The user also selects **how many and which** displays the desktop uses (e.g. one display,
+the external only, or all displays). This is a runtime flag, not a build-time choice.
+
+The nested Wayland backend (`wlsrv` presentation) is retired — the compositor is the native
+DRM master; `wlsrv` keeps only input, cursor, and the mac-window→Wayland-surface bridge.
 
 ## Target experience (native-equivalent)
 
