@@ -188,4 +188,15 @@ Report vulnerabilities privately. See [SECURITY.md](SECURITY.md).
 
 ## License
 
-[MIT](LICENSE).
+[GPLv3](LICENSE).
+
+**Attribution.** In addition to the terms of GPLv3, and under its Section 7(b), you must preserve
+the following attribution in the Appropriate Legal Notices displayed by any work that contains
+this software:
+
+> shimmy - run Linux natively on your Mac.
+> Copyright (C) 2025 Darrin Perry.
+> https://github.com/darrinperry83/shimmy
+
+In practice this means any interactive interface (an about box, a legal-notices screen, or a
+prominent `show w`/`show c` equivalent) must credit shimmy and its author.
