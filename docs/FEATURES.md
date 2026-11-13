@@ -1,8 +1,27 @@
 # Feature support
 
-This page tracks which hardware and software subsystems shimmy bridges, and the status of each.
-The model is borrowed from the [Asahi Linux feature-support pages](https://asahilinux.org/docs/platform/feature-support/overview/):
+This page tracks what shimmy does right now, and the status of each subsystem. The model is
+borrowed from the [Asahi Linux feature-support pages](https://asahilinux.org/docs/platform/feature-support/overview/):
 a status legend, a per-subsystem table, and notes for the caveats.
+
+## What works right now
+
+| Capability | Status |
+|---|---|
+| Boots Arch Linux (aarch64, glibc) to a TTY login | ✅ |
+| Native DRM-master compositor (Hyprland / KDE), both displays | ✅ |
+| Metal renderer (clear, draw, texture, vertex, index, uniform) | ✅ |
+| Audio (PipeWire -> CoreAudio) | ✅ |
+| Input (evdev/libinput keyboard + pointer) | ✅ |
+| TTY / virtual console with Ctrl+Alt+Fn | ✅ |
+| mac apps as Wayland surfaces | ✅ |
+| Cross-process dma-buf (accelerated clients) | ✅ |
+| Scanout takeover: stable + visible direct flip | ✅ |
+| Omarchy rootfs (`--rootfs omarchy`) | ✅ |
+| Self-contained build + GitHub CI | ✅ |
+| Live guest running GPU-accelerated (not softpipe) | 🚧 |
+| Takeover: hide macOS UI (no menu bar / Dock flashing) | 🚧 |
+| Takeover: remove the external display from macOS (virtual unplug) | 📋 |
 
 ## Status legend
 
@@ -18,16 +37,16 @@ has been verified end to end on the test machine.
 
 ## Subsystem support
 
-The shim translates the Linux kernel surface onto the Mac's own scheduler and drivers. The table
-below lists each subsystem, its status, and the bridge that implements it.
-
 | Subsystem | Status | Bridge |
 |---|---|---|
 | CPU scheduling | ✅ | Linux processes run as Mach tasks; the Mach kernel schedules them |
-| GPU (OpenGL/EGL) | ✅ | `rdmetal`, a Mesa Gallium driver that lowers guest shaders into Metal (clear, draw, texture, vertex, index, uniform) |
-| Display (compositor) | ✅ | the compositor runs as the native DRM master and presents through the shim's Metal path |
-| Multi-display | ✅ | per-CRTC present on the external (3440x1440) and builtin (3600x2338) displays |
-| Display takeover | 🚧 | `present_iosurface` -> IOMFB, with WindowServer suppressed; the repeatable flip is in progress |
+| GPU (rdmetal) | ✅ | Mesa Gallium driver that lowers guest GLES into Metal (clear, draw, texture, vertex, index, uniform) |
+| GPU in the live guest | 🚧 | the driver is complete, but the live compositor still falls back to CPU softpipe until the Metal path is wired into the live session |
+| Display (compositor) | ✅ | the compositor runs as the native DRM master, presents through the shim's Metal path |
+| Multi-display | ✅ | per-CRTC present on the external (3440x1440) and builtin (3600x2338) |
+| Display takeover (flip) | ✅ | direct `present_iosurface` -> IOMFB; stable and visible, held up overnight |
+| Takeover host suppression | 🚧 | the Apple menu bar / Dock still flash through between flips |
+| Takeover display removal | 📋 | drop the external from macOS (clear the `online` flag) so macOS stops seeing it |
 | Audio | ✅ | PipeWire/ALSA -> CoreAudio, shim-generated sound card |
 | Input | ✅ | evdev/libinput fed from the mac's HID events |
 | TTY / virtual console | ✅ | `/dev/ttyN` + getty login + Ctrl+Alt+Fn switching |
@@ -45,10 +64,18 @@ below lists each subsystem, its status, and the bridge that implements it.
 ## Notes
 
 - **Metal renderer.** Clear, draw, texture sampling, vertex attributes, index buffers, and a
-  bounded matrix uniform all run through Metal. Guest `glReadPixels` still returns black; the
-  host-side IOSurface read is authoritative. That readback path is a separate, known gap.
-- **Display takeover.** The direct `present_iosurface` flip is the active frontier. The frame
-  lands (`ret=1`), and the surface lifecycle is being stabilized so the flip repeats indefinitely.
+  bounded matrix uniform all run through Metal, validated headless with a non-black textured
+  indexed quad. The live guest still uses softpipe, so it renders slowly (fractional fps) until
+  the Metal path is wired into the live session.
+- **Guest `glReadPixels`.** Still returns black; the host-side IOSurface read is authoritative.
+  This readback path is a separate, known gap.
+- **Display takeover.** The direct `present_iosurface` flip is stable and visible (it held up
+  overnight). The remaining takeover work is the host-UI suppression (menu bar / Dock flashing),
+  the display removal (a virtual unplug of the external), and the nested Wayland-1 window
+  suppression.
+- **Takeover split mode.** The first takeover mode keeps the builtin display as macOS and takes
+  the external for Linux; the external is then dropped from macOS via its `online` flag while the
+  direct present keeps scanning out to it.
 - **Hotplug.** Physical-display hotplug events are not yet synthesized; they are on the roadmap.
-- **Input in takeover mode.** The evdev/libinput path is wired; in the nested-Wayland fallback the
-  outer `wl_seat` is no longer served, so native-DRM mode uses the evdev path directly.
+- **Input in takeover mode.** The evdev/libinput path is wired; the nested-Wayland `wl_seat` is no
+  longer served in native-DRM or takeover mode.

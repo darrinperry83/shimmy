@@ -23,9 +23,14 @@ Linux desktop and the Mac remains fully usable.
 
 ### Status
 
-**Pre-alpha.** The project boots a real Arch Linux rootfs and renders Hyprland, KDE Plasma, and
-Omarchy with working audio, input, a TTY console, and a native DRM-master compositor that presents
-on both displays. The Metal renderer and the direct-display takeover are the active frontier.
+**Pre-alpha, but the core works.** It boots a real Arch rootfs, renders Hyprland, KDE, and Omarchy
+on both displays through a native DRM-master compositor, and has working audio, input, a TTY
+console, and mac-app integration. The scanout takeover (the direct `present_iosurface` flip) is
+stable and visible. The active frontier is polishing the takeover (hiding the macOS UI and removing
+the taken-over display from macOS) and wiring the Metal renderer into the live guest, which still
+falls back to CPU softpipe.
+
+See [Feature support](docs/FEATURES.md) for the current status of every subsystem.
 
 **Tested on:** Apple M2 Max, 96 GB MacBook Pro, macOS 26.5.1 (arm64e).
 
@@ -74,14 +79,17 @@ GPU-driver guessing; the real Apple GPU does the work through Metal.
 | `rdmetal` graphics driver | ✅ | Mesa Gallium + DRM/GBM node, installed as the default GL driver (no env vars) |
 | Native DRM-master compositor | ✅ | Hyprland/KDE run as the DRM master via `MODE_ATOMIC` |
 | Multi-display + per-CRTC present | ✅ | external 3440x1440 + builtin 3600x2338, both present |
-| Metal-backed rendering | ✅ | clear + draw + texture + vertex/index/uniform through Metal |
+| Metal-backed rendering | ✅ | clear + draw + texture + vertex/index/uniform through Metal (headless-validated) |
+| Live guest GPU acceleration | 🚧 | the live compositor still falls back to CPU softpipe until the Metal path is wired in |
 | Input (evdev/libinput) | ✅ | keyboard + pointer in native DRM-master mode |
 | Audio | ✅ | PipeWire/ALSA -> CoreAudio, shim-generated card, auto sink |
 | TTY / virtual console | ✅ | `/dev/ttyN` + getty login + Ctrl+Alt+Fn switching |
 | mac apps as native windows | ✅ | owned by the compositor as Wayland surfaces |
 | Cross-process dma-buf | ✅ | accelerated client buffers |
-| Direct-display takeover | 🚧 | `present_iosurface` flip fires (`ret=1`); repeatable-frame stability in progress |
-| Omarchy rootfs | 🚧 | optional `--rootfs omarchy` (Hyprland + Quickshell) |
+| Direct-display takeover | ✅ | stable + visible direct `present_iosurface` flip (held up overnight) |
+| Takeover: hide macOS UI | 🚧 | the Apple menu bar / Dock still flash through between flips |
+| Takeover: remove display from macOS | 📋 | clear the display's `online` flag so macOS stops seeing it |
+| Omarchy rootfs | ✅ | optional `--rootfs omarchy` (Hyprland + Quickshell) |
 
 ## How it works
 
@@ -145,7 +153,11 @@ and scanout prerequisites.
 | Mode | Behavior |
 |---|---|
 | **Windowed** (default) | the desktop runs in a normal window, WindowServer present |
-| **Takeover** | suppress WindowServer, `present_iosurface` flips directly to all displays |
+| **Takeover** | the external display is taken over by Linux (suppress WindowServer, `present_iosurface` flips directly to it) while the builtin stays macOS |
+
+The first takeover mode is a **split**: macOS keeps running on the builtin display, and Linux owns
+the external display exclusively (macOS is made to stop seeing it). See
+[DESIGN.md](DESIGN.md) for the details.
 
 ## Development
 
@@ -168,7 +180,9 @@ The project uses a trunk-based-on-stable branching model:
 
 | Item | Priority |
 |---|---|
-| Repeatable scanout flip (frame 1..N stability) | high |
+| Wire the Metal renderer into the live guest (drop softpipe) | high |
+| Takeover: hide macOS UI (menu bar / Dock) | high |
+| Takeover: remove the taken-over display from macOS | high |
 | Guest `glReadPixels` readback | medium |
 | Hotplug uevent | medium |
 | Full plasmashell EGL session | medium |
