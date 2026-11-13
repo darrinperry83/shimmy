@@ -112,13 +112,16 @@ takeover flip stability, (4) the mode flag.
 ## Current state vs target
 
 Working: Arch boot, rdmetal driver (default GL, no env vars), stock Hyprland + KDE desktops,
-windowed presentation, mac apps owned by the compositor, ALSA/PipeWire→CoreAudio, D-Bus session.
+windowed presentation, mac apps owned by the compositor, ALSA/PipeWire→CoreAudio, D-Bus session,
+the TTY/VT console, the native DRM-master compositor on both displays, evdev/libinput input, the
+Metal renderer (headless-validated), cross-process dma-buf, and a stable + visible scanout takeover
+(the direct `present_iosurface` flip held up overnight).
 
-Remaining (the native-feel gap):
+Remaining:
 
-1. **TTY/VT console**: `/dev/ttyN` + getty + VT switching + a text-console renderer.
-2. **Takeover mode**: dual-output (per-display size), dual handoff, dual `present_iosurface` flip.
-3. **Windowed/takeover switch**: a clean mode flag.
-4. **Metal-backed GLES**: replace CPU softpipe with the Metal host-call renderer (perf).
-5. **Cross-process dma-buf**: client apps render accelerated (no software QtQuick).
+1. **Live GPU acceleration**: wire the Metal renderer into the live guest (it still uses softpipe).
+2. **Takeover host suppression**: hide the macOS menu bar / Dock so they stop flashing through.
+3. **Takeover display removal**: clear the external's `online` flag so macOS stops seeing it.
+4. **Guest `glReadPixels` readback** and **hotplug uevent**.
+5. **Full plasmashell EGL** and the full Omarchy application set.
 6. **App layer polish**: Chromium `/proc` gap, system tray with mac integration.
