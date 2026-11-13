@@ -53,15 +53,21 @@ To get there:
 2. A `libseat` shim so the compositor's DRM backend can take the seat.
 3. Remove `wlsrv`'s presentation path; keep input/cursor/mac-window.
 
-## Presentation
+## Presentation modes
 
-The primary mode is **native**: the compositor runs as the DRM master and the displays:
-and **hotplug**: just work, exactly like a native Linux machine. The DRM node advertises all
-connectors (external + builtin) and the compositor detects/modesets every screen automatically.
-There is no manual display selection; screens and hotplug are handled natively.
+Two modes:
 
-**Windowed** mode (the desktop in a normal window) is a separate, secondary convenience:
-useful for development, but not the primary experience.
+- **`windowed`**: Linux runs as a normal mac window inside macOS, without interrupting the
+  current macOS flow (WindowServer, the Dock, other apps all keep running normally). This is
+  the safe, coexist-with-macOS mode.
+
+- **`takeover`**: Linux takes over the whole display and suppresses the macOS compositing
+  (WindowServer's present path), so it runs faster and better, like a real machine. The shim
+  drives the display directly via `present_iosurface` → IOMFB, bypassing WindowServer.
+
+Takeover is the primary performance mode; windowed is the coexist/development mode. The
+native DRM-master compositor is the core of both: it renders the frame; the mode only changes
+how that frame is presented (into a window vs. directly to the display).
 
 ## Target experience (native-equivalent)
 
