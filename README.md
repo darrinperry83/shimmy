@@ -1,21 +1,27 @@
 # shimmy
 
-**Run Linux on macOS — as if it were native.**
+**Run Linux natively on your Mac — no VM, no emulation.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![shim CI](https://github.com/darrinperry83/shimmy/actions/workflows/ci.yml/badge.svg)](https://github.com/darrinperry83/shimmy/actions)
 [![rdmetal build](https://github.com/darrinperry83/shimmy-rdmetal/actions/workflows/build.yml/badge.svg)](https://github.com/darrinperry83/shimmy-rdmetal/actions)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-shimmy boots a real Arch Linux (aarch64, glibc) userland as a desktop on Apple Silicon macOS.
-The graphics are rendered by the **rdmetal** driver — a Mesa Gallium driver we wrote — and
-presented by the shim through Metal, with mac apps owned by the compositor as native Wayland
-surfaces. No VM. No custom compositor. Just Linux, running like it was installed on the bare
-metal.
+shimmy runs Linux **natively** on Apple Silicon. The Linux processes are not inside a VM —
+they are real tasks scheduled by the Mac's own **Mach kernel**. Graphics render through
+**Metal** (the Apple GPU), audio through **CoreAudio**, the display through the Mac's own
+compositor and display controller. It is a thin translation layer over the scheduler and
+drivers you already have — **no CPU emulation, no virtual hardware**.
 
-> **Status: pre-alpha.** It renders Hyprland and KDE Plasma, has working audio and input, but
-> there is real work left to harden, accelerate, and polish. This is a development preview,
-> not a product.
+> **What it's going to bring:** a real Linux desktop on the Mac. Boot to a TTY, log in, and
+> you're in Hyprland, KDE, or Omarchy — with displays, hotplug, workspaces, audio, and input
+> all working like it's installed on the hardware. And macOS keeps running underneath, so you
+> lose nothing: mac apps appear as windows inside that Linux desktop, and the Mac is still the
+> Mac whenever you want it.
+>
+> **Status: pre-alpha.** It boots real Arch and renders Hyprland/KDE/Omarchy with working
+> audio, input, and a TTY console; the native DRM-master compositor path is landed. Metal
+> rendering and the direct-display takeover are the active frontier.
 >
 > **Tested on:** Apple M2 Max · 96 GB MacBook Pro · macOS 26.5.1 (arm64e).
 
