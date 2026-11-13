@@ -1,8 +1,8 @@
-# How shimmy works — the technical story
+# How shimmy works: the technical story
 
 shimmy isn't a VM and doesn't emulate a GPU. It runs an unmodified Linux userland directly on
-the mac and drives the **real macOS graphics and audio stack** — Metal, IOSurface, the display
-controller (IOMFB), and CoreAudio — through a set of bridges it owns.
+the mac and drives the **real macOS graphics and audio stack**: Metal, IOSurface, the display
+controller (IOMFB), and CoreAudio: through a set of bridges it owns.
 
 ## The big picture
 
@@ -24,24 +24,24 @@ broker** (guest syscall `0x2002`):
 - draw/clear/resource commands cross the broker into host Metal,
 - the result lands in an **IOSurface**.
 
-So the compositor's GPU work runs on the **Apple Silicon GPU through Metal** — not a software
+So the compositor's GPU work runs on the **Apple Silicon GPU through Metal**: not a software
 rasterizer. (Status: the clear+draw path is Metal-backed and verified; the texture/index-buffer
 surface is the active piece of work. Until it lands, the guest falls back to softpipe.)
 
 ## 2. Presentation uses the real compositor + IOSurface
 
 The shim's `wlsrv` is a Wayland server the compositor (Hyprland/KDE) connects to as a client.
-Each frame is an IOSurface — the same `IOSurface` type macOS uses everywhere — handed through
+Each frame is an IOSurface: the same `IOSurface` type macOS uses everywhere: handed through
 the shim's Metal present path (`gpuwin_present` → a `CAMetalLayer`). In **windowed mode**
 WindowServer composites that CAMetalLayer like any other app window.
 
 ## 3. The scanout drives the real display controller (IOMFB)
 
 In **takeover mode**, the shim bypasses WindowServer entirely. It injects a small payload into
-WindowServer (the `scanout` submodule) and calls `SLCADisplay::present_iosurface` — SkyLight's
-internal present — directly. That flows into `CoreDisplay_Display_PresentIOSurface` and the
+WindowServer (the `scanout` submodule) and calls `SLCADisplay::present_iosurface`: SkyLight's
+internal present: directly. That flows into `CoreDisplay_Display_PresentIOSurface` and the
 **IOMobileFramebuffer (IOMFB)** swap, which is the actual hardware path that flips the frame to
-the display's scanout. This is the same path macOS's own compositor uses — the shim just drives
+the display's scanout. This is the same path macOS's own compositor uses: the shim just drives
 it itself, suppressing WindowServer.
 
 ## 4. Audio is CoreAudio

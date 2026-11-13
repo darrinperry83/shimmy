@@ -1,4 +1,4 @@
-# Design — shimmy
+# Design: shimmy
 
 The goal: run Linux on macOS **indistinguishably from a native machine**. Boot → TTY login →
 desktop → workspaces, with two presentation modes (windowed / full-display takeover), all
@@ -15,7 +15,7 @@ rendered by the **rdmetal** driver and presented by the shim.
 ┌───────────────────────────────▼─────────────────────────────┐
 │  shim (macOS)                                                │
 │  • syscall translation + /dev/ttyN + /dev/dri + /dev/snd    │
-│  • Wayland server (wlsrv) — windowed mode                    │
+│  • Wayland server (wlsrv): windowed mode                    │
 │  • input (cursor, keyboard, VT switching)                    │
 │  • Metal present path (CAMetalLayer)                         │
 └───────────────────────────────┬─────────────────────────────┘
@@ -55,12 +55,12 @@ To get there:
 
 ## Presentation
 
-The primary mode is **native**: the compositor runs as the DRM master and the displays —
-and **hotplug** — just work, exactly like a native Linux machine. The DRM node advertises all
+The primary mode is **native**: the compositor runs as the DRM master and the displays:
+and **hotplug**: just work, exactly like a native Linux machine. The DRM node advertises all
 connectors (external + builtin) and the compositor detects/modesets every screen automatically.
 There is no manual display selection; screens and hotplug are handled natively.
 
-**Windowed** mode (the desktop in a normal window) is a separate, secondary convenience —
+**Windowed** mode (the desktop in a normal window) is a separate, secondary convenience:
 useful for development, but not the primary experience.
 
 ## Target experience (native-equivalent)
@@ -79,9 +79,9 @@ windowed presentation, mac apps owned by the compositor, ALSA/PipeWire→CoreAud
 
 Remaining (the native-feel gap):
 
-1. **TTY/VT console** — `/dev/ttyN` + getty + VT switching + a text-console renderer.
-2. **Takeover mode** — dual-output (per-display size), dual handoff, dual `present_iosurface` flip.
-3. **Windowed/takeover switch** — a clean mode flag.
-4. **Metal-backed GLES** — replace CPU softpipe with the Metal host-call renderer (perf).
-5. **Cross-process dma-buf** — client apps render accelerated (no software QtQuick).
-6. **App layer polish** — Chromium `/proc` gap, system tray with mac integration.
+1. **TTY/VT console**: `/dev/ttyN` + getty + VT switching + a text-console renderer.
+2. **Takeover mode**: dual-output (per-display size), dual handoff, dual `present_iosurface` flip.
+3. **Windowed/takeover switch**: a clean mode flag.
+4. **Metal-backed GLES**: replace CPU softpipe with the Metal host-call renderer (perf).
+5. **Cross-process dma-buf**: client apps render accelerated (no software QtQuick).
+6. **App layer polish**: Chromium `/proc` gap, system tray with mac integration.

@@ -9,7 +9,7 @@ We use **main → develop → experimental**:
 | Branch | Purpose |
 |---|---|
 | `main` | stable, tagged releases only |
-| `develop` | staging — integration + CI before a release |
+| `develop` | staging: integration + CI before a release |
 | `experimental` | risky/forward work (scanout takeover, Metal renderer) |
 
 ## Making a change
@@ -44,9 +44,9 @@ We use **main → develop → experimental**:
 
 ## Repos
 
-- `shimmy` (this) — the shim + install/run scripts.
-- `shimmy-rdmetal` (submodule) — the Mesa driver; PRs go to its own repo.
-- `shimmy-scanout` (submodule) — the injection; tagged per macOS version.
+- `shimmy` (this): the shim + install/run scripts.
+- `shimmy-rdmetal` (submodule): the Mesa driver; PRs go to its own repo.
+- `shimmy-scanout` (submodule): the injection; tagged per macOS version.
 
 ## Code of conduct
 
@@ -74,9 +74,9 @@ drmasahi: generate the sound-card sysfs at boot
 
 Use the standard trailers to link work:
 
-- `Part-of: #123` — this is part of a larger change/topic.
-- `Closes: #123` / `Fixes: #123` — this closes the issue.
-- `Reviewed-by: Name <email>` — after review.
+- `Part-of: #123`: this is part of a larger change/topic.
+- `Closes: #123` / `Fixes: #123`: this closes the issue.
+- `Reviewed-by: Name <email>`: after review.
 
 One logical change per commit; keep the subject under ~72 characters and put the
 "why" in the body.
