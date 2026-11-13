@@ -38,10 +38,9 @@
 #include <limits.h>
 
 #include "rdgpu_scanout_client.h"
-// The canonical shared wire protocol lives in the OSAX tree (sibling of shim-metal-clear) so
-// this client and rdgpu-scanout-osax/payload.m compile the SAME struct layout; a relative
-// include keeps a single source of truth rather than a drifting copy.
-#include "../../rdgpu-scanout-osax/rdgpu_protocol.h"
+// The canonical shared wire protocol is vendored in src/ so a clean checkout compiles the
+// SAME struct layout as rdgpu-scanout-osax/payload.m without an out-of-repo sibling tree.
+#include "rdgpu_protocol.h"
 
 // ---------------------------------------------------------------------------------------------
 // The gate.

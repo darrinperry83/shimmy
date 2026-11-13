@@ -2,6 +2,9 @@
 *.c text
 *.h text
 *.m text
+*.mm text
+*.hpp text
 *.py text
 *.sh text eol=lf
 *.md text
+*.a binary

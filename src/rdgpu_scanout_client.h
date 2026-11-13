@@ -21,7 +21,7 @@
 // rdgpu_protocol.h (shared with the payload): 0 = primary / WAYLAND-1, 1 = secondary /
 // WAYLAND-2. The server maps role 0 -> /tmp/rdgpu-scanout-display (default 0x1e, external)
 // and role 1 -> /tmp/rdgpu-scanout-display2 (default 0x27, builtin).
-#include "../../rdgpu-scanout-osax/rdgpu_protocol.h"
+#include "rdgpu_protocol.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -24,11 +24,25 @@ CFLAGS="-arch arm64 -O2 -Wall -Wno-unused-parameter -I$SRC"
 #
 # BOTH halves are recorded. A source-only stamp also reports "ok" after `git checkout shim_wlh`
 # swaps the binary and leaves the stamp behind -- again caught by negative control, not by review.
-srcsha() { cat "$SRC"/*.c "$SRC"/*.h "$SRC"/*.m build.sh 2>/dev/null | shasum -a256 | cut -d' ' -f1; }
+srcsha() { cat "$SRC"/*.c "$SRC"/*.h "$SRC"/*.m third_party/*.m third_party/*.mm third_party/*.h third_party/spirv-cross/*.h third_party/spirv-cross/*.hpp build.sh 2>/dev/null | shasum -a256 | cut -d' ' -f1; }
 stamp()  { printf '%s %s\n' "$(srcsha)" "$(shasum -a256 "$1" | cut -d' ' -f1)" > "build/$1.srcsha"; }
 
 CORE="gmem.c guest_range_ledger.c elfload.c syscalls.c syscalls_ext.c signalfd_shim.c timerfd_shim.c bootstrap.c net.c vdso.c fastcall.c hostcall_scoped.c drmasahi.c rdgpu_surface_handoff.c v4l2cam.c present_feedback.c snd_alsa.c coreaudio_host.c"
 RDGPU="rdgpu_guest_syscall.c rdgpu_mock_gate.c rdgpu_virtual_carrier.c"
+
+build_third_party() {
+  # Vendored rdgpu host objects (see third_party/README.md). These used to be
+  # linked as pre-built .o files from sibling trees OUTSIDE the repo
+  # (../integrated-mesa-next/..., ../async-draw-next/..., ../broker-draw-next/...);
+  # they are now built from source inside the repo. rdmetal_resource.m and
+  # rdgpu_broker.m use manual reference counting (no ARC); rdgpu_draw_host.mm is
+  # Objective-C++ and needs ARC + C++17 to compile spirv_cross::CompilerMSL.
+  echo "== third_party =="
+  rm -rf build/third_party && mkdir -p build/third_party
+  ( cd build/third_party && clang $CFLAGS -ObjC -I../../third_party -c ../../third_party/rdmetal_resource.m -o rdmetal_resource.o )
+  ( cd build/third_party && clang $CFLAGS -ObjC -I../../third_party -c ../../third_party/rdgpu_broker.m -o rdgpu_broker.o )
+  ( cd build/third_party && clang $CFLAGS -fobjc-arc -std=c++17 -I../../third_party -I../../third_party/spirv-cross -c ../../third_party/rdgpu_draw_host.mm -o rdgpu_draw_host.o )
+}
 
 build_cli() {
   echo "== shim_cli =="
@@ -37,13 +51,10 @@ build_cli() {
   for f in $CORE $RDGPU; do
     ( cd build/cli && clang $CFLAGS -DRDGPU_CLIENT -c ../../$SRC/$f -o "${f%.c}.o" )
   done
-  clang -arch arm64 -o shim_cli build/cli/*.o build/mach_excServer.c \
-    ../integrated-mesa-next/signed-producer-service/rdgpu_broker.o \
-    ../async-draw-next/rdmetal_resource.o \
-    ../broker-draw-next/rdgpu_draw_host.o \
-    ../spirv-cross-build/libspirv-cross-msl.a \
-    ../spirv-cross-build/libspirv-cross-glsl.a \
-    ../spirv-cross-build/libspirv-cross-core.a \
+  clang -arch arm64 -o shim_cli build/cli/*.o build/third_party/rdgpu_broker.o build/third_party/rdmetal_resource.o build/third_party/rdgpu_draw_host.o build/mach_excServer.c \
+    third_party/lib/libspirv-cross-msl.a \
+    third_party/lib/libspirv-cross-glsl.a \
+    third_party/lib/libspirv-cross-core.a \
     -framework Metal -framework IOSurface -framework Foundation \
     -framework Security -framework CoreFoundation -framework AudioToolbox \
     -framework AudioUnit -framework CoreAudio -lc++
@@ -67,13 +78,10 @@ build_gui() {
   for f in gpu_bridge.m window.m named_clipboard.m secondary_window.m x11srv_render.m glbridge.m capresent.m rdgpu_scanout_client.m mac_surface_host.m; do
     ( cd build/gui && clang $CFLAGS -ObjC -fobjc-arc -c ../../$SRC/$f -o "${f%.m}.o" )
   done
-  clang -arch arm64 -o shim_gui build/gui/*.o build/mach_excServer.c \
-    ../integrated-mesa-next/signed-producer-service/rdgpu_broker.o \
-    ../async-draw-next/rdmetal_resource.o \
-    ../broker-draw-next/rdgpu_draw_host.o \
-    ../spirv-cross-build/libspirv-cross-msl.a \
-    ../spirv-cross-build/libspirv-cross-glsl.a \
-    ../spirv-cross-build/libspirv-cross-core.a \
+  clang -arch arm64 -o shim_gui build/gui/*.o build/third_party/rdgpu_broker.o build/third_party/rdmetal_resource.o build/third_party/rdgpu_draw_host.o build/mach_excServer.c \
+    third_party/lib/libspirv-cross-msl.a \
+    third_party/lib/libspirv-cross-glsl.a \
+    third_party/lib/libspirv-cross-core.a \
     -framework Metal -framework MetalKit -framework Cocoa -framework QuartzCore -framework CoreGraphics -framework Accelerate -framework IOSurface -framework IOKit -framework CoreServices \
     -framework AudioToolbox -framework AudioUnit -framework CoreAudio -framework Security -lc++
   codesign --force --sign - --entitlements $SRC/ent.plist shim_gui
@@ -143,10 +151,10 @@ build_mac_app() {
 }
 
 case "${1:-both}" in
-  cli) build_cli ;;
+  cli) build_third_party; build_cli ;;
   capres) build_capres ;;
   wlh) build_wlh ;;
-  gui) build_gui; build_mac_app ;;
+  gui) build_third_party; build_gui; build_mac_app ;;
   handoff) build_handoff ;;
   macapp) build_mac_app ;;
   # The default MUST build shim_wlh too. It used to build only cli+gui, and that silently cost a
@@ -159,6 +167,6 @@ case "${1:-both}" in
   # shim_wlh is the headless-Wayland binary, i.e. the one every GUI measurement that does not want
   # the window-server lock is supposed to use. Making it opt-in put the project's most-used test
   # binary on the one path a routine rebuild skipped. Build time is not the scarce resource here.
-  *)   build_cli; build_gui; build_wlh; build_capres; build_mac_app ;;
+  *)   build_third_party; build_cli; build_gui; build_wlh; build_capres; build_mac_app ;;
 esac
 echo "done. try:  ./shim_cli rootfs /bin/busybox echo hello-from-linux"
