@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: clang-format check
-        uses: jidicula/clang-format-action@v4
+        uses: jidicula/clang-format-action@master
         with:
           clang-format-version: '18'
           check-path: 'src'
