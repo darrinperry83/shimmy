@@ -16,3 +16,8 @@ shim_wlh
 rd_mac_app
 rd_mac_probe
 shim_gui.pre-fullscreen-split
+rootfs
+src/test_fastcall
+src/test_glbridge
+src/test_gmem
+src/test_window
