@@ -43,10 +43,26 @@ drivers you already have: **no CPU emulation, no virtual hardware**.
 
 ## Why shimmy
 
-macOS is a great host, but some workloads want a real Linux desktop. Existing options are VMs
-(slow, no direct GPU) or dual-boot (loses the mac). shimmy runs an **unmodified** Linux
-userland directly on the mac, with a native graphics driver, native audio, and native input:
-so it feels like Linux was installed on the hardware, while the mac stays fully usable.
+macOS is a great host, but some people need real Linux: the toolchain, the tiling WM, the
+server workloads, the freedom. Existing options are VMs (slow, no direct GPU) or dual-boot
+(loses the mac). shimmy runs an **unmodified** Linux userland directly on the mac, scheduled
+by the Mach kernel and driven by the real Metal/CoreAudio/IOMFB drivers: so it feels like
+Linux is on the hardware, while the mac stays fully usable.
+
+## GPU & performance
+
+shimmy does **not** emulate a GPU. The **rdmetal** driver is a Mesa Gallium driver that
+translates the guest's OpenGL/EGL into **Metal**, so the compositor's rendering runs on the
+Apple Silicon GPU.
+
+- **Render path:** guest shaders → NIR → SPIR-V → Metal Shading Language (spirv-cross) → the Apple GPU.
+- **Current state:** clear + draw + texture sampling are Metal-backed and verified. The full
+  vertex/index/uniform surface is in progress, so until it lands the compositor falls back to
+  CPU softpipe (~10 fps).
+- **Target:** full Metal-backed rendering → native GPU performance, at the display's refresh rate.
+
+This is the key difference from a VM: there is no emulated GPU and no guest GPU-driver guessing —
+the real Apple GPU does the work through Metal.
 
 ## Features
 
