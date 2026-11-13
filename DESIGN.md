@@ -53,18 +53,15 @@ To get there:
 2. A `libseat` shim so the compositor's DRM backend can take the seat.
 3. Remove `wlsrv`'s presentation path; keep input/cursor/mac-window.
 
-## The two presentation modes
+## Presentation
 
-The user chooses the mode **and** the displays:
+The primary mode is **native**: the compositor runs as the DRM master and the displays —
+and **hotplug** — just work, exactly like a native Linux machine. The DRM node advertises all
+connectors (external + builtin) and the compositor detects/modesets every screen automatically.
+There is no manual display selection; screens and hotplug are handled natively.
 
-- **`windowed`** — the desktop runs in a normal window; WindowServer present.
-- **`takeover`** — suppress WindowServer; `present_iosurface` flips directly to the displays.
-
-The user also selects **how many and which** displays the desktop uses (e.g. one display,
-the external only, or all displays). This is a runtime flag, not a build-time choice.
-
-The nested Wayland backend (`wlsrv` presentation) is retired — the compositor is the native
-DRM master; `wlsrv` keeps only input, cursor, and the mac-window→Wayland-surface bridge.
+**Windowed** mode (the desktop in a normal window) is a separate, secondary convenience —
+useful for development, but not the primary experience.
 
 ## Target experience (native-equivalent)
 
