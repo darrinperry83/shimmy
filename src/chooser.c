@@ -1,11 +1,17 @@
-// chooser.c — shimmy boot chooser (on-screen render + direct-scanout present).
+// chooser.c — shimmy boot chooser (config default + keyboard override; display-less).
 //
 // Runs from launchd BEFORE WindowServer (LaunchDaemon com.shimmy.chooser, which
-// registers the com.apple.windowserver bootstrap service). It draws a 1-line boot
-// menu straight to the builtin display's scanout surface via the private CoreDisplay
-// present path, reads a key from HID (or the console), and either:
-//   * key 1/m/Enter/timeout  -> boot macOS (kickstart the real WindowServer), or
-//   * key 2/l/s              -> boot shimmy/Linux (fork+exec the stand-in WindowServer).
+// registers the com.apple.windowserver bootstrap service). The on-screen present
+// (IOMFB + CoreDisplay) is BLOCKED pre-WindowServer (the framebuffer surface returns
+// kIOReturnNotPrivileged and the display id is 0x0), so the chooser is display-less:
+// it reads a config default (/usr/local/etc/shimmy/boot.conf) and a /dev/console key,
+// and either:
+//   * key o/O/1/m/M/Enter/timeout -> boot macOS (kickstart the real WindowServer), or
+//   * key 2/l/L                   -> boot shimmy/Linux (fork+exec the stand-in WindowServer).
+//
+// The key reader decides the branch; with no key (timeout) it falls back to the config
+// default. macOS is the safe default everywhere: a missing/unparseable config, an unknown
+// key, and the 'o'/'O' escape hatch all resolve to macOS.
 //
 // NOTE ON RECONSTRUCTION: the source repo this file originally lived in
 // (/tmp/rmatrixos-shim) was wiped before this task ran; only the installed binary
@@ -36,6 +42,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <termios.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 
@@ -119,6 +126,48 @@ static int               g_key_tail;        // next read slot
 static int               g_console_fd = 0;  // fd the console fallback reads (0 = stdin)
 
 // ---------------------------------------------------------------------------------------------
+// Config default (display-less boot target).
+
+// The config file `shimmy boot default <target>` writes, and the chooser reads at boot.
+// The canonical path is /usr/local/etc/shimmy/boot.conf; SHIMMY_BOOT_CONF overrides it for
+// headless validation (and the CLI). Safety first: any missing/unreadable/unparseable file
+// resolves to macOS, and the escape-hatch key ('o'/'O') always overrides to macOS regardless.
+#ifndef SHIMMY_BOOT_CONF_PATH
+#define SHIMMY_BOOT_CONF_PATH "/usr/local/etc/shimmy/boot.conf"
+#endif
+
+// Read the configured default boot target. Returns 1 = shimmy, 0 = macOS. The only value that
+// selects shimmy is an exact `default=shimmy` line; anything else (missing file, `default=macOS`,
+// a malformed line) is the safe macOS default.
+static int config_default_branch(void) {
+    const char* path = getenv("SHIMMY_BOOT_CONF");
+    if (!path || !path[0]) path = SHIMMY_BOOT_CONF_PATH;
+
+    FILE* f = fopen(path, "r");
+    if (!f) return 0;
+
+    int branch = 0;
+    char line[256];
+    while (fgets(line, sizeof line, f)) {
+        char* s = line;
+        while (*s == ' ' || *s == '\t') s++;
+        if (strncmp(s, "default", 7) != 0) continue;
+        char* p = s + 7;
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p != '=') continue;
+        p++;
+        while (*p == ' ' || *p == '\t') p++;
+        char* e = p + strlen(p);
+        while (e > p && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' ' || e[-1] == '\t'))
+            *--e = '\0';
+        branch = (strcmp(p, "shimmy") == 0) ? 1 : 0;
+        break;
+    }
+    fclose(f);
+    return branch;
+}
+
+// ---------------------------------------------------------------------------------------------
 // Small helpers.
 
 static uint64_t monotonic_ms(void) {
@@ -155,6 +204,12 @@ static CGDirectDisplayID main_display_id(void) {
 static int hid_console_fallback(void) {
     int fd = 0;                                   // stdin = StandardInPath=/dev/console
     if (!isatty(fd)) {
+        // Headless harness: when stdin is a pipe or a regular file, read the key from it
+        // directly (a test feeds 1/2/m/l/o on stdin). At real boot stdin is the /dev/console
+        // character device, so this check is false and we fall through to the tty fallback.
+        struct stat st;
+        if (fstat(fd, &st) == 0 && (S_ISFIFO(st.st_mode) || S_ISREG(st.st_mode)))
+            return fd;
         int c = open("/dev/console", O_RDONLY | O_NONBLOCK);
         if (c < 0) c = open("/dev/tty", O_RDONLY | O_NONBLOCK);
         if (c >= 0) fd = c;
@@ -508,7 +563,7 @@ static int present_menu(const uint8_t* fb, uint32_t width, uint32_t height) {
 
 // IOHIDValueCallback: key-down (integer value 1) on the keyboard page -> ASCII key into
 // the ring queue. Usage -> char map mirrors the original binary's jump table:
-//   0x0f L -> 'l', 0x10 M -> 'm', 0x16 S -> 's', 0x1e 1 -> '1', 0x1f 2 -> '2',
+//   0x0f L -> 'l', 0x10 M -> 'm', 0x12 O -> 'o', 0x16 S -> 's', 0x1e 1 -> '1', 0x1f 2 -> '2',
 //   0x28 Enter -> '0', 0x29 Esc -> '\r', 0x4e -> '\r', 0x4f -> '1',
 //   0x50 -> '2', 0x61 -> '0'; every other usage is ignored.
 static void hid_value_cb(void* ctx, IOReturn result, void* sender, IOHIDValueRef value) {
@@ -526,6 +581,7 @@ static void hid_value_cb(void* ctx, IOReturn result, void* sender, IOHIDValueRef
     switch (usage) {
         case 0x0f: c = 'l'; break;
         case 0x10: c = 'm'; break;
+        case 0x12: c = 'o'; break;
         case 0x16: c = 's'; break;
         case 0x1e: c = '1'; break;
         case 0x1f: c = '2'; break;
@@ -843,17 +899,25 @@ static void branch_macos(int kickstart, int dry_run) {
 // Branch resolution + interactive loop.
 
 // Interpret an ASCII key: returns 1 = shimmy, 0 = macOS.
+//   force macOS  (escape hatch): 'o' 'O' '1' 'm' 'M'
+//   force shimmy               : '2' 'l' 'L'
+//   anything else              : macOS (safe fallback)
 static int key_branch(int key) {
     const char* label;
     int branch;
-    if (key == '2') {
-        branch = 1;
-        label = "shimmy";
-    } else {
-        int shift = (unsigned char)key - 'L';
-        int bit = (shift <= 39) ? (int)((1ULL << shift) & 0x0000008100000081ULL) : 0;  // 'L','S','l','s'
-        branch = bit ? 1 : 0;
-        label = bit ? "shimmy" : "macOS";
+    switch (key) {
+        case '2': case 'l': case 'L':
+            branch = 1;
+            label = "shimmy";
+            break;
+        case 'o': case 'O': case '1': case 'm': case 'M':
+            branch = 0;
+            label = "macOS";
+            break;
+        default:
+            branch = 0;
+            label = "macOS";
+            break;
     }
     printf("chooser: key '%c' -> %s\n", (char)key, label);
     fflush(stdout);
@@ -873,6 +937,10 @@ static int resolve_branch(const char* choice, int present_flag) {
         long v = strtol(te, &end, 10);
         if (end && *end == '\0' && v > 0) timeout = (int)v;
     }
+
+    // Config default: the target chosen when no key arrives before the deadline.
+    int cfg_default = config_default_branch();
+    fprintf(stderr, "chooser: config default boot = %s\n", cfg_default ? "shimmy" : "macOS");
 
     hid_init();
 
@@ -944,9 +1012,11 @@ static int resolve_branch(const char* choice, int present_flag) {
 
         uint64_t now = monotonic_ms();
         if (now >= deadline_ms) {
-            puts("chooser: timeout / no input -> macOS");
+            printf("chooser: timeout / no input -> config default (%s)\n",
+                   cfg_default ? "shimmy" : "macOS");
+            fflush(stdout);
             free(fb);
-            return 0;
+            return cfg_default;
         }
         int remaining = (int)((deadline_ms + 999 - now) / 1000);
         if (remaining != last_countdown) {
@@ -977,9 +1047,11 @@ static void usage(FILE* out) {
         "  --render-size WxH       framebuffer size for --render (default %dx%d)\n"
         "  --checkin <name> [s]    test hook: bootstrap_check_in ONE name, hold it `s` seconds\n"
         "env: SHIMMY_BOOT_TIMEOUT (default 10), SHIMMY_BOOT_CHOICE, SHIMMY_PRESENT (0/1)\n"
+        "     SHIMMY_BOOT_CONF            boot.conf path (default /usr/local/etc/shimmy/boot.conf)\n"
         "     SHIMMY_WINDOWSERVER_CMD     stand-in path (default %s)\n"
         "     SHIMMY_WINDOWSERVER_SYSTEM  1 (default) real check-in; 0 = test names (safe)\n"
-        "     SHIMMY_WARM_SWITCH_KICKSTART 0 (default) print only; 1 = really kickstart\n",
+        "     SHIMMY_WARM_SWITCH_KICKSTART 0 (default) print only; 1 = really kickstart\n"
+        "keys: o/O/1/m/M/Enter/Esc/timeout -> macOS (config default); 2/l/L -> shimmy\n",
         960, 540, "/usr/local/sbin/shim_windowserver");
 }
 

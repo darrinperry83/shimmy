@@ -27,6 +27,9 @@ Commands:
     shimmy run                  derive the env and exec run.sh
     shimmy build                exec install.sh --rootfs <profile>
     shimmy recover              the recovery shell (graphical installer / scripted backend)
+    shimmy boot default <target>  set the boot chooser default (macOS | shimmy)
+    shimmy takeover             install the boot chooser (macOS stays the default)
+    shimmy release              remove the boot chooser (restore normal macOS boot)
 
 The YAML (or JSON) schema is the first cut; the DESIGN-NIX.md Nix-flavored
 evaluator is the stated future direction.  This loader therefore *also* detects
@@ -886,6 +889,12 @@ CHOOSER_BIN_DST = "/usr/local/sbin/shimmy-chooser"
 WINDOWSERVER_BIN_DST = "/usr/local/sbin/shim_windowserver"
 CHOOSER_BUILD_PLIST = REPO / "build" / "com.shimmy.chooser.plist"
 
+# The boot chooser's default-target config. The chooser reads this at boot (display-less) and
+# falls back to macOS when it is missing/unparseable. `shimmy boot default <target>` writes it;
+# `takeover` deliberately does NOT touch it, so macOS stays the default until the user opts in.
+BOOT_CONF_PATH = "/usr/local/etc/shimmy/boot.conf"
+BOOT_TARGETS = ("macOS", "shimmy")
+
 
 def build_takeover_plist(dst):
     """Load the canonical chooser plist and inject the windowserver-stand-in arrangement:
@@ -966,6 +975,46 @@ def cmd_release(args):
     return rc
 
 
+# --------------------------------------------------------------------------- #
+# boot chooser default target
+# --------------------------------------------------------------------------- #
+# The chooser reads /usr/local/etc/shimmy/boot.conf (`default=macOS|shimmy`) at boot when no
+# key is pressed. macOS is the SAFE default; `takeover` never writes this file, so it stays
+# macOS until the user explicitly runs `shimmy boot default shimmy`. The chooser's escape-hatch
+# key ('o'/'O') always drops to macOS regardless of this setting.
+
+def boot_conf_path():
+    return os.environ.get("SHIMMY_BOOT_CONF") or BOOT_CONF_PATH
+
+
+def cmd_boot_default(args):
+    target = args.target
+    if target == "macos":
+        target = "macOS"          # normalize the lowercase form
+    if target not in BOOT_TARGETS:
+        print("shimmy: boot default must be one of macOS | shimmy (got %r)" % target,
+              file=sys.stderr)
+        return 1
+
+    path = boot_conf_path()
+    if args.dry_run:
+        print("==> boot default %s (dry-run)" % target)
+        print("  # mkdir -p %s" % os.path.dirname(path))
+        print("  # write %s" % path)
+        print("  # default=%s" % target)
+        print("NOTE: takes effect at the NEXT boot; 'o'/'O' at the chooser still forces macOS.")
+        return 0
+
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(path, "w") as f:
+        f.write("default=%s\n" % target)
+    print("boot default -> %s (wrote %s)" % (target, path))
+    print("NOTE: takes effect at the NEXT boot; 'o'/'O' at the chooser still forces macOS.")
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="shimmy",
@@ -1011,6 +1060,14 @@ def main(argv=None):
     rel_p = sub.add_parser("release", help="remove the boot chooser (restore normal macOS boot)")
     rel_p.add_argument("--dry-run", action="store_true",
                        help="print the sudo commands without removing")
+
+    boot_p = sub.add_parser("boot", help="boot chooser settings")
+    bootsub = boot_p.add_subparsers(dest="boot_action")
+    bootdef_p = bootsub.add_parser(
+        "default", help="set the boot default target (macOS | shimmy)")
+    bootdef_p.add_argument("target", help="macOS or shimmy")
+    bootdef_p.add_argument("--dry-run", action="store_true",
+                           help="print the file write without touching the system")
 
     rec_p = sub.add_parser("recover",
                            help="recovery shell: graphical installer / scripted "
@@ -1063,6 +1120,11 @@ def main(argv=None):
             return cmd_takeover(args)
         if args.command == "release":
             return cmd_release(args)
+        if args.command == "boot":
+            if args.boot_action == "default":
+                return cmd_boot_default(args)
+            boot_p.print_help()
+            return 1
         if args.command == "recover":
             return cmd_recover(args)
         parser.print_help()

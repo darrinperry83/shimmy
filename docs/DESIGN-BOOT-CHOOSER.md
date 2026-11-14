@@ -1,8 +1,13 @@
 # Boot chooser — boot macOS or shimmy
 
-The shim runs as an early launchd daemon, **before WindowServer**, and shows a two-option menu.
+The shim runs as an early launchd daemon, **before WindowServer**, and branches on a key press.
 The choice decides whether macOS boots normally or the shim takes over as the WindowServer
 stand-in. macOS is always the safe default.
+
+The on-screen present (IOMFB + CoreDisplay) is **blocked pre-WindowServer** — the framebuffer
+surface returns `kIOReturnNotPrivileged` even as root, and the display id is `0x0` — so the
+chooser is **display-less**: it reads a config default and a `/dev/console` key instead of
+drawing a menu.
 
 ## Boot flow
 
@@ -16,21 +21,32 @@ Mac boots -> launchd -> shim-chooser (before WindowServer)
   -> normal macOS boot              -> Linux environment + mac apps
 ```
 
-## The menu
+## The keys
 
-Two options, drawn directly by the shim (Metal/framebuffer, no WindowServer needed):
+No menu is drawn; the chooser waits 10 seconds on the keyboard (HID, with a `/dev/console`
+raw-mode fallback):
+
+| Key | Branch |
+|---|---|
+| `o` `O` `1` `m` `M` (or Enter/Esc) | **macOS** — the escape hatch |
+| `2` `l` `L` | shimmy (Linux) |
+| anything else | macOS (safe fallback) |
+| no key (timeout) | the **config default** |
+
+## The config default
+
+The default boot target (the timeout branch) is read from `/usr/local/etc/shimmy/boot.conf`:
 
 ```
-        shimmy
-    [1] Boot macOS
-    [2] Boot Linux (shimmy)
-
-    (defaults to macOS in 10 s)
+default=macOS     # or default=shimmy
 ```
 
-- The chooser reads the keyboard via the HID stack (no WindowServer required).
-- A 10-second countdown defaults to **macOS**, so an unattended boot never lands somewhere
-  unexpected. Pressing a key cancels the countdown.
+- `default=macOS` (or a missing/unparseable file) → macOS. This is the safe default.
+- `default=shimmy` → boot Linux after the timeout, but only after the user explicitly runs
+  `sudo ./bin/shimmy boot default shimmy`. `shimmy takeover` never writes it.
+
+The escape hatch holds regardless of the config default: holding `o`/`O` at boot always drops to
+macOS.
 
 ## The branch
 
@@ -50,12 +66,15 @@ Two options, drawn directly by the shim (Metal/framebuffer, no WindowServer need
 
 ## Safety
 
-1. **macOS is the default.** Timeout (and any error) always boots macOS.
-2. **Fail-safe watchdog.** If the shim crashes after "shimmy" was chosen, the watchdog relaunches
+1. **macOS is the default.** The config default, a missing/unparseable config, an unknown key,
+   and any error all resolve to macOS.
+2. **Escape hatch.** `o`/`O` always forces macOS, regardless of the config default, so a machine
+   set to boot Linux by default can still be dropped back to macOS at the chooser.
+3. **Fail-safe watchdog.** If the shim crashes after "shimmy" was chosen, the watchdog relaunches
    the real WindowServer (a few seconds of login-screen flash, then macOS).
-3. **Warm-switch back.** The shim's clean exit releases the service and launchd relaunches the
+4. **Warm-switch back.** The shim's clean exit releases the service and launchd relaunches the
    real WindowServer.
-4. **Reversible.** `shimmy takeover` / `shimmy release` flip the arrangement back at any time.
+5. **Reversible.** `shimmy takeover` / `shimmy release` flip the arrangement back at any time.
 
-The chooser reuses two things the shim already has: a way to draw (Metal/framebuffer) and a way to
-read keys (HID). It is "draw two options, wait for a key, branch."
+The chooser reads a key (HID with a `/dev/console` fallback) and a config default, then branches.
+It is "wait for a key (or the timeout), then branch."

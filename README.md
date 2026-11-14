@@ -152,13 +152,31 @@ the shim is the WindowServer stand-in, and mac apps run inside Linux — install
 and reboot:
 
 ```sh
-./build.sh windowserver  # in the shim tree, builds the WindowServer stand-in
+./build.sh chooser       # in the shim tree, builds the boot chooser
 sudo ./bin/shimmy takeover --windowserver <path-to>/shim_windowserver
-# reboot, then pick "shimmy" at the chooser (macOS is the 10s default)
+# reboot. At the chooser, macOS is the default.
 ```
 
-The chooser is reversible (`sudo ./bin/shimmy release`) and fail-safe: if the stand-in crashes, the
-watchdog relaunches the real WindowServer, so macOS always comes back. See
+The chooser runs before WindowServer and is display-less (the pre-WindowServer framebuffer present
+is blocked), so it waits 10 seconds for a key instead of showing a menu:
+
+| Key | Action |
+|---|---|
+| `o` `O` `1` `m` `M` (or Enter) | **force macOS** — the escape hatch |
+| `2` `l` `L` | force shimmy (Linux) |
+| no key (timeout) | the **config default** (macOS unless changed) |
+
+The default boot target lives in `/usr/local/etc/shimmy/boot.conf` and is **macOS** unless you
+explicitly change it:
+
+```sh
+sudo ./bin/shimmy boot default macOS      # the safe default
+sudo ./bin/shimmy boot default shimmy     # opt in to boot Linux by default
+```
+
+Holding `o` (or `O`) at boot always drops to macOS, regardless of the config default. The chooser
+is reversible (`sudo ./bin/shimmy release`) and fail-safe: if the stand-in crashes, the watchdog
+relaunches the real WindowServer, so macOS always comes back. See
 [DESIGN-WINDOWSERVER-REPLACEMENT.md](docs/DESIGN-WINDOWSERVER-REPLACEMENT.md) and
 [DESIGN-BOOT-CHOOSER.md](docs/DESIGN-BOOT-CHOOSER.md).
 
