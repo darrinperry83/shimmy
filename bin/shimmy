@@ -1006,10 +1006,17 @@ def cmd_boot_default(args):
         return 0
 
     parent = os.path.dirname(path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    with open(path, "w") as f:
+    # /usr/local/etc/shimmy is root-owned; write a temp file and sudo-cp it (same as takeover).
+    import tempfile
+    fd, tmp = tempfile.mkstemp(suffix=".boot.conf")
+    with os.fdopen(fd, "w") as f:
         f.write("default=%s\n" % target)
+    rc = _sudo(["mkdir", "-p", parent], False)
+    rc |= _sudo(["cp", tmp, path], False)
+    os.unlink(tmp)
+    if rc:
+        print("shimmy: boot default write failed (run with sudo)", file=sys.stderr)
+        return 1
     print("boot default -> %s (wrote %s)" % (target, path))
     print("NOTE: takes effect at the NEXT boot; 'o'/'O' at the chooser still forces macOS.")
     return 0
