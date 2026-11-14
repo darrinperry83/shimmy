@@ -130,23 +130,57 @@ See [DESIGN.md](DESIGN.md) for the full architecture and the native-machine targ
 ```sh
 git clone --recursive https://github.com/darrinperry83/shimmy.git
 cd shimmy
-./install.sh                  # builds the shim and bootstraps the Arch rootfs
-./install.sh --rootfs omarchy # (optional) the Omarchy rootfs (Hyprland + Quickshell)
-./run.sh                      # boots to the TTY login
+./install.sh                   # builds the shim + bootstraps the Arch rootfs
+./install.sh --rootfs omarchy  # (optional) Arch + Hyprland + Quickshell
+./install.sh --rootfs recovery # (optional) the graphical recovery shell
+./run.sh                       # runs Linux alongside macOS (WindowServer still up)
 ```
 
-Inside the guest, install the desktop of your choice through the package manager:
+The desktop is installed by you through the package manager; there is no `--desktop` flag:
 
 ```sh
-pacman -S hyprland           # or plasma, sway, i3, ...
+pacman -S hyprland            # or plasma, sway, i3, ...
 ```
 
-There are exactly two rootfs choices, `arch` (the bare base) and `omarchy` (Arch + Hyprland +
-Quickshell). The desktop is always installed by you through `pacman`; there is no `--desktop`
-flag. The rootfs is built locally and is not stored in git.
+Rootfs profiles: `arch` (bare base), `omarchy` (Hyprland + Quickshell), `recovery` (a graphical
+installer with WiFi + rootfs reinstall + a shell). The rootfs is built locally, not stored in git.
 
-See [Host setup](README.md#host-setup--sip--the-scanout-injection-one-time) for the one-time SIP
-and scanout prerequisites.
+### Boot it for real (the takeover)
+
+`run.sh` runs Linux *alongside* a running macOS. To boot it for real — WindowServer never starts,
+the shim is the WindowServer stand-in, and mac apps run inside Linux — install the boot chooser
+and reboot:
+
+```sh
+./build.sh windowserver  # in the shim tree, builds the WindowServer stand-in
+sudo ./bin/shimmy takeover --windowserver <path-to>/shim_windowserver
+# reboot, then pick "shimmy" at the chooser (macOS is the 10s default)
+```
+
+The chooser is reversible (`sudo ./bin/shimmy release`) and fail-safe: if the stand-in crashes, the
+watchdog relaunches the real WindowServer, so macOS always comes back. See
+[DESIGN-WINDOWSERVER-REPLACEMENT.md](docs/DESIGN-WINDOWSERVER-REPLACEMENT.md) and
+[DESIGN-BOOT-CHOOSER.md](docs/DESIGN-BOOT-CHOOSER.md).
+
+### Declarative config
+
+The whole system is one file, `shimmy.yaml` (the Nix-like model — see [docs/DESIGN-NIX.md](docs/DESIGN-NIX.md)):
+
+```yaml
+rootfs: omarchy
+windowManager: hyprland
+mode: single-display
+takeover: { displays: [external] }
+flick: { key: ctrl-alt-f }
+```
+
+```sh
+./bin/shimmy config validate   # check it
+./bin/shimmy run               # boot with the config's mode + displays + flick
+./bin/shimmy build             # build the configured rootfs profile
+```
+
+Track the work on the [GitHub project](https://github.com/users/darrinperry83/projects/2).
 
 ## Modes
 
@@ -160,41 +194,43 @@ switches between them (a key combo, or moving the pointer across the screen boun
 | **Kiosk** | macOS on the builtin | one locked-down app on one display |
 | **All-displays takeover** | suppressed | Linux owns all displays |
 
-The takeover modes flip the Linux frame directly to the display via `present_iosurface`. The flip is
-stable and visible today; hiding the macOS UI and removing the taken-over display from macOS are
-still in progress. See [DESIGN.md](DESIGN.md) for the full mode and flick design.
+The takeover modes make the shim the WindowServer stand-in (macOS background services and mac apps
+connect to the shim), and each mac app's window surfaces as a native Wayland window in the Linux
+compositor. The flip is stable and visible today; a warm-switch (the flick) returns to macOS. See
+[DESIGN.md](DESIGN.md) for the full mode and flick design.
 
 ## Development
 
 The project uses a trunk-based-on-stable branching model:
 
 - `main`: stable, tagged releases.
-- `develop`: staging; where pull requests land and CI runs before a release.
-- `experimental`: risky or forward work, such as the scanout takeover and the Metal renderer.
+- `development`: where the current work lands (the active branch).
+- `experimental`: risky or forward work.
 
-**Workflow:** branch from `develop`, open a pull request (CI runs), review, then merge to
-`develop`. When a release is cut, `develop` is merged to `main` and tagged. See
+**Workflow:** branch from `development`, open a pull request (CI runs), review, then merge to
+`development`. When a release is cut, `development` is merged to `main` and tagged. See
 [CONTRIBUTING.md](CONTRIBUTING.md) for the full process.
 
 ```sh
-./build.sh gui     # shim_gui: the display-server host
-./build.sh cli     # shim_cli : headless guest runner
+./build.sh gui         # shim_gui: the display-server host
+./build.sh cli         # shim_cli : headless guest runner
+./build.sh windowserver # shim_windowserver: the WindowServer stand-in
 ```
 
 ## Roadmap
 
+The roadmap is tracked on the [GitHub project](https://github.com/users/darrinperry83/projects/2).
+The current frontier:
+
 | Item | Priority |
 |---|---|
-| Wire the Metal renderer into the live guest (drop softpipe) | high |
-| Takeover: hide macOS UI (menu bar / Dock) | high |
-| Takeover: remove the taken-over display from macOS | high |
-| Guest `glReadPixels` readback | medium |
-| Hotplug uevent | medium |
-| Full plasmashell EGL session | medium |
-| Full Omarchy application set | medium |
-| Workspaces across displays | medium |
-| System tray + mac integration | medium |
-| Chromium `/proc` gap | medium |
+| Live boot-time takeover proof (a real Dock/AppKit connects + renders) | high |
+| Media engine: zero-copy + encode + HEVC/VP9/AV1 + ffmpeg/mpv plumbing | high |
+| Complete the Linux syscall ABI (`io_uring`, `ptrace`/`seccomp`, signal delivery, `/proc/net`) | high |
+| Versioned update + rollback (`shimmy.lock`, atomic fallback) | high |
+| Bluetooth + USB device bridges | medium |
+| Proper install area on APFS | medium |
+| Syscall fast path + guest heap fix (performance) | medium |
 
 ## Contributing
 

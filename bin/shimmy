@@ -932,6 +932,7 @@ def cmd_takeover(args):
     print("  stand-in     : %s -> %s" % (ws_bin, WINDOWSERVER_BIN_DST))
 
     rc = 0
+    rc |= _sudo(["mkdir", "-p", "/usr/local/sbin"], args.dry_run)
     rc |= _sudo(["install", "-m", "0755", str(CHOOSER_BIN_SRC), CHOOSER_BIN_DST], args.dry_run)
     rc |= _sudo(["install", "-m", "0755", str(ws_bin), WINDOWSERVER_BIN_DST], args.dry_run)
     rc |= _sudo(["cp", str(CHOOSER_BUILD_PLIST), CHOOSER_PLIST_DST], args.dry_run)
