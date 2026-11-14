@@ -1,7 +1,9 @@
 # Design: shimmy
 
-The goal: run Linux on macOS **indistinguishably from a native machine**. Boot → TTY login →
-desktop → workspaces, with two presentation modes (windowed / full-display takeover), all
+The goal: run Linux on macOS **indistinguishably from a native machine**. Linux is the primary
+experience; macOS is the hardware layer underneath (the Mach scheduler + the real drivers).
+Boot → TTY login → desktop → workspaces, with four modes (windowed / single-display takeover /
+kiosk / all-displays takeover) and a **flick** that switches between Linux and macOS, all
 rendered by the **rdmetal** driver and presented by the shim.
 
 ## Layers
@@ -53,52 +55,62 @@ To get there:
 2. A `libseat` shim so the compositor's DRM backend can take the seat.
 3. Remove `wlsrv`'s presentation path; keep input/cursor/mac-window.
 
-## Presentation modes
+## Product modes and the flick
 
-The compositor runs natively as the **DRM master** and renders N monitors (one per mac
-display, hotplug-aware). That core is mode-independent. The only difference is the **present
-sink** for each monitor's frame.
+The product has four modes. Linux is the primary experience; macOS is the hardware layer
+underneath. A single **flick** gesture switches between Linux and macOS, and it is the product's
+most important interaction.
 
-### `windowed` — the Citrix-client model
+| # | Mode | macOS side | Linux side |
+|---|---|---|---|
+| 1 | `windowed` | full macOS | Linux in a window (one display) |
+| 2 | `takeover` (single-display) | macOS on the builtin | Linux owns one display (full desktop) |
+| 3 | `kiosk` | macOS on the builtin | one locked-down app on one display |
+| 4 | `takeover` (all-displays) | suppressed | Linux owns all displays |
 
-Linux runs inside a resizable macOS window. Stretch it across N mac displays and maximize it,
-and the shim maps each covered display to a Linux monitor:
+### The flick
 
-1. The shim's `NSWindow` is a borderless resizable container.
-2. On resize/move, the shim reads which `NSScreen`s the window intersects + their scale.
-3. It advertises that many Linux outputs (the rdmetal connectors), each = the covered display.
-4. Each monitor's frame is presented into the matching region of the window (or a per-display
-   sub-window), so the desktop is continuous across the displays.
-5. Move/resize across a different display = re-advertise + re-modeset (window-driven hotplug).
+- Multiple screens: the flick is **spatial** (move the pointer or focus across the screen
+  boundary), plus a key that swaps which display is Linux.
+- Single screen: the flick is a **mode toggle** (a key that flips the whole screen between Linux
+  and macOS).
+- One consistent gesture everywhere: a configurable key combo, with the pointer owned by
+  whichever side is active.
+- The flip is near-instant because macOS is never killed. Suppression is a reversible flag (the
+  display's `online` state + WindowServer's present path), and both OSes keep running underneath.
+  Flicking feels like switching full-screen spaces, not rebooting.
 
-Works with any number of mac displays, like a Citrix/RDP client. macOS keeps running normally.
+### `windowed`
 
-### `takeover` — own the external display, keep the builtin as macOS
+Linux runs inside a resizable macOS window (one Linux display), fullscreen-able, with macOS
+running normally. Stretch it across N mac displays and the shim maps each covered display to a
+Linux monitor. The pointer flicks back to macOS when it leaves the window or via the key.
 
-The first takeover mode is a **split**: the builtin display stays macOS (menu bar, Dock, mac
-apps all keep working normally), while the external display is taken over by Linux and **removed
-from macOS entirely** (a virtual unplug). The Linux compositor owns the external as its own
-monitor and flips its frames directly to it via `present_iosurface` → IOMFB, bypassing
-WindowServer:
+### `takeover` (single-display)
 
-1. The scanout injection suppresses WindowServer's present on the external display.
-2. The external drops out of macOS's active display set (no macOS UI on it).
-3. The Linux frame flips directly to the external's IOMFB swap → the hardware scanout.
+The display of the user's choice is taken over by Linux and **removed from macOS entirely** (a
+virtual unplug), while the other display stays macOS. The Linux compositor owns the taken-over
+display and flips its frames directly via `present_iosurface` → IOMFB, bypassing WindowServer.
+Result: macOS on one screen, a full Linux desktop on the other — two computers on two screens.
 
-Result: macOS on the builtin, a full Linux desktop on the external, side by side. The external
-is "faster and better, like a real machine"; the builtin is untouched macOS.
+### `kiosk`
 
-(This generalizes to any number of taken-over displays; the builtin is simply the one left to
-macOS in the default single-external setup.)
+A single-display takeover whose Linux side runs one locked-down, always-on application (a
+dashboard, signage, or point-of-sale app) instead of a desktop: no shell, no switching, nothing
+to escape to. macOS runs the operator's display.
+
+### `takeover` (all-displays)
+
+Every display is taken over by Linux and macOS is suppressed. This is the "it's a Linux machine"
+mode: boot to a TTY, log in, and you are on a Linux desktop with macOS just underneath, one flick
+away.
 
 ### Shape
 
-**One native compositor, two present sinks**: a window (windowed, any N displays) or the raw
-displays (takeover). A single `windowed | takeover` flag switches the sink; the DRM-master and
-connector discovery are shared.
-
-Plan: (1) per-CRTC present (shared core), (2) window-geometry → Linux-output mapping, (3)
-takeover flip stability, (4) the mode flag.
+**One native compositor, two present sinks**: a window (windowed) or the raw displays (takeover /
+kiosk). A mode flag switches the sink and which displays are taken over; the DRM-master and
+connector discovery are shared. Kiosk is the single-display takeover with a different rootfs and
+an "open in kiosk" flag.
 
 ## Target experience (native-equivalent)
 

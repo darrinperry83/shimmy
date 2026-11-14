@@ -42,7 +42,7 @@ See [Feature support](docs/FEATURES.md) for the current status of every subsyste
 - [How it works](#how-it-works)
 - [Architecture](#architecture)
 - [Quick start](#quick-start)
-- [Presentation modes](#presentation-modes)
+- [Modes](#modes)
 - [Development](#development)
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
@@ -148,16 +148,20 @@ flag. The rootfs is built locally and is not stored in git.
 See [Host setup](README.md#host-setup--sip--the-scanout-injection-one-time) for the one-time SIP
 and scanout prerequisites.
 
-## Presentation modes
+## Modes
 
-| Mode | Behavior |
-|---|---|
-| **Windowed** (default) | the desktop runs in a normal window, WindowServer present |
-| **Takeover** | the external display is taken over by Linux (suppress WindowServer, `present_iosurface` flips directly to it) while the builtin stays macOS |
+Linux is the primary experience; macOS is the hardware layer underneath. A single **flick**
+switches between them (a key combo, or moving the pointer across the screen boundary).
 
-The first takeover mode is a **split**: macOS keeps running on the builtin display, and Linux owns
-the external display exclusively (macOS is made to stop seeing it). See
-[DESIGN.md](DESIGN.md) for the details.
+| Mode | macOS side | Linux side |
+|---|---|---|
+| **Windowed** | full macOS | Linux in a window (one display), fullscreen-able |
+| **Takeover** (single-display) | macOS on the builtin | Linux owns the display of your choice |
+| **Kiosk** | macOS on the builtin | one locked-down app on one display |
+| **Takeover** (all-displays) | suppressed | Linux owns all displays |
+
+The takeover modes flip the Linux frame directly to the display via `present_iosurface` and remove
+the taken-over display from macOS. See [DESIGN.md](DESIGN.md) for the full mode and flick design.
 
 ## Development
 
