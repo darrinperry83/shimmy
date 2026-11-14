@@ -12,9 +12,15 @@
 
   MachServices: the two lowercase names the real WindowServer checks in
   (WINDOWSERVER_BOOTSTRAP_REGISTRATION.md). Declaring them HERE is what makes the chooser's
-  bootstrap_check_in succeed and makes the real WindowServer's own check-in fail at boot —
-  the "service race won at boot". `com.apple.windowserver` is always-visible (<true/>) and
+  child (the windowserver stand-in) win the check-in race and makes the real WindowServer's
+  own check-in fail at boot. `com.apple.windowserver` is always-visible (<true/>) and
   `com.apple.windowserver.active` is HideUntilCheckIn, exactly as the real plist declares them.
+
+  The shimmy branch launches the windowserver stand-in (SHIMMY_WINDOWSERVER_CMD) with
+  RDNATIVE_WINDOWSERVER_SYSTEM=1 so it checks these names in and runs the ~37-function server.
+  On a clean stand-in exit the chooser warm-switches: the stand-in's exit releases the names,
+  and SHIMMY_WARM_SWITCH_KICKSTART=1 relaunches the real WindowServer. These variables are
+  injected by `shimmy takeover`; the canonical file below carries only the static defaults.
 -->
 <dict>
     <key>Label</key>

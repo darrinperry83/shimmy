@@ -679,16 +679,22 @@ CHOOSER_PLIST_SRC = REPO / "config" / "com.shimmy.chooser.plist"
 CHOOSER_PLIST_DST = "/Library/LaunchDaemons/com.shimmy.chooser.plist"
 CHOOSER_BIN_SRC = REPO / "chooser"
 CHOOSER_BIN_DST = "/usr/local/sbin/shimmy-chooser"
+WINDOWSERVER_BIN_DST = "/usr/local/sbin/shim_windowserver"
 CHOOSER_BUILD_PLIST = REPO / "build" / "com.shimmy.chooser.plist"
 
 
-def build_takeover_plist(dst, linux_cmd):
-    """Load the canonical chooser plist, inject the site-specific Linux launch
-    command (SHIMMY_LINUX_CMD), and write the result. The canonical file is never
-    modified in place."""
+def build_takeover_plist(dst):
+    """Load the canonical chooser plist and inject the windowserver-stand-in arrangement:
+    where the stand-in lives (SHIMMY_WINDOWSERVER_CMD), that it runs the REAL check-in at boot
+    (SHIMMY_WINDOWSERVER_SYSTEM=1), and that a warm-switch really kickstarts the real
+    WindowServer (SHIMMY_WARM_SWITCH_KICKSTART=1). The canonical file is never modified in
+    place."""
     with open(CHOOSER_PLIST_SRC, "rb") as f:
         pl = plistlib.load(f)
-    pl.setdefault("EnvironmentVariables", {})["SHIMMY_LINUX_CMD"] = linux_cmd
+    env = pl.setdefault("EnvironmentVariables", {})
+    env["SHIMMY_WINDOWSERVER_CMD"] = WINDOWSERVER_BIN_DST
+    env["SHIMMY_WINDOWSERVER_SYSTEM"] = "1"
+    env["SHIMMY_WARM_SWITCH_KICKSTART"] = "1"
     with open(dst, "wb") as f:
         plistlib.dump(pl, f)
     return dst
@@ -703,7 +709,11 @@ def _sudo(cmd, dry_run):
 
 
 def cmd_takeover(args):
-    linux_cmd = args.linux_cmd or ("%s --desktop hyprland" % (REPO / "run.sh"))
+    ws_bin = args.windowserver or os.environ.get("SHIMMY_WINDOWSERVER_BIN")
+    if not ws_bin:
+        print("shimmy: takeover needs the windowserver stand-in binary: pass --windowserver "
+              "<path> or set SHIMMY_WINDOWSERVER_BIN", file=sys.stderr)
+        return 1
     if args.dry_run:
         print("==> takeover (dry-run)")
         print("  # build:  %s chooser" % (REPO / "build.sh"))
@@ -711,13 +721,15 @@ def cmd_takeover(args):
         print("==> takeover")
         subprocess.run([str(REPO / "build.sh"), "chooser"], cwd=str(REPO), check=True)
 
-    # Generate the installed plist with the site-specific Linux launch command.
-    build_takeover_plist(CHOOSER_BUILD_PLIST, linux_cmd)
+    # Generate the installed plist with the windowserver-stand-in arrangement.
+    build_takeover_plist(CHOOSER_BUILD_PLIST)
     print("  plist source : %s" % CHOOSER_PLIST_SRC)
-    print("  plist install: %s (SHIMMY_LINUX_CMD=%s)" % (CHOOSER_PLIST_DST, linux_cmd))
+    print("  plist install: %s" % CHOOSER_PLIST_DST)
+    print("  stand-in     : %s -> %s" % (ws_bin, WINDOWSERVER_BIN_DST))
 
     rc = 0
     rc |= _sudo(["install", "-m", "0755", str(CHOOSER_BIN_SRC), CHOOSER_BIN_DST], args.dry_run)
+    rc |= _sudo(["install", "-m", "0755", str(ws_bin), WINDOWSERVER_BIN_DST], args.dry_run)
     rc |= _sudo(["cp", str(CHOOSER_BUILD_PLIST), CHOOSER_PLIST_DST], args.dry_run)
 
     if args.dry_run:
@@ -727,13 +739,14 @@ def cmd_takeover(args):
         return 0
 
     if rc == 0:
-        print("installed chooser -> %s and %s" % (CHOOSER_BIN_DST, CHOOSER_PLIST_DST))
+        print("installed chooser -> %s and stand-in -> %s, plist -> %s"
+              % (CHOOSER_BIN_DST, WINDOWSERVER_BIN_DST, CHOOSER_PLIST_DST))
         print("reboot to activate; `shimmy release` undoes it. macOS stays the default.")
     return rc
 
 
 def cmd_release(args):
-    cmd = ["rm", "-f", CHOOSER_PLIST_DST, CHOOSER_BIN_DST]
+    cmd = ["rm", "-f", CHOOSER_PLIST_DST, CHOOSER_BIN_DST, WINDOWSERVER_BIN_DST]
     if args.dry_run:
         print("==> release (dry-run)")
         _sudo(cmd, True)
@@ -742,7 +755,8 @@ def cmd_release(args):
     print("==> release")
     rc = _sudo(cmd, False)
     if rc == 0:
-        print("removed %s and %s — normal macOS boot restored." % (CHOOSER_PLIST_DST, CHOOSER_BIN_DST))
+        print("removed %s, %s and %s — normal macOS boot restored."
+              % (CHOOSER_PLIST_DST, CHOOSER_BIN_DST, WINDOWSERVER_BIN_DST))
     return rc
 
 
@@ -784,9 +798,9 @@ def main(argv=None):
     take_p = sub.add_parser("takeover", help="install the boot chooser (next-boot macOS-vs-shimmy)")
     take_p.add_argument("--dry-run", action="store_true",
                         help="print the sudo commands + generated plist without installing")
-    take_p.add_argument("--linux-cmd", default=None,
-                        help="command the chooser execs on the shimmy branch "
-                             "(default: <repo>/run.sh --desktop hyprland)")
+    take_p.add_argument("--windowserver", default=None,
+                        help="path to the shim_windowserver stand-in binary to install "
+                             "(default: $SHIMMY_WINDOWSERVER_BIN)")
 
     rel_p = sub.add_parser("release", help="remove the boot chooser (restore normal macOS boot)")
     rel_p.add_argument("--dry-run", action="store_true",
