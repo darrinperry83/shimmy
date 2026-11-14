@@ -1,18 +1,33 @@
 #!/usr/bin/env bash
 # shimmy — streamlined installer.
-# Bootstraps the Arch Linux (aarch64) rootfs, installs the desktop (Hyprland or KDE)
-# per the Arch wiki, and installs the rdmetal driver so the desktop "just works".
+# Bootstraps the Arch Linux (aarch64) rootfs per the selected rootfs profile,
+# installs the desktop (Hyprland or KDE) where the profile calls for it, and
+# installs the rdmetal driver so the desktop "just works".
 #
 # Usage:
-#   ./install.sh                    # default desktop = hyprland
-#   ./install.sh --desktop kde      # KDE Plasma instead
+#   ./install.sh                    # arch (bare base; boots to the TTY login)
+#   ./install.sh --rootfs omarchy   # Arch + Hyprland + Quickshell, pre-configured
+#   ./install.sh --rootfs kiosk     # minimal base for one locked app (planned)
+#   ./install.sh --desktop kde      # legacy: force a KDE Plasma desktop install
 #
 # Produces a rootfs/ directory (NOT stored in git) and a built shim.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DESKTOP="${1:-hyprland}"
-case "${2:-$DESKTOP}" in --desktop) DESKTOP="$3";; esac
+DESKTOP="hyprland"
+DESKTOP_EXPLICIT=0
+ROOTFS_PROFILE="arch"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --desktop)
+      DESKTOP="${2:-hyprland}"; DESKTOP_EXPLICIT=1
+      [ $# -ge 2 ] && shift 2 || shift ;;
+    --rootfs)
+      ROOTFS_PROFILE="${2:-arch}"
+      [ $# -ge 2 ] && shift 2 || shift ;;
+    *) DESKTOP="$1"; DESKTOP_EXPLICIT=1; shift ;;
+  esac
+done
 ROOTFS="$HERE/rootfs"
 ARCH_TARBALL="ArchLinuxARM-aarch64-latest.tar.gz"
 ARCH_URL="http://os.archlinuxarm.org/os/$ARCH_TARBALL"
@@ -48,22 +63,43 @@ mkdir -p "$ROOTFS/dev/shm" "$ROOTFS/dev/dri"
 SHIM_CLI="$HERE/shim_cli"
 run_pacman() { RDUID0=1 "$SHIM_CLI" "$ROOTFS" /usr/bin/pacman "$@" --disable-sandbox; }
 
-# --- 4. sync + install the desktop per the Arch wiki --------------------------
+# --- 4. sync + install the profile's package set ------------------------------
 echo "==> pacman -Sy"
 run_pacman -Sy --noconfirm
-case "$DESKTOP" in
-  kde|plasma)
-    echo "==> installing KDE Plasma (standard Arch install)"
-    run_pacman -S --noconfirm plasma-meta konsole dolphin sddm
-    ;;
-  *)
-    echo "==> installing Hyprland (standard Arch install)"
-    run_pacman -S --noconfirm hyprland foot gtk3 gtk4 noto-fonts
-    ;;
+
+# The rootfs profile picks the package set.  `arch` is bare (boots to the TTY);
+# `omarchy` pre-ships Hyprland + Quickshell; `kiosk` is the minimal base with a
+# single locked app configured in shimmy.yaml (not installed here — planned).
+# A legacy `--desktop` flag forces a desktop install regardless of profile.
+INSTALL_DESKTOP=0
+case "$ROOTFS_PROFILE" in
+  omarchy) INSTALL_DESKTOP=1 ;;
+  kiosk|arch) ;;
+  *) echo "    ! unknown rootfs profile '$ROOTFS_PROFILE' (arch|omarchy|kiosk); assuming bare arch" ;;
 esac
-# common desktop apps
-run_pacman -S --noconfirm mesa mesa-utils libglvnd wayland wayland-protocols \
-  fastfetch btop htop chromium mpv 2>/dev/null || true
+[ "$DESKTOP_EXPLICIT" = "1" ] && INSTALL_DESKTOP=1
+
+if [ "$INSTALL_DESKTOP" = "1" ]; then
+  case "$DESKTOP" in
+    kde|plasma)
+      echo "==> installing KDE Plasma (standard Arch install)"
+      run_pacman -S --noconfirm plasma-meta konsole dolphin sddm
+      ;;
+    *)
+      echo "==> installing Hyprland (standard Arch install)"
+      if [ "$ROOTFS_PROFILE" = "omarchy" ]; then
+        run_pacman -S --noconfirm hyprland quickshell foot gtk3 gtk4 noto-fonts
+      else
+        run_pacman -S --noconfirm hyprland foot gtk3 gtk4 noto-fonts
+      fi
+      ;;
+  esac
+  # common desktop apps
+  run_pacman -S --noconfirm mesa mesa-utils libglvnd wayland wayland-protocols \
+    fastfetch btop htop chromium mpv 2>/dev/null || true
+else
+  echo "==> bare rootfs profile '$ROOTFS_PROFILE' — no desktop installed (boots to TTY)"
+fi
 
 # --- 5. install the rdmetal driver (so the desktop renders) -------------------
 echo "==> installing the rdmetal driver"
@@ -85,4 +121,9 @@ fi
 
 echo ""
 echo "==> done."
-echo "    run:  ./run.sh --desktop $DESKTOP"
+echo "    rootfs profile: $ROOTFS_PROFILE"
+if [ "$INSTALL_DESKTOP" = "1" ]; then
+  echo "    run:  ./run.sh --desktop $DESKTOP"
+else
+  echo "    run:  ./run.sh            # bare base; install a desktop via pacman first"
+fi

@@ -1,0 +1,68 @@
+# shimmy.yaml.example — the whole Linux machine, in one file (YAML fallback).
+#
+# Copy this to `shimmy.yaml` and edit it.  The machine is a pure function of the
+# config:
+#
+#     machine = f(shimmy.yaml)      # (shimmy.nix + a Nix-flavored evaluator is
+#                                   #  the future; see docs/DESIGN-NIX.md)
+#
+#   shimmy config validate   # parse + validate
+#   shimmy config render     # print the derived env / flags
+#   shimmy run               # derive the env and exec run.sh
+#   shimmy build             # exec install.sh --rootfs <rootfs>
+#
+# The YAML schema is the first cut; it maps 1:1 onto the fields DESIGN-NIX.md
+# defines.  A JSON file (shimmy.json) is an exact first-class fallback.
+
+# ---- the Linux userland ----
+
+# The rootfs profile ("base system"): arch | omarchy | kiosk.
+rootfs: omarchy
+
+# The window manager / desktop.  Installed via pacman; the runner derives the
+# launch command (hyprland -> Hyprland, plasma -> startplasma-wayland, sway -> sway).
+windowManager: hyprland
+
+# The app set, installed via pacman (the full Arch aarch64 repo).
+packages:
+  - foot
+  - chromium
+  - neovim
+  - firefox
+  - wireguard-tools
+
+# ---- how Linux and macOS share the hardware ----
+
+# The mode (the present sink):
+#   windowed | single-display | kiosk | all-displays
+mode: single-display
+
+# Which displays Linux takes over (ignored in "windowed").
+#   symbolic names ("external", "builtin", "all") or a display id ("0x..."/number).
+takeover:
+  displays:
+    - external
+  # Optional fixed geometry for each taken output, "WxH" -> RDNATIVE_FIT_OUTPUT_*.
+  # Omit to let the shim auto-fit natively.
+  fit:
+    external: "3440x1440"
+    builtin:  "3600x2338"
+
+# The flick: the hotkey that switches between Linux and macOS.
+flick:
+  key: ctrl-alt-f          # -> RDFLICK_KEY
+  on: all                  # all | taken  -> RDFLICK_ON
+
+# ---- the kiosk app (only when mode == "kiosk") ----
+# kiosk:
+#   app: chromium
+#   args: [ "--kiosk", "https://dashboard.internal" ]
+
+# ---- misc ----
+
+# Environment variables passed into the guest (RDENV_* passthrough).
+env:
+  LANG: en_AU.UTF-8
+
+# The user to auto-login at the TTY (omit to drop to a getty login).
+user: darrin

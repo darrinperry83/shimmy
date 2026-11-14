@@ -1,0 +1,732 @@
+#!/usr/bin/env python3
+"""shimmy — the declarative config layer for the Linux-on-macOS shim.
+
+shimmy makes the machine a pure function of one file:
+
+    machine = f(shimmy.yaml)      # (shimmy.nix + a Nix-flavored evaluator is the future)
+
+The config is a declarative description of the Linux userland (rootfs profile,
+window manager, packages), how Linux and macOS share the hardware (mode,
+takeover displays, the flick key), and the guest environment.  shimmy validates
+that file and *derives* the concrete runtime flags the shim already reads:
+
+    RDGPU_SCANOUT=1            direct scanout / takeover
+    RDNATIVE_MODE=<mode>       canonical mode marker
+    RDNATIVE_SPLIT_OUTPUT      one display Linux, the rest stay macOS
+    RDNATIVE_FIT_DISPLAY       full-screen fit on the taken display
+    RDNATIVE_FIT_OUTPUT_1/2    per-output fit geometry ("WxH")
+    RDNATIVE_TARGET_DISPLAY_ID / RDNATIVE_EXTRA_TARGET_DISPLAY_ID
+    RDGPU_SCANOUT_DISPLAY(_2)  the scanout payload's "want_id"
+    RDNATIVE_KIOSK             kiosk (raise above menu bar / Dock)
+    RDFLICK_KEY / RDFLICK_ON   the flick
+    RDENV_*                    guest environment passthrough
+
+Commands:
+    shimmy config validate      parse + validate the config
+    shimmy config render        print the derived env / flags
+    shimmy run                  derive the env and exec run.sh
+    shimmy build                exec install.sh --rootfs <profile>
+
+The YAML (or JSON) schema is the first cut; the DESIGN-NIX.md Nix-flavored
+evaluator is the stated future direction.  This loader therefore *also* detects
+`shimmy.nix` and says so explicitly rather than pretending to evaluate it.
+
+This file depends only on the Python 3 standard library.
+"""
+
+import argparse
+import json
+import os
+import re
+import shlex
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+
+VERSION = "0.1.0"
+
+# --------------------------------------------------------------------------- #
+# schema
+# --------------------------------------------------------------------------- #
+
+MODES = ("windowed", "single-display", "kiosk", "all-displays")
+ROOTFS_PROFILES = ("arch", "omarchy", "kiosk")
+FLICK_ON = ("all", "taken")
+
+DEFAULTS = {
+    "rootfs": "arch",
+    "windowManager": "hyprland",
+    "packages": [],
+    "services": [],
+    "autostart": [],
+    "mode": "windowed",
+    "takeover": {"displays": ["external"], "fit": {}},
+    "flick": {"key": "ctrl-alt-f", "on": "all"},
+    "kiosk": None,
+    "env": {},
+    "user": "",
+}
+
+# The window manager name in the config maps to the `--desktop` token run.sh
+# understands (run.sh: kde|plasma -> KDE, anything else -> Hyprland default).
+def desktop_for(window_manager):
+    wm = str(window_manager).strip().lower()
+    if wm in ("plasma", "kde"):
+        return "kde"
+    return wm
+
+
+# --------------------------------------------------------------------------- #
+# a minimal YAML subset parser (stdlib only) + JSON fallback
+# --------------------------------------------------------------------------- #
+
+class ConfigError(Exception):
+    pass
+
+
+def _strip_comment(line):
+    """Drop a `#` comment that starts a token (preceded by whitespace/start),
+    respecting single- and double-quoted strings."""
+    out = []
+    quote = None
+    for ch in line:
+        if quote:
+            out.append(ch)
+            if ch == quote:
+                quote = None
+        elif ch in ('"', "'"):
+            quote = ch
+            out.append(ch)
+        elif ch == '#':
+            if not out or out[-1] in ' \t':
+                break
+            out.append(ch)
+        else:
+            out.append(ch)
+    return ''.join(out).rstrip()
+
+
+def _split_mapping(line):
+    """Split `key: value` at the first `:` followed by space or end-of-line,
+    outside quotes.  Returns (key, rest) or (key, None) when no separator."""
+    quote = None
+    for i, ch in enumerate(line):
+        if quote:
+            if ch == quote:
+                quote = None
+            continue
+        if ch in ('"', "'"):
+            quote = ch
+            continue
+        if ch == ':':
+            rest = line[i + 1:]
+            if rest == '' or rest[0] in ' \t':
+                return line[:i].strip(), rest.strip()
+    return line.strip(), None
+
+
+def _split_top(s, sep):
+    """Split `s` on `sep` at bracket depth zero and outside quotes."""
+    out = []
+    depth = 0
+    quote = None
+    cur = ''
+    for ch in s:
+        if quote:
+            cur += ch
+            if ch == quote:
+                quote = None
+            continue
+        if ch in ('"', "'"):
+            quote = ch
+            cur += ch
+            continue
+        if ch in '[{(':
+            depth += 1
+        elif ch in ']})':
+            depth -= 1
+        if ch == sep and depth == 0:
+            out.append(cur)
+            cur = ''
+        else:
+            cur += ch
+    if cur.strip():
+        out.append(cur)
+    return out
+
+
+def _unquote(s):
+    q = s[0]
+    inner = s[1:-1]
+    if q == '"':
+        return inner.replace('\\"', '"').replace('\\\\', '\\')
+    return inner
+
+
+def _parse_scalar(s):
+    s = s.strip()
+    if s == '':
+        return None
+    if (s[0] == '"' and s[-1] == '"') or (s[0] == "'" and s[-1] == "'"):
+        return _unquote(s)
+    if s in ('null', 'Null', 'NULL', '~'):
+        return None
+    if s in ('true', 'True', 'TRUE'):
+        return True
+    if s in ('false', 'False', 'FALSE'):
+        return False
+    # Plain decimal integers only.  Hex display ids ("0x1a2b") stay strings so
+    # they pass through to RDGPU_SCANOUT_DISPLAY unchanged.
+    if re.fullmatch(r'[+-]?\d+', s):
+        return int(s)
+    return s
+
+
+def _parse_scalar_or_inline(rest):
+    rest = rest.strip()
+    if rest.startswith('['):
+        if not rest.endswith(']'):
+            raise ConfigError("unterminated inline list: %r" % rest)
+        items = _split_top(rest[1:-1], ',')
+        return [_parse_scalar(x) for x in items if x.strip() != '']
+    if rest.startswith('{'):
+        if not rest.endswith('}'):
+            raise ConfigError("unterminated inline map: %r" % rest)
+        result = {}
+        for part in _split_top(rest[1:-1], ','):
+            part = part.strip()
+            if not part:
+                continue
+            k, v = _split_mapping(part)
+            if v is None:
+                raise ConfigError("bad inline mapping entry: %r" % part)
+            result[k] = _parse_scalar_or_inline(v)
+        return result
+    return _parse_scalar(rest)
+
+
+def _parse_map(lines, i, indent):
+    result = {}
+    n = len(lines)
+    while i < n:
+        ind, content = lines[i]
+        if ind < indent:
+            break
+        if ind > indent:
+            raise ConfigError("unexpected indentation at: %r" % content)
+        if content.startswith('- '):
+            raise ConfigError("unexpected list item inside mapping: %r" % content)
+        key, rest = _split_mapping(content)
+        if rest is None or rest == '':
+            if i + 1 < n and lines[i + 1][0] > indent:
+                val, i = _parse_lines(lines, i + 1, lines[i + 1][0])
+            else:
+                val = None
+                i += 1
+        else:
+            val = _parse_scalar_or_inline(rest)
+            i += 1
+        result[key] = val
+    return result, i
+
+
+def _parse_seq(lines, i, indent):
+    result = []
+    n = len(lines)
+    while i < n:
+        ind, content = lines[i]
+        if ind < indent:
+            break
+        if ind > indent:
+            raise ConfigError("unexpected indentation in list: %r" % content)
+        if not content.startswith('- '):
+            break
+        rest = content[2:].strip()
+        if rest == '':
+            if i + 1 < n and lines[i + 1][0] > indent:
+                val, i = _parse_lines(lines, i + 1, lines[i + 1][0])
+            else:
+                val = None
+                i += 1
+        else:
+            val = _parse_scalar_or_inline(rest)
+            i += 1
+        result.append(val)
+    return result, i
+
+
+def _parse_lines(lines, i, indent):
+    if lines[i][1].startswith('- '):
+        return _parse_seq(lines, i, indent)
+    return _parse_map(lines, i, indent)
+
+
+def parse_config_text(text):
+    """Parse YAML (a small strict subset) or JSON.  Returns a dict."""
+    stripped = text.lstrip('\ufeff \t\r\n')
+    if stripped.startswith('{'):
+        # JSON is an exact, first-class fallback.
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as e:
+            raise ConfigError("invalid JSON: %s" % e)
+    lines = []
+    for lineno, raw in enumerate(text.splitlines(), 1):
+        s = _strip_comment(raw)
+        if s.strip() == '':
+            continue
+        indent = len(s) - len(s.lstrip(' '))
+        if '\t' in s[:indent] or '\t' in s:
+            raise ConfigError("line %d: tabs are not allowed for indentation" % lineno)
+        lines.append((indent, s[indent:]))
+    if not lines:
+        return {}
+    value, i = _parse_lines(lines, 0, lines[0][0])
+    if i != len(lines):
+        raise ConfigError("unparsed trailing content at: %r" % (lines[i][1],))
+    if not isinstance(value, dict):
+        raise ConfigError("top-level config must be a mapping")
+    return value
+
+
+# --------------------------------------------------------------------------- #
+# normalize + validate
+# --------------------------------------------------------------------------- #
+
+def _as_list(v):
+    if v is None:
+        return []
+    if isinstance(v, (list, tuple)):
+        return [str(x).strip() for x in v]
+    return [str(v).strip()]
+
+
+def normalize(raw):
+    if not isinstance(raw, dict):
+        raise ConfigError("config must be a mapping, got %s" % type(raw).__name__)
+
+    cfg = {
+        "rootfs": str(raw.get("rootfs") or DEFAULTS["rootfs"]).strip(),
+        "windowManager": str(raw.get("windowManager") or DEFAULTS["windowManager"]).strip(),
+        "mode": str(raw.get("mode") or DEFAULTS["mode"]).strip(),
+        "user": str(raw.get("user") or "").strip(),
+        "packages": _as_list(raw.get("packages")),
+        "services": _as_list(raw.get("services")),
+        "autostart": _as_list(raw.get("autostart")),
+        "takeover": dict(DEFAULTS["takeover"]),
+        "flick": dict(DEFAULTS["flick"]),
+        "kiosk": raw.get("kiosk"),
+        "env": {},
+    }
+
+    t = raw.get("takeover")
+    if t is not None:
+        if not isinstance(t, dict):
+            raise ConfigError("takeover must be a mapping")
+        if t.get("displays") is not None:
+            cfg["takeover"]["displays"] = _as_list(t.get("displays"))
+        if t.get("fit") is not None:
+            if not isinstance(t.get("fit"), dict):
+                raise ConfigError("takeover.fit must be a mapping of display -> \"WxH\"")
+            cfg["takeover"]["fit"] = {str(k): str(v) for k, v in t["fit"].items()}
+
+    f = raw.get("flick")
+    if f is not None:
+        if not isinstance(f, dict):
+            raise ConfigError("flick must be a mapping")
+        if f.get("key") is not None:
+            cfg["flick"]["key"] = str(f["key"]).strip()
+        if f.get("on") is not None:
+            cfg["flick"]["on"] = str(f["on"]).strip()
+
+    e = raw.get("env")
+    if e is not None:
+        if not isinstance(e, dict):
+            raise ConfigError("env must be a mapping")
+        cfg["env"] = {str(k): str(v) for k, v in e.items()}
+
+    return cfg
+
+
+def validate(cfg):
+    errors, warnings = [], []
+
+    if cfg["mode"] not in MODES:
+        errors.append("mode must be one of %s (got %r)" % (MODES, cfg["mode"]))
+    if cfg["rootfs"] not in ROOTFS_PROFILES:
+        errors.append("rootfs must be one of %s (got %r)" % (ROOTFS_PROFILES, cfg["rootfs"]))
+    if not cfg["windowManager"]:
+        errors.append("windowManager must be a non-empty string")
+
+    disp = cfg["takeover"]["displays"]
+    if not disp:
+        errors.append("takeover.displays must be a non-empty list")
+
+    if cfg["flick"]["on"] not in FLICK_ON:
+        errors.append("flick.on must be one of %s (got %r)" % (FLICK_ON, cfg["flick"]["on"]))
+    if not cfg["flick"]["key"]:
+        errors.append("flick.key must be a non-empty string")
+
+    k = cfg["kiosk"]
+    if k is not None:
+        if not isinstance(k, dict):
+            errors.append("kiosk must be a mapping")
+        elif not k.get("app") and not cfg["packages"]:
+            errors.append("kiosk needs an app: set kiosk.app or packages[0]")
+
+    if cfg["mode"] == "kiosk" and cfg["rootfs"] != "kiosk":
+        warnings.append("mode is 'kiosk' but rootfs is %r; consider rootfs: kiosk"
+                        % cfg["rootfs"])
+    if cfg["mode"] == "kiosk" and cfg["windowManager"] != "hyprland":
+        warnings.append("kiosk runs the compositor underneath; windowManager is ignored")
+
+    return errors, warnings
+
+
+# --------------------------------------------------------------------------- #
+# derivation: config -> runtime flags
+# --------------------------------------------------------------------------- #
+
+def _is_display_id(s):
+    s = str(s).strip()
+    return s.lower().startswith("0x") or s.isdigit()
+
+
+def derive_displays(takeover):
+    """Map `takeover.displays` (symbolic names or display ids) onto the display
+    env the shim + scanout payload read.  Two outputs exist:
+        output 1 = primary/external = WAYLAND-1 = scanout role 0
+        output 2 = secondary/builtin = WAYLAND-2 = scanout role 1
+    """
+    displays = takeover.get("displays") or ["external"]
+    fit = takeover.get("fit") or {}
+
+    taken_external = False
+    taken_builtin = False
+    primary_id = None
+    secondary_id = None
+
+    for d in displays:
+        s = str(d).strip()
+        if s == "all":
+            taken_external = taken_builtin = True
+        elif s == "external":
+            taken_external = True
+        elif s == "builtin":
+            taken_builtin = True
+        elif _is_display_id(s):
+            if primary_id is None:
+                primary_id = s
+                taken_external = True
+            else:
+                secondary_id = s
+                taken_builtin = True
+        else:
+            # unknown symbolic name: pass it through as the primary target id
+            primary_id = s
+            taken_external = True
+
+    env = {}
+    roles = []
+    if taken_external:
+        roles.append("external")
+    if taken_builtin:
+        roles.append("builtin")
+    env["RDNATIVE_TARGET_ROLE"] = ",".join(roles) if roles else "none"
+
+    if primary_id is not None:
+        env["RDNATIVE_TARGET_DISPLAY_ID"] = primary_id
+        env["RDGPU_SCANOUT_DISPLAY"] = primary_id      # the scanout payload "want_id"
+    if secondary_id is not None:
+        env["RDNATIVE_EXTRA_TARGET_DISPLAY_ID"] = secondary_id
+        env["RDGPU_SCANOUT_DISPLAY2"] = secondary_id
+
+    # per-output fit geometry, only for outputs Linux actually takes over
+    if taken_external and fit.get("external") is not None:
+        env["RDNATIVE_FIT_OUTPUT_1"] = str(fit["external"])
+    if taken_builtin and fit.get("builtin") is not None:
+        env["RDNATIVE_FIT_OUTPUT_2"] = str(fit["builtin"])
+
+    return env
+
+
+def run_target(cfg):
+    if cfg["mode"] == "kiosk":
+        k = cfg["kiosk"] or {}
+        app = k.get("app") or (cfg["packages"][0] if cfg["packages"] else "chromium")
+        args = k.get("args") or []
+        suffix = (" " + " ".join(str(a) for a in args)) if args else ""
+        return "kiosk:%s%s" % (app, suffix)
+    return "desktop:%s" % desktop_for(cfg["windowManager"])
+
+
+def derive(cfg):
+    """Pure function: config -> (ordered env, flags)."""
+    mode = cfg["mode"]
+    env = {}
+
+    # Always emitted: the canonical mode marker, the rootfs profile, the flick.
+    env["RDNATIVE_MODE"] = mode
+    env["RDNATIVE_ROOTFS"] = cfg["rootfs"]
+    env["RDFLICK_KEY"] = cfg["flick"]["key"]
+    env["RDFLICK_ON"] = cfg["flick"]["on"]
+
+    # Guest environment passthrough (RDENV_*).
+    for k in sorted(cfg["env"]):
+        env["RDENV_" + k] = cfg["env"][k]
+
+    # Auto-login user (forward-looking contract var).
+    if cfg["user"]:
+        env["RDNATIVE_USER"] = cfg["user"]
+
+    # Takeover: direct scanout + full-screen fit + the taken display set.
+    if mode in ("single-display", "kiosk", "all-displays"):
+        env["RDGPU_SCANOUT"] = "1"
+        env["RDNATIVE_FIT_DISPLAY"] = "1"
+        if mode != "all-displays":
+            env["RDNATIVE_SPLIT_OUTPUT"] = "1"
+        env.update(derive_displays(cfg["takeover"]))
+
+    # Kiosk: raise above the menu bar / Dock and carry the locked app.
+    if mode == "kiosk":
+        env["RDNATIVE_KIOSK"] = "1"
+        k = cfg["kiosk"] or {}
+        app = k.get("app") or (cfg["packages"][0] if cfg["packages"] else "chromium")
+        args = k.get("args") or []
+        env["RDENV_KIOSK_APP"] = str(app)
+        if args:
+            env["RDENV_KIOSK_ARGS"] = " ".join(shlex.quote(str(a)) for a in args)
+
+    flags = {
+        "rootfs": cfg["rootfs"],
+        "desktop": desktop_for(cfg["windowManager"]),
+        "run_target": run_target(cfg),
+    }
+    return env, flags
+
+
+# --------------------------------------------------------------------------- #
+# config discovery + load
+# --------------------------------------------------------------------------- #
+
+CONFIG_NAMES = ("shimmy.yaml", "shimmy.yml", "shimmy.json", "shimmy.nix")
+
+
+def find_config(explicit):
+    if explicit:
+        p = Path(explicit)
+        if not p.is_file():
+            raise ConfigError("config not found: %s" % explicit)
+        return p
+    envvar = os.environ.get("SHIMMY_CONFIG")
+    if envvar:
+        p = Path(envvar)
+        if not p.is_file():
+            raise ConfigError("SHIMMY_CONFIG not found: %s" % envvar)
+        return p
+    for name in CONFIG_NAMES:
+        p = Path.cwd() / name
+        if p.is_file():
+            return p
+    return None
+
+
+def load_config(explicit):
+    path = find_config(explicit)
+    if path is None:
+        raise ConfigError(
+            "no config found (looked for %s; pass --config, set SHIMMY_CONFIG, "
+            "or copy config/shimmy.yaml.example to shimmy.yaml)"
+            % ", ".join(CONFIG_NAMES))
+    if path.name.endswith(".nix") or path.name.startswith("shimmy.nix"):
+        raise ConfigError(
+            "%s is a Nix config, but the Nix-flavored evaluator is not implemented yet "
+            "(it is the DESIGN-NIX.md future direction). Use the YAML/JSON fallback "
+            "(shimmy.yaml) for now." % path)
+    raw = parse_config_text(path.read_text())
+    cfg = normalize(raw)
+    errors, warnings = validate(cfg)
+    return cfg, errors, warnings, path
+
+
+# --------------------------------------------------------------------------- #
+# output helpers
+# --------------------------------------------------------------------------- #
+
+def print_derivation(cfg, env, flags, path, out=sys.stdout):
+    out.write("# shimmy derivation  (config: %s)\n" % path)
+    out.write("# mode=%s rootfs=%s windowManager=%s\n"
+              % (cfg["mode"], cfg["rootfs"], cfg["windowManager"]))
+    out.write("## env\n")
+    for k, v in env.items():
+        out.write("%s=%s\n" % (k, v))
+    out.write("## flags\n")
+    for k in ("rootfs", "desktop", "run_target"):
+        out.write("%s=%s\n" % (k, flags[k]))
+    out.write("## command\n")
+    out.write("%s\n" % build_run_command(flags))
+
+
+def build_run_command(flags):
+    return " ".join([str(REPO / "run.sh"), "--desktop", flags["desktop"]])
+
+
+def build_install_command(profile):
+    return " ".join([str(REPO / "install.sh"), "--rootfs", profile])
+
+
+# --------------------------------------------------------------------------- #
+# CLI
+# --------------------------------------------------------------------------- #
+
+def cmd_validate(args):
+    cfg, errors, warnings, path = load_config(args.config)
+    if warnings:
+        for w in warnings:
+            print("warning: %s" % w, file=sys.stderr)
+    if errors:
+        print("invalid config (%s):" % path)
+        for e in errors:
+            print("  - %s" % e)
+        return 1
+    print("valid config: %s" % path)
+    print("  mode=%s rootfs=%s windowManager=%s displays=%s flick=%s"
+          % (cfg["mode"], cfg["rootfs"], cfg["windowManager"],
+             ",".join(cfg["takeover"]["displays"]), cfg["flick"]["key"]))
+    print("  packages=%d env=%d" % (len(cfg["packages"]), len(cfg["env"])))
+    return 0
+
+
+def cmd_render(args):
+    cfg, errors, warnings, path = load_config(args.config)
+    for w in warnings:
+        print("warning: %s" % w, file=sys.stderr)
+    if errors:
+        print("invalid config (%s):" % path, file=sys.stderr)
+        for e in errors:
+            print("  - %s" % e, file=sys.stderr)
+        return 1
+    env, flags = derive(cfg)
+    print_derivation(cfg, env, flags, path)
+    return 0
+
+
+def cmd_run(args):
+    cfg, errors, warnings, path = load_config(args.config)
+    for w in warnings:
+        print("warning: %s" % w, file=sys.stderr)
+    if errors:
+        print("invalid config (%s):" % path, file=sys.stderr)
+        for e in errors:
+            print("  - %s" % e, file=sys.stderr)
+        return 1
+
+    env, flags = derive(cfg)
+    if args.dry_run or not args.quiet:
+        print_derivation(cfg, env, flags, path, out=sys.stderr)
+    if args.dry_run:
+        return 0
+
+    os.environ.update(env)
+    run_sh = str(REPO / "run.sh")
+    try:
+        os.execvp(run_sh, [run_sh, "--desktop", flags["desktop"]])
+    except OSError as e:
+        print("failed to exec %s: %s" % (run_sh, e), file=sys.stderr)
+        return 1
+
+
+def cmd_build(args):
+    cfg, errors, warnings, path = load_config(args.config)
+    for w in warnings:
+        print("warning: %s" % w, file=sys.stderr)
+    if errors:
+        print("invalid config (%s):" % path, file=sys.stderr)
+        for e in errors:
+            print("  - %s" % e, file=sys.stderr)
+        return 1
+
+    profile = args.profile or cfg["rootfs"]
+    if profile not in ROOTFS_PROFILES:
+        print("invalid rootfs profile %r (choose %s)" % (profile, ", ".join(ROOTFS_PROFILES)),
+              file=sys.stderr)
+        return 1
+
+    install_sh = str(REPO / "install.sh")
+    command = build_install_command(profile)
+    print("==> %s" % command, file=sys.stderr)
+    if args.dry_run:
+        return 0
+    try:
+        os.execvp(install_sh, [install_sh, "--rootfs", profile])
+    except OSError as e:
+        print("failed to exec %s: %s" % (install_sh, e), file=sys.stderr)
+        return 1
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        prog="shimmy",
+        description="Declarative config layer for the Linux-on-macOS shim.")
+    parser.add_argument("--config", "-c", default=None,
+                        help="path to shimmy.yaml / shimmy.json (default: shimmy.yaml in CWD)")
+    parser.add_argument("--version", action="version", version="shimmy %s" % VERSION)
+    sub = parser.add_subparsers(dest="command")
+
+    # `--config` is accepted both before and after the subcommand; SUPPRESS keeps
+    # a subcommand-level omission from clobbering a global-level value.
+    def add_config_arg(p):
+        p.add_argument("--config", "-c", default=argparse.SUPPRESS,
+                       help=argparse.SUPPRESS)
+
+    cfg_p = sub.add_parser("config", help="inspect the config")
+    add_config_arg(cfg_p)
+    cfgsub = cfg_p.add_subparsers(dest="config_action")
+    add_config_arg(cfgsub.add_parser("validate", help="parse + validate the config"))
+    add_config_arg(cfgsub.add_parser("render", help="print the derived env / flags"))
+
+    run_p = sub.add_parser("run", help="derive the env and exec run.sh")
+    add_config_arg(run_p)
+    run_p.add_argument("--dry-run", action="store_true",
+                       help="print the derived env/flags/command without exec")
+    run_p.add_argument("--quiet", "-q", action="store_true",
+                       help="suppress the derivation banner")
+
+    build_p = sub.add_parser("build", help="exec install.sh --rootfs <profile>")
+    add_config_arg(build_p)
+    build_p.add_argument("--profile", "--rootfs", dest="profile", default=None,
+                         help="rootfs profile override (default: config rootfs)")
+    build_p.add_argument("--dry-run", action="store_true",
+                         help="print the install command without exec")
+
+    args = parser.parse_args(argv)
+
+    if args.command is None:
+        parser.print_help()
+        return 0
+
+    try:
+        if args.command == "config":
+            if args.config_action == "validate":
+                return cmd_validate(args)
+            if args.config_action == "render":
+                return cmd_render(args)
+            cfg_p.print_help()
+            return 1
+        if args.command == "run":
+            return cmd_run(args)
+        if args.command == "build":
+            return cmd_build(args)
+        parser.print_help()
+        return 1
+    except ConfigError as e:
+        print("shimmy: %s" % e, file=sys.stderr)
+        return 1
+    except OSError as e:
+        print("shimmy: %s" % e, file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
