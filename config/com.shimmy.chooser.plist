@@ -51,7 +51,7 @@
         </dict>
     </dict>
 
-    <!-- fd 0 for the key read; the framebuffer menu is the documented follow-up. -->
+    <!-- fd 0 is the /dev/console fallback for the key read (HID/IOHIDManager is primary). -->
     <key>StandardInPath</key>
     <string>/dev/console</string>
     <key>StandardOutPath</key>
@@ -63,6 +63,11 @@
     <dict>
         <key>SHIMMY_BOOT_TIMEOUT</key>
         <string>10</string>
+        <!-- Draw the menu straight to the display (direct CoreDisplay scanout present) before
+             WindowServer. Off by default in a plain ./chooser run so headless validation never
+             flips the live screen; the installed daemon turns it on. -->
+        <key>SHIMMY_PRESENT</key>
+        <string>1</string>
     </dict>
 </dict>
 </plist>

@@ -151,10 +151,18 @@ build_mac_app() {
 }
 
 build_chooser() {
-  # The boot chooser: a tiny, dependency-free root LaunchDaemon binary that runs BEFORE
-  # WindowServer and branches macOS vs shimmy. Only libsystem (servers/bootstrap + mach).
+  # The boot chooser: a root LaunchDaemon binary that runs BEFORE WindowServer and branches
+  # macOS vs shimmy. Two capabilities beyond libsystem (servers/bootstrap + mach):
+  #   * on-screen menu  — an RGBA8 framebuffer rendered with the embedded 8x13 font and presented
+  #     straight to the display via the PRIVATE CoreDisplay_Display_PresentIOSurface. CoreDisplay
+  #     is NOT linked (not a linkable dylib on every Xcode version); it is dlopen'd at runtime, so
+  #     only IOSurface + CoreGraphics are link-time deps.
+  #   * keyboard        — IOHIDManager (IOKit HID, WindowServer-free) with a /dev/console fallback,
+  #     which needs IOKit + CoreFoundation (CFRunLoop for the HID event delivery).
   echo "== chooser =="
-  clang $CFLAGS -o chooser $SRC/chooser.c
+  clang $CFLAGS -o chooser $SRC/chooser.c \
+    -framework CoreFoundation -framework IOKit \
+    -framework IOSurface -framework CoreGraphics
   codesign --force --sign - chooser
   stamp chooser
   echo "   -> ./chooser"

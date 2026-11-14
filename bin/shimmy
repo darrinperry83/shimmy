@@ -899,6 +899,7 @@ def build_takeover_plist(dst):
     env["SHIMMY_WINDOWSERVER_CMD"] = WINDOWSERVER_BIN_DST
     env["SHIMMY_WINDOWSERVER_SYSTEM"] = "1"
     env["SHIMMY_WARM_SWITCH_KICKSTART"] = "1"
+    env["SHIMMY_PRESENT"] = "1"
     with open(dst, "wb") as f:
         plistlib.dump(pl, f)
     return dst
