@@ -29,8 +29,8 @@ Commands:
     shimmy recover              the recovery shell (graphical installer / scripted backend)
     shimmy boot default <target>  set the boot chooser default (macOS | shimmy) — persistent
     shimmy boot once <target>     boot a target ONCE, then auto-revert to macOS (the safe way)
-    shimmy takeover             rewrite the WindowServer job to run the stand-in (backup first)
-    shimmy release              restore the backed-up WindowServer job + remove the stand-in
+    shimmy takeover             install a /Library WindowServer override (Label=com.apple.WindowServer)
+    shimmy release              remove the override + stand-in + boot.conf (real WindowServer returns)
 
 The YAML (or JSON) schema is the first cut; the DESIGN-NIX.md Nix-flavored
 evaluator is the stated future direction.  This loader therefore *also* detects
@@ -876,22 +876,29 @@ def cmd_recover(args):
 
 
 # --------------------------------------------------------------------------- #
-# WindowServer job rewrite — takeover / release
+# WindowServer override — takeover / release
 # --------------------------------------------------------------------------- #
-# SIP is DISABLED on this machine, so instead of an /Library override we edit the ORIGINAL
-# /System/Library/LaunchDaemons/com.apple.WindowServer.plist IN PLACE. `takeover`:
-#   1. backs up the pristine original to BACKUP_DIR (once),
-#   2. rewrites its ProgramArguments to /usr/local/sbin/shim_windowserver,
-#   3. adds EnvironmentVariables RDNATIVE_WINDOWSERVER_SYSTEM=1 (Label / MachServices /
-#      POSIXSpawnType / _Conclave are kept as-is), and
+# /System is the SEALED system volume (read-only even with SIP disabled), so `takeover` does NOT
+# edit /System/Library/LaunchDaemons/com.apple.WindowServer.plist in place. Instead it installs an
+# OVERRIDE at /Library/LaunchDaemons/com.apple.WindowServer.plist (the writable data volume) with
+# the SAME Label (com.apple.WindowServer); launchd gives the /Library copy precedence over /System.
+# `takeover`:
+#   1. reads the pristine /System plist ONCE (read-only) to copy its Label / MachServices /
+#      POSIXSpawnType / _Conclave into the override,
+#   2. backs up that pristine /System plist (once) to BACKUP_DIR — for REFERENCE only,
+#   3. writes the override (ProgramArguments = /usr/local/sbin/shim_windowserver,
+#      EnvironmentVariables RDNATIVE_WINDOWSERVER_SYSTEM=1, full MachServices verbatim) to
+#      /Library/LaunchDaemons/com.apple.WindowServer.plist, and
 #   4. installs the stand-in binary to /usr/local/sbin/shim_windowserver.
-# The stand-in then checks in com.apple.windowserver (+ .active) directly
+# /System is never written. The stand-in checks in com.apple.windowserver (+ .active) directly
 # (ws_bootstrap_check_in_system(), gated on RDNATIVE_WINDOWSERVER_SYSTEM=1 + root).
 #
-# `release` restores the backup (cp back over the system plist) and removes the stand-in + the
-# boot.conf. Both take effect at the NEXT boot — the live WindowServer is never disturbed.
+# `release` removes the /Library override, the stand-in, and the boot.conf; launchd then falls back
+# to the untouched /System plist, so the real WindowServer returns. Both take effect at the NEXT
+# boot — the live WindowServer is never disturbed.
 WINDOWSERVER_BIN_DST = "/usr/local/sbin/shim_windowserver"
 SYSTEM_WINDOWSERVER_PLIST = "/System/Library/LaunchDaemons/com.apple.WindowServer.plist"
+OVERRIDE_WINDOWSERVER_PLIST = "/Library/LaunchDaemons/com.apple.WindowServer.plist"
 BACKUP_DIR = "/Library/Application Support/shimmy"
 ORIG_PLIST_BACKUP = BACKUP_DIR + "/com.apple.WindowServer.plist.orig"
 
@@ -925,8 +932,9 @@ def cmd_takeover(args):
     else:
         print("==> takeover")
 
-    # Edit the ORIGINAL system plist in place (SIP disabled). Read it once, keep Label /
-    # MachServices / POSIXSpawnType / _Conclave, and only rewrite ProgramArguments + add the env.
+    # Read the pristine /System plist READ-ONLY: copy its Label / MachServices / POSIXSpawnType /
+    # _Conclave into the override, then only rewrite ProgramArguments + add the env. /System itself
+    # is never written.
     try:
         with open(SYSTEM_WINDOWSERVER_PLIST, "rb") as f:
             pl = plistlib.load(f)
@@ -935,49 +943,49 @@ def cmd_takeover(args):
         return 1
 
     old_args = pl.get("ProgramArguments")
-    # The pristine backup is written BEFORE the in-memory edit.
-    backup_tmp = REPO / "build" / "com.apple.WindowServer.plist.orig"
-    edited_tmp = REPO / "build" / "com.apple.WindowServer.plist.edited"
-    with open(backup_tmp, "wb") as f:
-        plistlib.dump(pl, f)
+    # Build the override in memory and dump it to a temp file for the sudo-cp + a plutil -lint.
+    override_tmp = REPO / "build" / "com.apple.WindowServer.plist.override"
     pl["ProgramArguments"] = [WINDOWSERVER_BIN_DST]
     env = pl.setdefault("EnvironmentVariables", {})
     env["RDNATIVE_WINDOWSERVER_SYSTEM"] = "1"
-    with open(edited_tmp, "wb") as f:
+    with open(override_tmp, "wb") as f:
         plistlib.dump(pl, f)
 
-    print("  system plist : %s" % SYSTEM_WINDOWSERVER_PLIST)
+    print("  override source: %s (read-only)" % SYSTEM_WINDOWSERVER_PLIST)
+    print("  override       : %s" % OVERRIDE_WINDOWSERVER_PLIST)
     print("  ProgramArguments: %r -> %r" % (old_args, [WINDOWSERVER_BIN_DST]))
     print("  EnvironmentVariables: + RDNATIVE_WINDOWSERVER_SYSTEM=1")
-    print("  (Label / MachServices / POSIXSpawnType / _Conclave kept as-is)")
-    print("  stand-in     : %s -> %s" % (ws_bin, WINDOWSERVER_BIN_DST))
-    print("  system backup: %s -> %s (once)" % (SYSTEM_WINDOWSERVER_PLIST, ORIG_PLIST_BACKUP))
+    print("  (Label / MachServices / POSIXSpawnType / _Conclave copied verbatim)")
+    print("  stand-in       : %s -> %s" % (ws_bin, WINDOWSERVER_BIN_DST))
+    print("  reference backup: %s -> %s (once)" % (SYSTEM_WINDOWSERVER_PLIST, ORIG_PLIST_BACKUP))
 
     rc = 0
     rc |= _sudo(["mkdir", "-p", "/usr/local/sbin"], args.dry_run)
+    rc |= _sudo(["mkdir", "-p", "/Library/LaunchDaemons"], args.dry_run)
     rc |= _sudo(["mkdir", "-p", BACKUP_DIR], args.dry_run)
     rc |= _sudo(["install", "-m", "0755", str(ws_bin), WINDOWSERVER_BIN_DST], args.dry_run)
-    # Back up the pristine original ONCE (skip when a backup already exists).
-    rc |= _sudo(["sh", "-c",
-                 "test -f %s || cp %s %s" % (shlex.quote(ORIG_PLIST_BACKUP),
-                                             SYSTEM_WINDOWSERVER_PLIST,
-                                             shlex.quote(ORIG_PLIST_BACKUP))],
-                args.dry_run)
-    # Rewrite the original in place.
-    rc |= _sudo(["cp", str(edited_tmp), SYSTEM_WINDOWSERVER_PLIST], args.dry_run)
+    # Back up the pristine /System plist ONCE, for reference (skip when a backup exists).
+    if args.dry_run:
+        print("  # sudo cp %s %s   (only when no backup exists yet)"
+              % (shlex.quote(SYSTEM_WINDOWSERVER_PLIST), shlex.quote(ORIG_PLIST_BACKUP)))
+    elif not os.path.exists(ORIG_PLIST_BACKUP):
+        rc |= _sudo(["cp", SYSTEM_WINDOWSERVER_PLIST, ORIG_PLIST_BACKUP], False)
+    # Install the override to /Library (launchd prefers it over /System for the same Label).
+    rc |= _sudo(["cp", str(override_tmp), OVERRIDE_WINDOWSERVER_PLIST], args.dry_run)
 
     if args.dry_run:
-        print("  # (validate the edited plist with: plutil -lint %s)" % edited_tmp)
-        print("NOTE: rewrites %s in place (SIP disabled). Takes effect at the NEXT boot; "
-              "the live WindowServer is untouched." % SYSTEM_WINDOWSERVER_PLIST)
+        print("  # (validate the override with: plutil -lint %s)" % override_tmp)
+        print("NOTE: installs %s (the data-volume override). /System is NOT touched. "
+              "Takes effect at the NEXT boot; the live WindowServer is untouched."
+              % OVERRIDE_WINDOWSERVER_PLIST)
         return 0
 
     if rc == 0:
-        print("rewrote %s to run the stand-in, installed stand-in -> %s"
-              % (SYSTEM_WINDOWSERVER_PLIST, WINDOWSERVER_BIN_DST))
-        print("backed up the original system plist -> %s" % ORIG_PLIST_BACKUP)
+        print("installed the override %s (Label=com.apple.WindowServer) and the stand-in -> %s"
+              % (OVERRIDE_WINDOWSERVER_PLIST, WINDOWSERVER_BIN_DST))
+        print("backed up the original system plist (reference) -> %s" % ORIG_PLIST_BACKUP)
         print("REBOOT to activate. Recovery: `shimmy release`, or Cmd+R/Cmd+S then "
-              "`cp %s %s`." % (ORIG_PLIST_BACKUP, SYSTEM_WINDOWSERVER_PLIST))
+              "`rm %s`." % OVERRIDE_WINDOWSERVER_PLIST)
     return rc
 
 
@@ -987,25 +995,23 @@ def cmd_release(args):
     else:
         print("==> release")
 
-    print("  restore: %s -> %s" % (ORIG_PLIST_BACKUP, SYSTEM_WINDOWSERVER_PLIST))
+    print("  remove override: %s  (launchd falls back to %s)"
+          % (OVERRIDE_WINDOWSERVER_PLIST, SYSTEM_WINDOWSERVER_PLIST))
 
     rc = 0
-    # Restore the pristine original over the system plist (no-op when no backup exists).
-    rc |= _sudo(["sh", "-c",
-                 "test -f %s && cp %s %s" % (shlex.quote(ORIG_PLIST_BACKUP),
-                                             shlex.quote(ORIG_PLIST_BACKUP),
-                                             SYSTEM_WINDOWSERVER_PLIST)],
-                args.dry_run)
+    # Remove the /Library override; launchd then uses the untouched /System plist.
+    rc |= _sudo(["rm", "-f", OVERRIDE_WINDOWSERVER_PLIST], args.dry_run)
     # Remove the stand-in + boot.conf (+ legacy chooser artifacts).
     rc |= _sudo(["rm", "-f", WINDOWSERVER_BIN_DST, BOOT_CONF_PATH,
                  LEGACY_CHOOSER_PLIST_DST, LEGACY_CHOOSER_BIN_DST], args.dry_run)
 
     if args.dry_run:
-        print("NOTE: restoring the real WindowServer; no live service is touched.")
+        print("NOTE: removes the /Library override; the real WindowServer job returns from "
+              "/System at the next boot. /System is NOT touched.")
         return 0
     if rc == 0:
-        print("restored %s and removed the stand-in + boot.conf — the real WindowServer job "
-              "returns at the next boot." % SYSTEM_WINDOWSERVER_PLIST)
+        print("removed %s and the stand-in + boot.conf — the real WindowServer job "
+              "returns at the next boot." % OVERRIDE_WINDOWSERVER_PLIST)
     return rc
 
 
@@ -1123,15 +1129,16 @@ def main(argv=None):
                          help="print the install command without exec")
 
     take_p = sub.add_parser("takeover",
-                            help="rewrite the WindowServer job to run the stand-in (backup first)")
+                            help="install a /Library WindowServer override to run the stand-in "
+                                 "(backup /System for reference)")
     take_p.add_argument("--dry-run", action="store_true",
-                        help="print the sudo commands + edited plist without installing")
+                        help="print the sudo commands + override plist without installing")
     take_p.add_argument("--windowserver", default=None,
                         help="path to the shim_windowserver stand-in binary to install "
                              "(default: $SHIMMY_WINDOWSERVER_BIN)")
 
     rel_p = sub.add_parser("release",
-                           help="restore the backed-up WindowServer job + remove the stand-in")
+                           help="remove the /Library WindowServer override + stand-in + boot.conf")
     rel_p.add_argument("--dry-run", action="store_true",
                        help="print the sudo commands without removing")
 

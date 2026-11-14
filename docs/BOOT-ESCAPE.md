@@ -1,9 +1,15 @@
 # Boot escape: getting back to macOS
 
 The WindowServer takeover is designed so that **macOS is always reachable**, even if the stand-in,
-the keyboard, and the display all fail. The takeover edits the original
-`/System/Library/LaunchDaemons/com.apple.WindowServer.plist` **in place** (SIP is disabled), after
-backing it up — so recovery is simply restoring that backup.
+the keyboard, and the display all fail. The takeover does **not** edit `/System` — `/System` is the
+sealed system volume and is read-only even with SIP disabled. Instead it installs an **override** at
+
+    /Library/LaunchDaemons/com.apple.WindowServer.plist
+
+(the writable data volume) with the same `Label` (`com.apple.WindowServer`). launchd gives the
+`/Library` copy precedence over the untouched `/System` copy, so the stand-in runs as the
+WindowServer job. Recovery is therefore a single `rm` of that override — launchd then falls back to
+`/System` and the real WindowServer returns.
 
 The escapes, in order of preference:
 
@@ -22,21 +28,20 @@ From a working macOS (or any shell where the repo is reachable):
 sudo ./bin/shimmy release
 ```
 
-This restores the backed-up original plist over `/System/Library/LaunchDaemons/com.apple.WindowServer.plist`
-and removes the stand-in (`/usr/local/sbin/shim_windowserver`) and the boot config
-(`/usr/local/etc/shimmy/boot.conf`). The real WindowServer job returns at the next boot.
+This removes the override (`/Library/LaunchDaemons/com.apple.WindowServer.plist`), the stand-in
+(`/usr/local/sbin/shim_windowserver`), and the boot config (`/usr/local/etc/shimmy/boot.conf`).
+The real WindowServer job returns at the next boot.
 
 ---
 
 ## 2. Single-user mode (Cmd+S)
 
 Hold **Cmd+S** at boot. This boots the main macOS in single-user mode, which skips launchd (and
-therefore the edited WindowServer job), dropping to a root shell.
+therefore the WindowServer override), dropping to a root shell.
 
 ```sh
-/sbin/mount -uw /                                        # mount the root filesystem writable
-cp '/Library/Application Support/shimmy/com.apple.WindowServer.plist.orig' \
-   /System/Library/LaunchDaemons/com.apple.WindowServer.plist
+/sbin/mount -uw /                                        # make the data volume writable (if needed)
+rm /Library/LaunchDaemons/com.apple.WindowServer.plist   # drop the override; launchd falls back to /System
 reboot
 ```
 
@@ -50,19 +55,17 @@ different macOS install and is immune to anything shimmy did.
 From **Utilities -> Terminal**:
 
 ```sh
-diskutil list                                            # find the main volume (e.g. "Macintosh HD", disk3s1)
-diskutil mount disk3s1                                   # mount it at /Volumes/Macintosh HD
-cp '/Volumes/Macintosh HD/Library/Application Support/shimmy/com.apple.WindowServer.plist.orig' \
-   '/Volumes/Macintosh HD/System/Library/LaunchDaemons/com.apple.WindowServer.plist'
+diskutil list                                            # find the Data volume (e.g. "Macintosh HD - Data")
+diskutil mount "Macintosh HD - Data"                     # mount it under /Volumes
+rm '/Volumes/Macintosh HD - Data/Library/LaunchDaemons/com.apple.WindowServer.plist'
 ```
 
-Then reboot.
+Then reboot. Removing the override is enough: launchd falls back to the untouched
+`/System/Library/LaunchDaemons/com.apple.WindowServer.plist`.
 
-> **Note:** `/System` is normally SIP-protected, but SIP is **disabled** on this machine (which is
-> why the takeover can edit the plist in place in the first place). In Recovery the write to
-> `/System/Library/LaunchDaemons/...` therefore succeeds. If SIP were re-enabled, remove the backup
-> restore and instead reboot into single-user mode with `csrutil disable` from Recovery, or use
-> `shimmy release` from a normal boot.
+> **Note:** the override lives on the **data volume**, which is writable — no `csrutil` / SIP step
+> is needed to remove it. `/System` itself is never modified by shimmy, so there is nothing to
+> restore there.
 
 ---
 
@@ -71,16 +74,19 @@ Then reboot.
 The stand-in's server loop handles SIGTERM/SIGINT as a clean exit that releases the two
 `com.apple.windowserver` receive rights it checked in. If the Linux guest (or the stand-in's own
 logic) exits cleanly, the service goes dead and the real WindowServer can re-check-in and take
-over. This depends on the stand-in still running well enough to exit cleanly, so the restore
-commands above are the dependable path.
+over. This depends on the stand-in still running well enough to exit cleanly, so the `rm` / release
+above are the dependable path.
 
 ---
 
-## The backup
+## The reference backup
 
-`shimmy takeover` copies the original system plist aside (once) to
-`/Library/Application Support/shimmy/com.apple.WindowServer.plist.orig` **before** rewriting it.
-The backup is the pristine original, and it is exactly what `shimmy release` (or a manual `cp`)
-restores. Keep it; without it the only manual fix is to re-enter the original
-`ProgramArguments` (`/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer`
-`-daemon`) and drop the added `RDNATIVE_WINDOWSERVER_SYSTEM` environment variable by hand.
+`shimmy takeover` copies the original `/System` plist aside (once) to
+
+    /Library/Application Support/shimmy/com.apple.WindowServer.plist.orig
+
+This is for **reference only** — it is the pristine original job definition, so you can see exactly
+what the real WindowServer looked like (its `ProgramArguments`
+`/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer -daemon`, its
+`MachServices`, `POSIXSpawnType`, and `_Conclave`). Recovery never needs it: `/System` is untouched,
+and removing the override is the entire recovery.
