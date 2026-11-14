@@ -4,14 +4,15 @@
 // registers the com.apple.windowserver bootstrap service). The on-screen present
 // (IOMFB + CoreDisplay) is BLOCKED pre-WindowServer (the framebuffer surface returns
 // kIOReturnNotPrivileged and the display id is 0x0), so the chooser is display-less:
-// it reads a config default (/usr/local/etc/shimmy/boot.conf) and a /dev/console key,
+// it reads a config default + one-shot (/usr/local/etc/shimmy/boot.conf) and a /dev/console key,
 // and either:
 //   * key o/O/1/m/M/Enter/timeout -> boot macOS (kickstart the real WindowServer), or
 //   * key 2/l/L                   -> boot shimmy/Linux (fork+exec the stand-in WindowServer).
 //
-// The key reader decides the branch; with no key (timeout) it falls back to the config
-// default. macOS is the safe default everywhere: a missing/unparseable config, an unknown
-// key, and the 'o'/'O' escape hatch all resolve to macOS.
+// The key reader decides the branch; with no key (timeout) it falls back to the config default
+// (`default=macOS|shimmy`) or a one-shot (`once=macOS|shimmy`, which is cleared to macOS BEFORE
+// the branch so the NEXT boot is macOS). macOS is the safe default everywhere: a
+// missing/unparseable config, an unknown key, and the 'o'/'O' escape hatch all resolve to macOS.
 //
 // NOTE ON RECONSTRUCTION: the source repo this file originally lived in
 // (/tmp/rmatrixos-shim) was wiped before this task ran; only the installed binary
@@ -126,19 +127,36 @@ static int               g_key_tail;        // next read slot
 static int               g_console_fd = 0;  // fd the console fallback reads (0 = stdin)
 
 // ---------------------------------------------------------------------------------------------
-// Config default (display-less boot target).
+// Config default + one-shot (display-less boot target).
 
-// The config file `shimmy boot default <target>` writes, and the chooser reads at boot.
-// The canonical path is /usr/local/etc/shimmy/boot.conf; SHIMMY_BOOT_CONF overrides it for
-// headless validation (and the CLI). Safety first: any missing/unreadable/unparseable file
-// resolves to macOS, and the escape-hatch key ('o'/'O') always overrides to macOS regardless.
+// The config file `shimmy boot default <target>` / `shimmy boot once <target>` writes, and the
+// chooser reads at boot. The canonical path is /usr/local/etc/shimmy/boot.conf; SHIMMY_BOOT_CONF
+// overrides it for headless validation (and the CLI). Safety first: any
+// missing/unreadable/unparseable file resolves to macOS, and the escape-hatch key ('o'/'O')
+// always overrides to macOS regardless.
 #ifndef SHIMMY_BOOT_CONF_PATH
 #define SHIMMY_BOOT_CONF_PATH "/usr/local/etc/shimmy/boot.conf"
 #endif
 
-// Read the configured default boot target. Returns 1 = shimmy, 0 = macOS. The only value that
-// selects shimmy is an exact `default=shimmy` line; anything else (missing file, `default=macOS`,
-// a malformed line) is the safe macOS default.
+// Clear the one-shot by rewriting the boot.conf to the safe `default=macOS`. This is done
+// BEFORE the branch is taken, so even a crash mid-boot leaves macOS as the next default. A
+// failed write is non-fatal: a missing/partial file also resolves to macOS (the only values
+// that select shimmy are an exact `default=shimmy` or `once=shimmy` line).
+static void clear_boot_conf(const char* path) {
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) return;
+    const char* content = "default=macOS\n";
+    (void)write(fd, content, strlen(content));
+    close(fd);
+}
+
+// Read the configured boot target. Returns 1 = shimmy, 0 = macOS.
+//   * `once=shimmy`     -> shimmy this boot, and the file is cleared (rewritten to
+//                         `default=macOS`) BEFORE branching, so the NEXT boot is macOS.
+//   * `once=macOS`      -> macOS this boot, and the file is cleared (harmless).
+//   * `default=shimmy`  -> shimmy (persistent; nothing is cleared).
+//   * anything else (missing file, `default=macOS`, a malformed line) -> macOS.
+// `once=` takes precedence over `default=` regardless of line order.
 static int config_default_branch(void) {
     const char* path = getenv("SHIMMY_BOOT_CONF");
     if (!path || !path[0]) path = SHIMMY_BOOT_CONF_PATH;
@@ -146,24 +164,42 @@ static int config_default_branch(void) {
     FILE* f = fopen(path, "r");
     if (!f) return 0;
 
-    int branch = 0;
+    int branch = 0;   // persistent default: macOS unless a `default=shimmy` line appears
+    int once = -1;    // one-shot: -1 = absent, 0 = macOS, 1 = shimmy
     char line[256];
     while (fgets(line, sizeof line, f)) {
         char* s = line;
         while (*s == ' ' || *s == '\t') s++;
-        if (strncmp(s, "default", 7) != 0) continue;
-        char* p = s + 7;
-        while (*p == ' ' || *p == '\t') p++;
-        if (*p != '=') continue;
-        p++;
-        while (*p == ' ' || *p == '\t') p++;
-        char* e = p + strlen(p);
-        while (e > p && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' ' || e[-1] == '\t'))
+
+        int is_once = 0;
+        if (strncmp(s, "once", 4) == 0) {
+            is_once = 1;
+            s += 4;
+        } else if (strncmp(s, "default", 7) == 0) {
+            s += 7;
+        } else {
+            continue;
+        }
+
+        while (*s == ' ' || *s == '\t') s++;
+        if (*s != '=') continue;
+        s++;
+        while (*s == ' ' || *s == '\t') s++;
+        char* e = s + strlen(s);
+        while (e > s && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' ' || e[-1] == '\t'))
             *--e = '\0';
-        branch = (strcmp(p, "shimmy") == 0) ? 1 : 0;
-        break;
+        int v = (strcmp(s, "shimmy") == 0) ? 1 : 0;
+        if (is_once) once = v;
+        else         branch = v;
     }
     fclose(f);
+
+    if (once >= 0) {
+        fprintf(stderr, "chooser: one-shot boot consumed (%s); cleared -> default=macOS\n",
+                once ? "shimmy" : "macOS");
+        clear_boot_conf(path);
+        return once;
+    }
     return branch;
 }
 

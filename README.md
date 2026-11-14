@@ -170,13 +170,18 @@ The default boot target lives in `/usr/local/etc/shimmy/boot.conf` and is **macO
 explicitly change it:
 
 ```sh
-sudo ./bin/shimmy boot default macOS      # the safe default
-sudo ./bin/shimmy boot default shimmy     # opt in to boot Linux by default
+sudo ./bin/shimmy boot once shimmy       # SAFE: boot shimmy once, auto-revert to macOS
+sudo ./bin/shimmy boot default macOS     # the safe default
+sudo ./bin/shimmy boot default shimmy    # RISKY: boot Linux on EVERY boot (persistent)
 ```
 
-Holding `o` (or `O`) at boot always drops to macOS, regardless of the config default. The chooser
-is reversible (`sudo ./bin/shimmy release`) and fail-safe: if the stand-in crashes, the watchdog
-relaunches the real WindowServer, so macOS always comes back. See
+`boot once shimmy` writes a one-shot that the chooser clears back to `default=macOS` **before**
+it branches — so the next reboot (or a power-button press) is always macOS again, with no
+keyboard or display needed. This is the safe way to try shimmy when you "can't afford a mistake";
+`boot default shimmy` is the persistent option and should only be used when you really want
+Linux every boot. Holding `o` (or `O`) at boot always drops to macOS, regardless of the config.
+The chooser is reversible (`sudo ./bin/shimmy release`) and fail-safe: if the stand-in crashes,
+the watchdog relaunches the real WindowServer, so macOS always comes back. See
 [DESIGN-WINDOWSERVER-REPLACEMENT.md](docs/DESIGN-WINDOWSERVER-REPLACEMENT.md) and
 [DESIGN-BOOT-CHOOSER.md](docs/DESIGN-BOOT-CHOOSER.md).
 

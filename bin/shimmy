@@ -27,7 +27,8 @@ Commands:
     shimmy run                  derive the env and exec run.sh
     shimmy build                exec install.sh --rootfs <profile>
     shimmy recover              the recovery shell (graphical installer / scripted backend)
-    shimmy boot default <target>  set the boot chooser default (macOS | shimmy)
+    shimmy boot default <target>  set the boot chooser default (macOS | shimmy) — persistent
+    shimmy boot once <target>     boot a target ONCE, then auto-revert to macOS (the safe way)
     shimmy takeover             install the boot chooser (macOS stays the default)
     shimmy release              remove the boot chooser (restore normal macOS boot)
 
@@ -976,15 +977,59 @@ def cmd_release(args):
 
 
 # --------------------------------------------------------------------------- #
-# boot chooser default target
+# boot chooser target: default (persistent) + once (one-shot)
 # --------------------------------------------------------------------------- #
 # The chooser reads /usr/local/etc/shimmy/boot.conf (`default=macOS|shimmy`) at boot when no
 # key is pressed. macOS is the SAFE default; `takeover` never writes this file, so it stays
 # macOS until the user explicitly runs `shimmy boot default shimmy`. The chooser's escape-hatch
 # key ('o'/'O') always drops to macOS regardless of this setting.
+#
+# `boot once <target>` writes `once=<target>` instead: the chooser boots that target ONCE and
+# clears the file (back to `default=macOS`) BEFORE branching, so the NEXT boot — whether by
+# reboot or power-button — is macOS again. This is the safe way to try shimmy once; `boot
+# default shimmy` is the persistent (risky) option.
 
 def boot_conf_path():
     return os.environ.get("SHIMMY_BOOT_CONF") or BOOT_CONF_PATH
+
+
+def _boot_conf_write(kind, target, dry_run):
+    """Write `kind=target` to the boot.conf via the same sudo-cp temp-file dance as takeover.
+    kind is 'default' (persistent) or 'once' (one-shot, auto-reverts to macOS)."""
+    path = boot_conf_path()
+    if dry_run:
+        print("==> boot %s %s (dry-run)" % (kind, target))
+        print("  # mkdir -p %s" % os.path.dirname(path))
+        print("  # write %s" % path)
+        print("  # %s=%s" % (kind, target))
+        if kind == "once":
+            print("NOTE: one-shot — boots %s ONCE, then auto-reverts to macOS; "
+                  "reboot (or power-button) always returns to macOS." % target)
+        else:
+            print("NOTE: takes effect at the NEXT boot; 'o'/'O' at the chooser still forces "
+                  "macOS.")
+        return 0
+
+    parent = os.path.dirname(path)
+    # /usr/local/etc/shimmy is root-owned; write a temp file and sudo-cp it (same as takeover).
+    import tempfile
+    fd, tmp = tempfile.mkstemp(suffix=".boot.conf")
+    with os.fdopen(fd, "w") as f:
+        f.write("%s=%s\n" % (kind, target))
+    rc = _sudo(["mkdir", "-p", parent], False)
+    rc |= _sudo(["cp", tmp, path], False)
+    os.unlink(tmp)
+    if rc:
+        print("shimmy: boot %s write failed (run with sudo)" % kind, file=sys.stderr)
+        return 1
+    print("boot %s -> %s (wrote %s)" % (kind, target, path))
+    if kind == "once":
+        print("NOTE: one-shot — boots %s ONCE, then auto-reverts to macOS; "
+              "reboot (or power-button) always returns to macOS." % target)
+    else:
+        print("NOTE: takes effect at the NEXT boot; 'o'/'O' at the chooser still forces "
+              "macOS.")
+    return 0
 
 
 def cmd_boot_default(args):
@@ -995,31 +1040,18 @@ def cmd_boot_default(args):
         print("shimmy: boot default must be one of macOS | shimmy (got %r)" % target,
               file=sys.stderr)
         return 1
+    return _boot_conf_write("default", target, args.dry_run)
 
-    path = boot_conf_path()
-    if args.dry_run:
-        print("==> boot default %s (dry-run)" % target)
-        print("  # mkdir -p %s" % os.path.dirname(path))
-        print("  # write %s" % path)
-        print("  # default=%s" % target)
-        print("NOTE: takes effect at the NEXT boot; 'o'/'O' at the chooser still forces macOS.")
-        return 0
 
-    parent = os.path.dirname(path)
-    # /usr/local/etc/shimmy is root-owned; write a temp file and sudo-cp it (same as takeover).
-    import tempfile
-    fd, tmp = tempfile.mkstemp(suffix=".boot.conf")
-    with os.fdopen(fd, "w") as f:
-        f.write("default=%s\n" % target)
-    rc = _sudo(["mkdir", "-p", parent], False)
-    rc |= _sudo(["cp", tmp, path], False)
-    os.unlink(tmp)
-    if rc:
-        print("shimmy: boot default write failed (run with sudo)", file=sys.stderr)
+def cmd_boot_once(args):
+    target = args.target
+    if target == "macos":
+        target = "macOS"          # normalize the lowercase form
+    if target not in BOOT_TARGETS:
+        print("shimmy: boot once must be one of macOS | shimmy (got %r)" % target,
+              file=sys.stderr)
         return 1
-    print("boot default -> %s (wrote %s)" % (target, path))
-    print("NOTE: takes effect at the NEXT boot; 'o'/'O' at the chooser still forces macOS.")
-    return 0
+    return _boot_conf_write("once", target, args.dry_run)
 
 
 def main(argv=None):
@@ -1071,10 +1103,15 @@ def main(argv=None):
     boot_p = sub.add_parser("boot", help="boot chooser settings")
     bootsub = boot_p.add_subparsers(dest="boot_action")
     bootdef_p = bootsub.add_parser(
-        "default", help="set the boot default target (macOS | shimmy)")
+        "default", help="set the boot default target (macOS | shimmy) — persistent")
     bootdef_p.add_argument("target", help="macOS or shimmy")
     bootdef_p.add_argument("--dry-run", action="store_true",
                            help="print the file write without touching the system")
+    bootonce_p = bootsub.add_parser(
+        "once", help="boot a target ONCE then auto-revert to macOS (the safe way)")
+    bootonce_p.add_argument("target", help="macOS or shimmy")
+    bootonce_p.add_argument("--dry-run", action="store_true",
+                            help="print the file write without touching the system")
 
     rec_p = sub.add_parser("recover",
                            help="recovery shell: graphical installer / scripted "
@@ -1130,6 +1167,8 @@ def main(argv=None):
         if args.command == "boot":
             if args.boot_action == "default":
                 return cmd_boot_default(args)
+            if args.boot_action == "once":
+                return cmd_boot_once(args)
             boot_p.print_help()
             return 1
         if args.command == "recover":
