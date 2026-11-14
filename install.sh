@@ -8,6 +8,8 @@
 #   ./install.sh                    # arch (bare base; boots to the TTY login)
 #   ./install.sh --rootfs omarchy   # Arch + Hyprland + Quickshell, pre-configured
 #   ./install.sh --rootfs kiosk     # minimal base for one locked app (planned)
+#   ./install.sh --rootfs recovery  # minimal recovery rootfs (graphical installer)
+#   ./install.sh --dry-run [--rootfs <p>]   # print the resolved package set (no build/install)
 #   ./install.sh --desktop kde      # legacy: force a KDE Plasma desktop install
 #
 # Produces a rootfs/ directory (NOT stored in git) and a built shim.
@@ -17,6 +19,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DESKTOP="hyprland"
 DESKTOP_EXPLICIT=0
 ROOTFS_PROFILE="arch"
+DRY_RUN=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --desktop)
@@ -25,6 +28,7 @@ while [ $# -gt 0 ]; do
     --rootfs)
       ROOTFS_PROFILE="${2:-arch}"
       [ $# -ge 2 ] && shift 2 || shift ;;
+    --dry-run) DRY_RUN=1; shift ;;
     *) DESKTOP="$1"; DESKTOP_EXPLICIT=1; shift ;;
   esac
 done
@@ -32,15 +36,73 @@ ROOTFS="$HERE/rootfs"
 ARCH_TARBALL="ArchLinuxARM-aarch64-latest.tar.gz"
 ARCH_URL="http://os.archlinuxarm.org/os/$ARCH_TARBALL"
 
+# The recovery profile package set: a minimal rootfs that boots straight to the
+# full-screen graphical installer (Qt6) with WiFi (wpa_supplicant + dhcpcd),
+# the reinstall + disassembly tools (binutils/gdb/python), and the hardware
+# bridges (bluez/bluez-utils -> host CoreBluetooth; usbutils -> host IOKit).
+RECOVERY_PKGS="busybox coreutils wpa_supplicant dhcpcd binutils gdb python \
+qt6-base qt6-wayland pyside6 cage bluez bluez-utils usbutils"
+
 # --- 0. prerequisites ---------------------------------------------------------
 command -v curl >/dev/null || { echo "need curl"; exit 1; }
 command -v clang >/dev/null || { echo "need clang"; exit 1; }
 
-# --- 1. build the shim --------------------------------------------------------
+# --- 1. resolve the profile's package set (pure; no side effects) -------------
+INSTALL_DESKTOP=0
+case "$ROOTFS_PROFILE" in
+  omarchy) INSTALL_DESKTOP=1 ;;
+  recovery|kiosk|arch) ;;
+  *) echo "    ! unknown rootfs profile '$ROOTFS_PROFILE' (arch|omarchy|kiosk|recovery); assuming bare arch" ;;
+esac
+[ "$DESKTOP_EXPLICIT" = "1" ] && INSTALL_DESKTOP=1
+
+DESKTOP_PKGS=""
+EXTRA_PKGS=""
+if [ "$INSTALL_DESKTOP" = "1" ]; then
+  case "$DESKTOP" in
+    kde|plasma) DESKTOP_PKGS="plasma-meta konsole dolphin sddm" ;;
+    *)
+      if [ "$ROOTFS_PROFILE" = "omarchy" ]; then
+        DESKTOP_PKGS="hyprland quickshell foot gtk3 gtk4 noto-fonts"
+      else
+        DESKTOP_PKGS="hyprland foot gtk3 gtk4 noto-fonts"
+      fi
+      ;;
+  esac
+  EXTRA_PKGS="mesa mesa-utils libglvnd wayland wayland-protocols fastfetch btop htop chromium mpv"
+fi
+
+# --- 2. dry-run: report the resolved plan and stop ----------------------------
+if [ "$DRY_RUN" = "1" ]; then
+  echo "==> rootfs profile: $ROOTFS_PROFILE (dry-run)"
+  if [ "$ROOTFS_PROFILE" = "recovery" ]; then
+    echo "==> recovery package set: $RECOVERY_PKGS"
+    echo "    -> install bin/shimmy + bin/shimmy-installer into rootfs (shimmy recover TUI/backend)"
+    echo "    -> autologin root on tty1; launch: cage -s -- /usr/local/bin/shimmy-installer"
+    echo "    -> devices: bluez/bluez-utils (CoreBluetooth HCI) + usbutils (IOKit /dev/bus/usb)"
+  elif [ "$INSTALL_DESKTOP" = "1" ]; then
+    echo "==> desktop profile '$ROOTFS_PROFILE' (desktop=$DESKTOP)"
+    echo "==> package set: $DESKTOP_PKGS $EXTRA_PKGS"
+  else
+    echo "==> bare rootfs profile '$ROOTFS_PROFILE' — no packages preinstalled (boots to TTY)"
+  fi
+  echo "==> would run: (cd \"$HERE\" && ./build.sh gui && ./build.sh cli)"
+  echo "==> would run: curl -sL \"$ARCH_URL\" -o /tmp/$ARCH_TARBALL ; tar -xzf /tmp/$ARCH_TARBALL -C \"$ROOTFS\""
+  echo "==> would run: shim_cli \"$ROOTFS\" /usr/bin/pacman -Sy --noconfirm"
+  if [ "$ROOTFS_PROFILE" = "recovery" ]; then
+    echo "==> would run: shim_cli \"$ROOTFS\" /usr/bin/pacman -S --noconfirm $RECOVERY_PKGS"
+  elif [ "$INSTALL_DESKTOP" = "1" ]; then
+    echo "==> would run: shim_cli \"$ROOTFS\" /usr/bin/pacman -S --noconfirm $DESKTOP_PKGS"
+    echo "==> would run: shim_cli \"$ROOTFS\" /usr/bin/pacman -S --noconfirm $EXTRA_PKGS"
+  fi
+  exit 0
+fi
+
+# --- 3. build the shim --------------------------------------------------------
 echo "==> building the shim"
 (cd "$HERE" && ./build.sh gui && ./build.sh cli)
 
-# --- 2. bootstrap the Arch rootfs (not stored; built here) --------------------
+# --- 4. bootstrap the Arch rootfs (not stored; built here) --------------------
 if [ ! -x "$ROOTFS/usr/bin/pacman" ]; then
   echo "==> downloading Arch Linux ARM aarch64 base rootfs (~830 MB)"
   [ -f "/tmp/$ARCH_TARBALL" ] || curl -sL "$ARCH_URL" -o "/tmp/$ARCH_TARBALL"
@@ -49,7 +111,7 @@ if [ ! -x "$ROOTFS/usr/bin/pacman" ]; then
   tar -xzf "/tmp/$ARCH_TARBALL" -C "$ROOTFS" 2>/dev/null || true
 fi
 
-# --- 3. make pacman work under the shim --------------------------------------
+# --- 5. make pacman work under the shim --------------------------------------
 echo "==> configuring the guest (DNS, mount table, pacman)"
 # DNS: resolv.conf is a broken symlink in the tarball
 rm -f "$ROOTFS/etc/resolv.conf"
@@ -63,47 +125,79 @@ mkdir -p "$ROOTFS/dev/shm" "$ROOTFS/dev/dri"
 SHIM_CLI="$HERE/shim_cli"
 run_pacman() { RDUID0=1 "$SHIM_CLI" "$ROOTFS" /usr/bin/pacman "$@" --disable-sandbox; }
 
-# --- 4. sync + install the profile's package set ------------------------------
+# --- 6. sync + install the profile's package set ------------------------------
 echo "==> pacman -Sy"
 run_pacman -Sy --noconfirm
 
-# The rootfs profile picks the package set.  `arch` is bare (boots to the TTY);
-# `omarchy` pre-ships Hyprland + Quickshell; `kiosk` is the minimal base with a
-# single locked app configured in shimmy.yaml (not installed here — planned).
-# A legacy `--desktop` flag forces a desktop install regardless of profile.
-INSTALL_DESKTOP=0
-case "$ROOTFS_PROFILE" in
-  omarchy) INSTALL_DESKTOP=1 ;;
-  kiosk|arch) ;;
-  *) echo "    ! unknown rootfs profile '$ROOTFS_PROFILE' (arch|omarchy|kiosk); assuming bare arch" ;;
-esac
-[ "$DESKTOP_EXPLICIT" = "1" ] && INSTALL_DESKTOP=1
-
-if [ "$INSTALL_DESKTOP" = "1" ]; then
-  case "$DESKTOP" in
-    kde|plasma)
-      echo "==> installing KDE Plasma (standard Arch install)"
-      run_pacman -S --noconfirm plasma-meta konsole dolphin sddm
-      ;;
-    *)
-      echo "==> installing Hyprland (standard Arch install)"
-      if [ "$ROOTFS_PROFILE" = "omarchy" ]; then
-        run_pacman -S --noconfirm hyprland quickshell foot gtk3 gtk4 noto-fonts
-      else
-        run_pacman -S --noconfirm hyprland foot gtk3 gtk4 noto-fonts
-      fi
-      ;;
-  esac
-  # common desktop apps
-  run_pacman -S --noconfirm mesa mesa-utils libglvnd wayland wayland-protocols \
-    fastfetch btop htop chromium mpv 2>/dev/null || true
+if [ "$ROOTFS_PROFILE" = "recovery" ]; then
+  echo "==> installing the recovery rootfs (graphical installer + tools)"
+  run_pacman -S --noconfirm $RECOVERY_PKGS
+elif [ "$INSTALL_DESKTOP" = "1" ]; then
+  echo "==> installing desktop '$DESKTOP' (standard Arch install)"
+  run_pacman -S --noconfirm $DESKTOP_PKGS
+  run_pacman -S --noconfirm $EXTRA_PKGS 2>/dev/null || true
 else
   echo "==> bare rootfs profile '$ROOTFS_PROFILE' — no desktop installed (boots to TTY)"
 fi
 
-# --- 5. install the rdmetal driver (so the desktop renders) -------------------
-echo "==> installing the rdmetal driver"
-if [ -d "$HERE/rdmetal/rdmetal-libs" ]; then
+# --- 7. recovery: install the shimmy CLI + installer + launch path -------------
+if [ "$ROOTFS_PROFILE" = "recovery" ]; then
+  echo "==> installing the recovery shell (shimmy recover + graphical installer)"
+  install -d "$ROOTFS/usr/local/bin"
+  install -m 0755 "$HERE/bin/shimmy" "$ROOTFS/usr/local/bin/shimmy"
+  install -m 0755 "$HERE/bin/shimmy-installer" "$ROOTFS/usr/local/bin/shimmy-installer"
+
+  # The launch path: run the installer full-screen under cage on the shim's
+  # Wayland/DRM (see docs/RECOVERY-SHELL.md).
+  cat > "$ROOTFS/usr/local/bin/shimmy-installer-start" <<'EOF'
+#!/bin/sh
+# shimmy recovery — launch the graphical installer full-screen under cage.
+exec dbus-run-session -- cage -s -- /usr/local/bin/shimmy-installer
+EOF
+  chmod 0755 "$ROOTFS/usr/local/bin/shimmy-installer-start"
+
+  # Boot straight into the installer: root autologin on tty1 -> the launch script.
+  install -d "$ROOTFS/etc/systemd/system/getty@tty1.service.d"
+  printf '[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin root --noclear %%I $TERM\n' \
+    > "$ROOTFS/etc/systemd/system/getty@tty1.service.d/autologin.conf"
+  touch "$ROOTFS/root/.bash_profile"
+  if ! grep -q 'shimmy-installer-start' "$ROOTFS/root/.bash_profile" 2>/dev/null; then
+    cat >> "$ROOTFS/root/.bash_profile" <<'EOF'
+
+# recovery: boot straight into the graphical installer
+if [ -x /usr/local/bin/shimmy-installer-start ] && [ -t 0 ]; then
+  exec /usr/local/bin/shimmy-installer-start
+fi
+EOF
+  fi
+
+  # Alternative: a systemd service (enabled for multi-user.target) that does the
+  # same cage -> installer launch without relying on a login shell.
+  cat > "$ROOTFS/etc/systemd/system/shimmy-installer.service" <<'EOF'
+[Unit]
+Description=shimmy recovery graphical installer
+After=systemd-user-sessions.service
+
+[Service]
+Type=simple
+TTYPath=/dev/tty1
+ExecStart=/usr/local/bin/shimmy-installer-start
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+fi
+
+# --- 8. install the rdmetal driver (so the desktop renders) -------------------
+# The recovery rootfs is a headless rescue shell (no desktop), so it skips the
+# GPU driver; every other profile installs it as the default GL driver.
+if [ "$ROOTFS_PROFILE" = "recovery" ]; then
+  echo "==> skipping rdmetal driver (recovery is a headless rescue rootfs)"
+elif [ -d "$HERE/rdmetal/rdmetal-libs" ]; then
+  echo "==> installing the rdmetal driver"
   install -d "$ROOTFS/usr/lib/dri"
   install -m 644 "$HERE/rdmetal/rdmetal-libs/dri/rdmetal_dri.so" "$ROOTFS/usr/lib/dri/rdmetal_dri.so"
   for lib in libEGL.so.1.0.0 libGLESv2.so.2.0.0 libgbm.so.1.0.0 libglapi.so.0.0.0; do
@@ -122,7 +216,10 @@ fi
 echo ""
 echo "==> done."
 echo "    rootfs profile: $ROOTFS_PROFILE"
-if [ "$INSTALL_DESKTOP" = "1" ]; then
+if [ "$ROOTFS_PROFILE" = "recovery" ]; then
+  echo "    run:  ./run.sh            # boots straight into the graphical installer"
+  echo "    or:   ./shim_cli rootfs /usr/local/bin/shimmy-installer-start"
+elif [ "$INSTALL_DESKTOP" = "1" ]; then
   echo "    run:  ./run.sh --desktop $DESKTOP"
 else
   echo "    run:  ./run.sh            # bare base; install a desktop via pacman first"

@@ -1,0 +1,268 @@
+#!/usr/bin/env python3
+"""shimmy-installer — the recovery rootfs's full-screen graphical installer.
+
+This is the recovery shell's UI: a single full-screen window with the recovery
+actions, rendered through the shim's Wayland/DRM path on the Linux side.  It is
+the graphical face on top of `shimmy recover` (which does the real work —
+wpa_supplicant + dhcpcd, the rootfs tarball download + extract, the Bluetooth /
+USB device listings — and is scriptable/testable headlessly).
+
+Toolkit
+-------
+Qt6 (QtWidgets) via PySide6.  The recovery package set pulls `qt6-base`
+(the Qt6 Widgets base libraries), `qt6-wayland` (the Wayland platform plugin so
+the app renders on the shim's Wayland display), and `pyside6` (the Python
+bindings this file imports).  Python 3 is already in the recovery set.
+
+Hardware bridges (shim-side, like audio->CoreAudio and input->HID)
+------------------------------------------------------------------
+- Bluetooth: `bluez` + `bluez-utils` in the recovery rootfs; the shim bridges
+  the host's CoreBluetooth so Linux sees an HCI device (bluetoothctl).
+- USB: `usbutils` in the recovery rootfs; the shim bridges the host's USB via
+  /dev/bus/usb through IOKit (lsusb lists the host's devices).
+
+Both are listed in the installer's "Bluetooth & USB devices" panel.
+
+Launch path
+-----------
+Recovery boots to a root autologin on tty1; `shimmy-installer.service` then runs
+the app full-screen under `cage` (a minimal kiosk Wayland compositor) on the
+shim's Wayland display:
+
+    dbus-run-session -- cage -s -- /usr/local/bin/shimmy-installer
+
+See docs/RECOVERY-SHELL.md for the full boot -> installer flow and the screens.
+
+Headless testability
+--------------------
+`shimmy-installer --dry-run` prints the toolkit, the screens, the launch path and
+the exact subprocess commands WITHOUT importing Qt, so the installer's structure
+is testable on a machine with no Qt installed.  `python3 -m py_compile` checks
+the syntax.  This file depends only on the Python 3 standard library plus PySide6
+(imported lazily, only when actually launching).
+"""
+
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+TOOLKIT = "Qt6 (qt6-base, QtWidgets) via PySide6, rendered on Wayland (qt6-wayland)"
+COMPOSITOR = "cage (minimal kiosk Wayland compositor)"
+LAUNCH_CMD = ["dbus-run-session", "--", "cage", "-s", "--",
+              "/usr/local/bin/shimmy-installer"]
+
+# The recovery screens, in order.  `action` is the `shimmy recover` backend
+# operation each button drives (see bin/shimmy -> cmd_recover).
+SCREENS = [
+    ("Connect to WiFi",
+     "network picker: wpa_supplicant scan -> SSID list + passphrase prompt -> dhcpcd",
+     ["shimmy", "recover", "--ssid", "<ssid>", "--psk", "<passphrase>"]),
+    ("Install a rootfs",
+     "choose arch / omarchy -> download progress bar -> extract over the target",
+     ["shimmy", "recover", "--profile", "<arch|omarchy>"]),
+    ("Open a shell",
+     "in-app terminal running /bin/bash with gdb / objdump / python on PATH",
+     ["shimmy", "recover", "--shell"]),
+    ("Reboot into macOS",
+     "clean guest shutdown -> shim exit -> warm-switch back to macOS",
+     ["shimmy", "recover", "--reboot"]),
+    ("Bluetooth & USB devices",
+     "Bluetooth: bluez/bluez-utils -> host CoreBluetooth (HCI); USB: usbutils -> "
+     "host IOKit via /dev/bus/usb",
+     ["shimmy", "recover", "--devices"]),
+]
+
+
+def find_shimmy():
+    """Locate the `shimmy` CLI: the installed copy first, then the repo copy."""
+    from shutil import which
+    p = which("shimmy")
+    if p:
+        return p
+    here = Path(__file__).resolve().parent / "shimmy"
+    return str(here) if here.is_file() else "shimmy"
+
+
+def print_plan(out=sys.stdout):
+    """Print the installer structure + launch path (the headless dry-run)."""
+    import shlex
+    shimmy = find_shimmy()
+    out.write("shimmy-installer — graphical recovery installer\n")
+    out.write("  toolkit   : %s\n" % TOOLKIT)
+    out.write("  compositor: %s\n" % COMPOSITOR)
+    out.write("  launch    : %s\n" % " ".join(shlex.quote(a) for a in LAUNCH_CMD))
+    out.write("\n")
+    out.write("screens:\n")
+    for i, (title, desc, backend) in enumerate(SCREENS, 1):
+        out.write("  %d. %s\n" % (i, title))
+        out.write("     %s\n" % desc)
+        out.write("     -> %s\n" % " ".join(shlex.quote(a) for a in backend))
+    out.write("\nbackend: %s\n" % shimmy)
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+# GUI (Qt6 / PySide6) — imported lazily so the dry-run never needs Qt.
+# --------------------------------------------------------------------------- #
+
+def run_gui():
+    from PySide6.QtCore import Qt, QProcess
+    from PySide6.QtWidgets import (
+        QApplication, QWidget, QVBoxLayout, QLabel, QPushButton,
+        QInputDialog, QLineEdit, QProgressDialog, QPlainTextEdit,
+        QDialog, QMessageBox, QTextEdit,
+    )
+
+    shimmy = find_shimmy()
+
+    def call(*args):
+        """Run the backend action; report failure as a dialog."""
+        cmd = [shimmy] + list(args)
+        rc = subprocess.call(cmd)
+        if rc != 0:
+            QMessageBox.warning(None, "shimmy-installer",
+                                "command failed (%d):\n%s" % (rc, " ".join(cmd)))
+        return rc
+
+    def wifi():
+        # First-cut graphical picker: scan -> SSID list -> passphrase -> connect.
+        scan = subprocess.run([shimmy, "recover", "--scan"],
+                              capture_output=True, text=True)
+        ssids = [ln.strip() for ln in scan.stdout.splitlines()
+                 if ln.strip() and not ln.startswith("#")]
+        if not ssids:
+            ssids = [""]
+        ssid, ok = QInputDialog.getItem(None, "Connect to WiFi", "Network:",
+                                        ssids, 0, True)
+        if not ok:
+            return
+        if not ssid.strip():
+            ssid, ok = QInputDialog.getText(None, "Connect to WiFi", "SSID:")
+            if not ok or not ssid.strip():
+                return
+        psk, ok = QInputDialog.getText(
+            None, "Connect to WiFi", "Passphrase for %s:" % ssid,
+            QLineEdit.Password)
+        if not ok:
+            return
+        call("recover", "--ssid", ssid.strip(), "--psk", psk)
+
+    def install():
+        profile, ok = QInputDialog.getItem(
+            None, "Install a rootfs", "Profile:",
+            ["arch", "omarchy"], 0, False)
+        if not ok:
+            return
+        dlg = QProgressDialog("Downloading and extracting %s rootfs..." % profile,
+                              "Cancel", 0, 0, None)
+        dlg.setWindowTitle("Install a rootfs")
+        dlg.setWindowModality(Qt.WindowModal)
+        dlg.setMinimumDuration(0)
+        dlg.show()
+        rc = call("recover", "--profile", profile)
+        dlg.close()
+        return rc
+
+    def shell():
+        # In-app terminal: QProcess -> /bin/bash.  gdb/objdump/python on PATH.
+        dlg = QDialog(None)
+        dlg.setWindowTitle("Shell — gdb / objdump / python")
+        dlg.resize(900, 600)
+        out = QPlainTextEdit(dlg)
+        out.setReadOnly(True)
+        inp = QLineEdit(dlg)
+        lay = QVBoxLayout(dlg)
+        lay.addWidget(QLabel("Recovery shell (tools: gdb, objdump, python):"))
+        lay.addWidget(out)
+        lay.addWidget(inp)
+        proc = QProcess(dlg)
+        proc.setProgram("/bin/bash")
+        proc.setProcessChannelMode(QProcess.MergedChannels)
+
+        def on_read():
+            data = proc.readAll().data().decode(errors="replace")
+            if data:
+                out.moveCursor(out.textCursor().End)
+                out.insertPlainText(data)
+
+        proc.readyRead.connect(on_read)
+
+        def on_enter():
+            proc.write((inp.text() + "\n").encode())
+            inp.clear()
+
+        inp.returnPressed.connect(on_enter)
+        proc.start()
+        inp.setFocus()
+        dlg.exec_()
+        if proc.state() != QProcess.NotRunning:
+            proc.write(b"exit\n")
+            proc.waitForFinished(500)
+
+    def reboot():
+        call("recover", "--reboot")
+
+    def devices():
+        # Bluetooth (bluez -> CoreBluetooth) + USB (usbutils -> IOKit) status.
+        dlg = QDialog(None)
+        dlg.setWindowTitle("Bluetooth & USB devices")
+        dlg.resize(700, 480)
+        txt = QTextEdit(dlg)
+        txt.setReadOnly(True)
+        lay = QVBoxLayout(dlg)
+        lay.addWidget(QLabel(
+            "Bridged devices (shim-side, like audio->CoreAudio / input->HID):"))
+        lay.addWidget(txt)
+        dlg.show()
+        proc = subprocess.run([shimmy, "recover", "--devices"],
+                              capture_output=True, text=True)
+        txt.setPlainText(proc.stdout or proc.stderr or "(no devices)")
+        dlg.exec_()
+
+    app = QApplication(sys.argv)
+    win = QWidget()
+    win.setWindowTitle("shimmy recovery")
+    win.resize(800, 560)
+    lay = QVBoxLayout(win)
+    lay.addWidget(QLabel("shimmy recovery shell"))
+    lay.addWidget(QLabel("Choose an action:"))
+    lay.addWidget(QPushButton("Connect to WiFi"), 0, Qt.AlignLeft)
+    lay.addWidget(QPushButton("Install a rootfs"), 0, Qt.AlignLeft)
+    lay.addWidget(QPushButton("Open a shell"), 0, Qt.AlignLeft)
+    lay.addWidget(QPushButton("Reboot into macOS"), 0, Qt.AlignLeft)
+    lay.addWidget(QPushButton("Bluetooth & USB devices"), 0, Qt.AlignLeft)
+
+    # Wire each button to its action.
+    buttons = [w for w in win.findChildren(QPushButton)]
+    buttons[0].clicked.connect(wifi)
+    buttons[1].clicked.connect(install)
+    buttons[2].clicked.connect(shell)
+    buttons[3].clicked.connect(reboot)
+    buttons[4].clicked.connect(devices)
+
+    win.show()
+    return app.exec_()
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        prog="shimmy-installer",
+        description="Full-screen graphical recovery installer (Qt6).")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="print toolkit + screens + launch path without launching Qt")
+    args = parser.parse_args(argv)
+
+    if args.dry_run:
+        return print_plan()
+
+    try:
+        return run_gui()
+    except ImportError as e:
+        print("shimmy-installer: Qt6/PySide6 not available (%s). "
+              "Install qt6-base qt6-wayland pyside6." % e, file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

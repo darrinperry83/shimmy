@@ -5,12 +5,13 @@ before you log in and start installing things. Every profile is built from the s
 ARM aarch64** rootfs tarball, bootstrapped locally, and is **not stored in git** — the built
 `rootfs/` directory is a local artifact.
 
-There are exactly two rootfs choices today, `arch` and `omarchy`, with `kiosk` planned:
+There are three rootfs choices today, `arch`, `omarchy` and `recovery`, with `kiosk` planned:
 
 | Profile | Status | Contents |
 |---|---|---|
 | `arch` | ✅ default | bare Arch aarch64 + glibc, nothing else |
 | `omarchy` | ✅ | Arch + Hyprland + Quickshell + a curated bar, pre-configured |
+| `recovery` | ✅ | minimal rescue rootfs that boots into a graphical installer (WiFi + reinstall + shell + devices) |
 | `kiosk` | 📋 planned | a minimal rootfs that boots straight into one locked app |
 
 ## `arch` — the bare base
@@ -51,15 +52,31 @@ operator's display.
 `kiosk` is on the roadmap (📋). It ships the single app *inside the rootfs* and leaves the shell
 out entirely, which is why it is a profile rather than a launch option.
 
-## The install model
+## `recovery` — minimal rescue rootfs + graphical installer
 
-The rootfs choice is **only `arch` or `omarchy`** (plus `kiosk` planned). There is no third option,
-and there is no `--desktop` flag on the profile: **the desktop is always installed by you through
-`pacman`.**
+The **recovery** profile is the independent rescue image: a minimal rootfs that boots straight into
+a full-screen **graphical installer** (Qt6, rendered through the shim's Wayland/DRM) instead of a
+TTY login. From it you can connect WiFi (`wpa_supplicant` + `dhcpcd`), reinstall a fresh `arch` or
+`omarchy` rootfs, open a shell with the disassembly tools (`binutils`/`gdb`/`python`), inspect the
+bridged Bluetooth/USB devices, or reboot back into macOS.
 
 ```sh
-./install.sh                    # arch — the bare base, boots to the TTY
-./install.sh --rootfs omarchy   # omarchy — Hyprland + Quickshell, pre-configured
+./install.sh --rootfs recovery    # minimal rescue rootfs + graphical installer
+./run.sh                          # boots straight into the installer
+```
+
+See [RECOVERY-SHELL.md](RECOVERY-SHELL.md) for the package set, the installer's screens, the launch
+path, and the `shimmy recover` backend.
+
+## The install model
+
+The rootfs choice is `arch`, `omarchy` or `recovery` (plus `kiosk` planned). There is no
+`--desktop` flag on the profile: **the desktop is always installed by you through `pacman`.**
+
+```sh
+./install.sh                      # arch — the bare base, boots to the TTY
+./install.sh --rootfs omarchy     # omarchy — Hyprland + Quickshell, pre-configured
+./install.sh --rootfs recovery    # recovery — minimal rescue rootfs + graphical installer
 ```
 
 Inside the guest, install the desktop of your choice through the package manager:
@@ -76,7 +93,7 @@ vars), so every standard GL/EGL app gets Metal through Mesa regardless of profil
 
 ## How this maps forward
 
-The same three names become the `rootfs` field of the declarative `shimmy.nix` config, and the
+The same names become the `rootfs` field of the declarative `shimmy.nix` config, and the
 `pacman`-installs-the-desktop rule becomes its `windowManager` + `packages` fields — the config
 *names* the desktop and apps, `pacman` installs them. See
 [DESIGN-NIX.md](DESIGN-NIX.md) for that proposal.

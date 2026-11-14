@@ -26,6 +26,7 @@ Commands:
     shimmy config render        print the derived env / flags
     shimmy run                  derive the env and exec run.sh
     shimmy build                exec install.sh --rootfs <profile>
+    shimmy recover              the recovery shell (graphical installer / scripted backend)
 
 The YAML (or JSON) schema is the first cut; the DESIGN-NIX.md Nix-flavored
 evaluator is the stated future direction.  This loader therefore *also* detects
@@ -40,6 +41,7 @@ import os
 import plistlib
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -53,7 +55,7 @@ VERSION = "0.1.0"
 # --------------------------------------------------------------------------- #
 
 MODES = ("windowed", "single-display", "kiosk", "all-displays")
-ROOTFS_PROFILES = ("arch", "omarchy", "kiosk")
+ROOTFS_PROFILES = ("arch", "omarchy", "kiosk", "recovery")
 FLICK_ON = ("all", "taken")
 
 DEFAULTS = {
@@ -668,6 +670,208 @@ def cmd_build(args):
 
 
 # --------------------------------------------------------------------------- #
+# recovery shell: `shimmy recover`
+# --------------------------------------------------------------------------- #
+# The recovery rootfs (install.sh --rootfs recovery) boots to a full-screen
+# graphical installer (bin/shimmy-installer, Qt6).  `shimmy recover` is the
+# scriptable backend that installer calls — WiFi (wpa_supplicant + dhcpcd), the
+# fresh-rootfs download + extract, the Bluetooth/USB device listings, and the
+# reboot back to macOS.  Every action has a `--dry-run` form that prints the
+# exact steps, so the logic is testable headlessly (no live boot).
+
+RECOVERY_PROFILES = ("arch", "omarchy")
+ARCH_BASE_URL = "http://os.archlinuxarm.org/os"
+RELEASE_BASE_URL = os.environ.get(
+    "SHIMMY_RELEASE_URL",
+    "https://github.com/darrinperry83/shimmy/releases/latest/download")
+
+
+def recovery_tarball_url(profile, url=None):
+    if url:
+        return url
+    if profile == "arch":
+        return ARCH_BASE_URL + "/ArchLinuxARM-aarch64-latest.tar.gz"
+    # omarchy (and future profiles) ship as a shimmy release asset.
+    return RELEASE_BASE_URL + "/rootfs-%s-aarch64.tar.gz" % profile
+
+
+def _rc_sh(cmd, dry_run):
+    """Print a command (dry-run) or run it, returning the exit code."""
+    if dry_run:
+        print("  # " + " ".join(shlex.quote(str(a)) for a in cmd))
+        return 0
+    return subprocess.call([str(a) for a in cmd])
+
+
+def _rc_wifi_iface(preferred=None, dry_run=False):
+    if preferred:
+        if dry_run:
+            print("  # wireless interface: %s (explicit)" % preferred)
+        return preferred
+    if dry_run:
+        print("  # detect wireless interface: /sys/class/net/*/wireless "
+              "(fallback: wlan0)")
+        return "wlan0"
+    for d in sorted(Path("/sys/class/net").glob("*/wireless")):
+        return d.parent.name
+    if shutil.which("iw"):
+        try:
+            out = subprocess.run(["iw", "dev"], capture_output=True, text=True)
+            for line in out.stdout.splitlines():
+                line = line.strip()
+                if line.startswith("Interface"):
+                    return line.split()[1]
+        except OSError:
+            pass
+    return "wlan0"
+
+
+def _write_wpa_conf(ssid, psk, conf):
+    if psk:
+        block = 'network={\n\tssid="%s"\n\tpsk="%s"\n}\n' % (ssid, psk)
+    else:
+        block = 'network={\n\tssid="%s"\n\tkey_mgmt=NONE\n}\n' % ssid
+    with open(conf, "w") as f:
+        f.write("ctrl_interface=DIR=/var/run/wpa_supplicant\n"
+                "update_config=1\n" + block)
+
+
+def rc_scan(args, dry_run):
+    print("==> scan WiFi%s" % (" (dry-run)" if dry_run else ""))
+    iface = _rc_wifi_iface(args.iface, dry_run)
+    rc = _rc_sh(["wpa_supplicant", "-B", "-i", iface, "-c",
+                 args.wpa_conf or "/etc/wpa_supplicant/wpa_supplicant.conf"],
+                dry_run)
+    rc |= _rc_sh(["wpa_cli", "-i", iface, "scan"], dry_run)
+    rc |= _rc_sh(["sh", "-c", "sleep 2"], dry_run)
+    if dry_run:
+        print("  # wpa_cli -i %s scan_results    (list SSIDs)" % iface)
+        return rc
+    out = subprocess.run(["wpa_cli", "-i", iface, "scan_results"],
+                         capture_output=True, text=True)
+    print(out.stdout)
+    return rc
+
+
+def rc_connect(args, dry_run):
+    print("==> connect WiFi%s" % (" (dry-run)" if dry_run else ""))
+    iface = _rc_wifi_iface(args.iface, dry_run)
+    ssid = args.ssid or ("<ssid>" if dry_run else None)
+    conf = args.wpa_conf
+    if not conf:
+        conf = "/tmp/shimmy-wpa_supplicant.conf"
+        if dry_run:
+            print("  # write %s (network ssid=%s psk=%s)"
+                  % (conf, ssid, args.psk or "<passphrase>"))
+        else:
+            _write_wpa_conf(ssid, args.psk, conf)
+    rc = _rc_sh(["wpa_supplicant", "-B", "-i", iface, "-c", conf], dry_run)
+    rc |= _rc_sh(["wpa_cli", "-i", iface, "reconfigure"], dry_run)
+    rc |= _rc_sh(["dhcpcd", iface], dry_run)
+    return rc
+
+
+def rc_install(args, dry_run):
+    profile = args.profile or "arch"
+    url = recovery_tarball_url(profile, args.url)
+    target = args.target or "/"
+    tarball = "/tmp/rootfs-%s.tar.gz" % profile
+    print("==> install fresh rootfs: %s%s" % (profile, " (dry-run)" if dry_run else ""))
+    print("    source: %s" % url)
+    print("    target: %s" % target)
+    rc = _rc_sh(["curl", "-L", "--progress-bar", url, "-o", tarball], dry_run)
+    cmd = ["tar", "-xzf", tarball, "-C", target]
+    if target in ("/", "/rootfs"):
+        cmd += ["--exclude=./proc/*", "--exclude=./sys/*",
+                "--exclude=./dev/*", "--exclude=./run/*"]
+    rc |= _rc_sh(cmd, dry_run)
+    return rc
+
+
+def rc_devices(dry_run):
+    print("==> devices%s" % (" (dry-run)" if dry_run else ""))
+    print("    Bluetooth: bluez/bluez-utils -> host CoreBluetooth (HCI device)")
+    print("    USB:       usbutils -> host IOKit via /dev/bus/usb")
+    rc = _rc_sh(["bluetoothctl", "list"], dry_run)
+    rc |= _rc_sh(["lsusb"], dry_run)
+    return rc
+
+
+def rc_reboot(dry_run):
+    print("==> reboot into macOS%s" % (" (dry-run)" if dry_run else ""))
+    print("    (clean guest shutdown -> shim exit -> warm-switch to macOS)")
+    rc = _rc_sh(["sync"], dry_run)
+    rc |= _rc_sh(["reboot"], dry_run)
+    return rc
+
+
+def rc_shell(dry_run):
+    print("==> open a recovery shell%s (gdb / objdump / python)"
+          % (" (dry-run)" if dry_run else ""))
+    if dry_run:
+        print("  # exec /bin/bash")
+        return 0
+    os.execvp("/bin/bash", ["/bin/bash"])
+    return 1
+
+
+def _recover_requested(args):
+    return any((args.ssid, args.psk, args.wpa_conf, args.profile, args.url,
+                args.devices, args.scan, args.shell, args.reboot))
+
+
+def _launch_installer():
+    installer = shutil.which("shimmy-installer") or str(REPO / "bin" / "shimmy-installer")
+    try:
+        os.execvp(installer, [installer])
+    except OSError as e:
+        print("failed to exec %s: %s" % (installer, e), file=sys.stderr)
+        return 1
+
+
+def cmd_recover(args):
+    if args.dry_run:
+        print("==> shimmy recover (dry-run)")
+        if args.devices:
+            return rc_devices(True)
+        if args.scan:
+            return rc_scan(args, True)
+        if args.shell:
+            return rc_shell(True)
+        if args.reboot:
+            return rc_reboot(True)
+        rc = 0
+        wifi = args.ssid or args.psk or args.wpa_conf
+        if wifi:
+            rc |= rc_connect(args, True)
+        if args.profile or args.url:
+            rc |= rc_install(args, True)
+        if not wifi and not (args.profile or args.url):
+            print("    (full plan: WiFi connect, then fresh-rootfs install)")
+            rc |= rc_connect(args, True)
+            rc |= rc_install(args, True)
+        return rc
+
+    if args.gui or not _recover_requested(args):
+        return _launch_installer()
+
+    if args.devices:
+        return rc_devices(False)
+    if args.scan:
+        return rc_scan(args, False)
+    if args.shell:
+        return rc_shell(False)
+    if args.reboot:
+        return rc_reboot(False)
+    rc = 0
+    if args.ssid or args.psk or args.wpa_conf:
+        rc |= rc_connect(args, False)
+    if args.profile or args.url:
+        rc |= rc_install(args, False)
+    return rc
+
+
+# --------------------------------------------------------------------------- #
 # boot chooser takeover / release
 # --------------------------------------------------------------------------- #
 # The chooser is a root LaunchDaemon that runs BEFORE WindowServer and branches
@@ -806,6 +1010,35 @@ def main(argv=None):
     rel_p.add_argument("--dry-run", action="store_true",
                        help="print the sudo commands without removing")
 
+    rec_p = sub.add_parser("recover",
+                           help="recovery shell: graphical installer / scripted "
+                                "WiFi + rootfs reinstall + devices")
+    rec_p.add_argument("--dry-run", action="store_true",
+                       help="print the WiFi + download + device + reboot steps "
+                            "without acting")
+    rec_p.add_argument("--gui", action="store_true",
+                       help="launch the graphical installer (default when no "
+                            "action flag is given)")
+    rec_p.add_argument("--scan", action="store_true",
+                       help="list available WiFi networks (wpa_cli scan_results)")
+    rec_p.add_argument("--ssid", default=None, help="WiFi SSID (scripted connect)")
+    rec_p.add_argument("--psk", default=None, help="WiFi passphrase (with --ssid)")
+    rec_p.add_argument("--wpa-conf", default=None,
+                       help="path to an existing wpa_supplicant.conf")
+    rec_p.add_argument("--iface", default=None,
+                       help="wireless interface (default: auto-detect)")
+    rec_p.add_argument("--profile", default=None,
+                       help="rootfs to install: arch | omarchy")
+    rec_p.add_argument("--url", default=None, help="override the rootfs tarball URL")
+    rec_p.add_argument("--target", default="/",
+                       help="directory to extract the fresh rootfs into (default: /)")
+    rec_p.add_argument("--devices", action="store_true",
+                       help="list Bluetooth (bluez) + USB (usbutils) devices")
+    rec_p.add_argument("--shell", action="store_true",
+                       help="open a recovery shell (gdb / objdump / python)")
+    rec_p.add_argument("--reboot", action="store_true",
+                       help="reboot into macOS (warm-switch)")
+
     args = parser.parse_args(argv)
 
     if args.command is None:
@@ -828,6 +1061,8 @@ def main(argv=None):
             return cmd_takeover(args)
         if args.command == "release":
             return cmd_release(args)
+        if args.command == "recover":
+            return cmd_recover(args)
         parser.print_help()
         return 1
     except ConfigError as e:
