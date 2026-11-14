@@ -178,12 +178,14 @@ sudo ./bin/shimmy boot default shimmy    # RISKY: boot Linux on EVERY boot (pers
 `boot once shimmy` writes a one-shot that the chooser clears back to `default=macOS` **before**
 it branches — so the next reboot (or a power-button press) is always macOS again, with no
 keyboard or display needed. This is the safe way to try shimmy when you "can't afford a mistake";
+`boot once shimmy` boots shimmy a single time and then auto-reverts to macOS (the safe escape);
 `boot default shimmy` is the persistent option and should only be used when you really want
-Linux every boot. Holding `o` (or `O`) at boot always drops to macOS, regardless of the config.
-The chooser is reversible (`sudo ./bin/shimmy release`) and fail-safe: if the stand-in crashes,
-the watchdog relaunches the real WindowServer, so macOS always comes back. See
-[DESIGN-WINDOWSERVER-REPLACEMENT.md](docs/DESIGN-WINDOWSERVER-REPLACEMENT.md) and
-[DESIGN-BOOT-CHOOSER.md](docs/DESIGN-BOOT-CHOOSER.md).
+Linux every boot. The chooser is reversible (`sudo ./bin/shimmy release`) and fail-safe: if the
+stand-in crashes, the watchdog relaunches the real WindowServer. Getting back to macOS is always
+possible via the Apple-native escapes (single-user and Recovery) — see
+[BOOT-ESCAPE.md](docs/BOOT-ESCAPE.md) for the full ladder, and
+[DESIGN-WINDOWSERVER-REPLACEMENT.md](docs/DESIGN-WINDOWSERVER-REPLACEMENT.md) +
+[DESIGN-BOOT-CHOOSER.md](docs/DESIGN-BOOT-CHOOSER.md) for the architecture.
 
 ### Declarative config
 
