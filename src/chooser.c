@@ -16,6 +16,7 @@
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreGraphics/CoreGraphics.h>
+#include <IOKit/IOKitLib.h>
 #include <IOKit/hid/IOHIDManager.h>
 #include <IOSurface/IOSurface.h>
 
@@ -64,6 +65,49 @@ static fn_PresentIOSurface               f_present_io;
 // crash the chooser at boot.
 static sigjmp_buf        g_present_jmp;
 static volatile sig_atomic_t g_present_guarded;
+
+// ---------------------------------------------------------------------------------------------
+// IOMFB framebuffer present state (the boot-logo mechanism).
+//
+// The Apple boot logo is drawn before WindowServer by writing straight into the display
+// controller's raw framebuffer: an IOSurface owned by the IOMobileFramebuffer (IOMFB) user
+// client. A user-space root process reaches it the same way:
+//     IOMobileFramebufferGetMainDisplay(&conn)           -> the main display's connection
+//     IOMobileFramebufferGetLayerDefaultSurface(conn,0,&s)-> the layer-0 framebuffer IOSurface
+// then IOSurfaceLock + blit + IOSurfaceUnlock + SwapBegin/SwapEnd to present.
+// GetLayerDefaultSurface is privileged: it returns kIOReturnNotPrivileged (0xe00002c1) for an
+// unprivileged caller, so the chooser degrades to the CoreDisplay present + /dev/console
+// fallback when it is not running as root (see resolve_branch).
+
+typedef struct __IOMobileFramebuffer *IOMobileFramebufferConnection;
+
+typedef kern_return_t (*fn_IOMFB_Open)(io_service_t, task_port_t, unsigned int, IOMobileFramebufferConnection*);
+typedef kern_return_t (*fn_IOMFB_GetMainDisplay)(IOMobileFramebufferConnection*);
+typedef kern_return_t (*fn_IOMFB_GetLayerDefaultSurface)(IOMobileFramebufferConnection, int, IOSurfaceRef*);
+typedef kern_return_t (*fn_IOMFB_SwapBegin)(IOMobileFramebufferConnection, int*);
+typedef kern_return_t (*fn_IOMFB_SwapEnd)(IOMobileFramebufferConnection);
+
+typedef struct {
+    int                 valid;          // 1 once the framebuffer surface is locked-in
+    void*               framework;      // IOMobileFramebuffer dylib handle
+    IOMobileFramebufferConnection conn; // main display connection (opaque)
+    IOSurfaceRef        surface;        // the layer-0 framebuffer IOSurface
+    size_t              width, height;  // surface pixel dimensions
+    size_t              stride;         // bytes per row (may be > width*4)
+    size_t              bytes_per_element;
+    uint32_t            pixel_format;   // surface 4CC (BGRA on Apple Silicon)
+    int                 fail_stage;     // 0=ok 1=dlopen 2=dlsym 3=open/conn 4=surface
+    kern_return_t       last_err;       // last IOReturn from the failing stage
+} iomfb_t;
+
+static iomfb_t g_iomfb;
+static int     g_iomfb_resolved;
+
+static fn_IOMFB_Open                    f_iomfb_open;
+static fn_IOMFB_GetMainDisplay          f_iomfb_get_main;
+static fn_IOMFB_GetLayerDefaultSurface  f_iomfb_get_layer_surface;
+static fn_IOMFB_SwapBegin               f_iomfb_swap_begin;
+static fn_IOMFB_SwapEnd                 f_iomfb_swap_end;
 
 // HID state.
 static IOHIDManagerRef   g_hid;             // IOHIDManager (may be NULL)
@@ -292,6 +336,171 @@ static int present_framebuffer(const uint8_t* fb, uint32_t width, uint32_t heigh
 
     if (!used_display_next) CFRelease(surface);
     return rc;
+}
+
+// ---------------------------------------------------------------------------------------------
+// IOMFB framebuffer present (the boot-logo blit).
+
+// Resolve the IOMobileFramebuffer main-display connection + its layer-0 default surface.
+// Returns 0 and sets fb->valid when the raw framebuffer IOSurface is reachable; otherwise
+// records the failing stage and returns -1 (graceful degradation).
+static int iomfb_resolve(iomfb_t* fb) {
+    if (g_iomfb_resolved) return fb->valid ? 0 : -1;
+    g_iomfb_resolved = 1;
+    memset(fb, 0, sizeof *fb);
+
+    fb->framework = dlopen("/System/Library/PrivateFrameworks/IOMobileFramebuffer.framework/IOMobileFramebuffer",
+                           RTLD_LAZY);
+    if (!fb->framework)
+        fb->framework = dlopen("/System/Library/PrivateFrameworks/IOMobileFramebuffer.framework/Versions/A/IOMobileFramebuffer",
+                               RTLD_LAZY);
+    if (!fb->framework) { fb->fail_stage = 1; return -1; }
+
+    f_iomfb_open            = (fn_IOMFB_Open)dlsym(fb->framework, "IOMobileFramebufferOpen");
+    f_iomfb_get_main        = (fn_IOMFB_GetMainDisplay)dlsym(fb->framework, "IOMobileFramebufferGetMainDisplay");
+    f_iomfb_get_layer_surface = (fn_IOMFB_GetLayerDefaultSurface)dlsym(fb->framework, "IOMobileFramebufferGetLayerDefaultSurface");
+    f_iomfb_swap_begin      = (fn_IOMFB_SwapBegin)dlsym(fb->framework, "IOMobileFramebufferSwapBegin");
+    f_iomfb_swap_end        = (fn_IOMFB_SwapEnd)dlsym(fb->framework, "IOMobileFramebufferSwapEnd");
+
+    if (!f_iomfb_get_main || !f_iomfb_get_layer_surface || !f_iomfb_swap_begin || !f_iomfb_swap_end) {
+        fb->fail_stage = 2;
+        return -1;
+    }
+
+    // Main display connection (guarded: the private hop can fault from a bad context).
+    kern_return_t kr = KERN_FAILURE;
+    if (sigsetjmp(g_present_jmp, 1) == 0) {
+        g_present_guarded = 1;
+        kr = f_iomfb_get_main(&fb->conn);
+        g_present_guarded = 0;
+    } else {
+        g_present_guarded = 0;
+    }
+
+    // Fallback: open the IOMobileFramebuffer IOService directly (IOMobileFramebufferOpen).
+    if ((kr != KERN_SUCCESS || !fb->conn) && f_iomfb_open) {
+        io_service_t svc = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOMobileFramebuffer"));
+        if (svc != IO_OBJECT_NULL) {
+            if (sigsetjmp(g_present_jmp, 1) == 0) {
+                g_present_guarded = 1;
+                kr = f_iomfb_open(svc, mach_task_self(), 0, &fb->conn);
+                g_present_guarded = 0;
+            } else {
+                g_present_guarded = 0;
+            }
+            IOObjectRelease(svc);
+        }
+    }
+    if (kr != KERN_SUCCESS || !fb->conn) { fb->fail_stage = 3; fb->last_err = kr; return -1; }
+
+    // Layer-0 default surface = the raw framebuffer IOSurface. Privileged: non-root callers
+    // get kIOReturnNotPrivileged here.
+    IOSurfaceRef surf = NULL;
+    if (sigsetjmp(g_present_jmp, 1) == 0) {
+        g_present_guarded = 1;
+        kr = f_iomfb_get_layer_surface(fb->conn, 0, &surf);
+        g_present_guarded = 0;
+    } else {
+        g_present_guarded = 0;
+        kr = KERN_FAILURE;
+    }
+    if (kr != KERN_SUCCESS || !surf) { fb->fail_stage = 4; fb->last_err = kr; return -1; }
+
+    fb->surface      = surf;
+    fb->width        = IOSurfaceGetWidth(surf);
+    fb->height       = IOSurfaceGetHeight(surf);
+    fb->stride       = IOSurfaceGetBytesPerRow(surf);
+    fb->bytes_per_element = IOSurfaceGetBytesPerElement(surf);
+    fb->pixel_format = IOSurfaceGetPixelFormat(surf);
+    // The menu blit is a 32-bit RGBA8 write; refuse non-32bpp surfaces (e.g. 10-bit HDR
+    // scanout) and fall back to the console key + macOS default rather than corrupt them.
+    if (fb->bytes_per_element != 4) {
+        fb->fail_stage = 4;
+        fb->last_err = 0;
+        fb->valid = 0;
+        return -1;
+    }
+    fb->valid        = 1;
+    return 0;
+}
+
+// Map each destination byte of a 4CC to a source channel. Source framebuffer is BGRA:
+// byte0=B, byte1=G, byte2=R, byte3=A. Returns the source byte index, -1 for an 'X' pad
+// byte (write 0xff), or -2 for an unknown channel (treated as straight copy).
+static int iomfb_channel_map(uint32_t fmt, int dst_byte, int* map) {
+    char c = (char)((fmt >> (8 * dst_byte)) & 0xff);
+    switch (c) {
+        case 'B': case 'b': map[dst_byte] = 0; return 1;
+        case 'G': case 'g': map[dst_byte] = 1; return 1;
+        case 'R': case 'r': map[dst_byte] = 2; return 1;
+        case 'A': case 'a': map[dst_byte] = 3; return 1;
+        case 'X': case 'x': map[dst_byte] = -1; return 1;
+        default:            map[dst_byte] = -2; return 0;
+    }
+}
+
+// Blit the BGRA8 menu framebuffer into the IOMFB surface (channel-swizzled to the surface's
+// pixel format + stride-aware), then SwapBegin/SwapEnd to present it. Returns 0 on success.
+static int iomfb_blit(iomfb_t* fb, const uint8_t* src, uint32_t src_w, uint32_t src_h) {
+    if (!fb->valid || !fb->surface) return -1;
+    if (IOSurfaceLock(fb->surface, 0, NULL) != kIOReturnSuccess) return -1;
+
+    uint8_t* dst = (uint8_t*)IOSurfaceGetBaseAddress(fb->surface);
+    if (!dst) { IOSurfaceUnlock(fb->surface, 0, NULL); return -1; }
+
+    int map[4];
+    int known = 1;
+    for (int i = 0; i < 4; i++)
+        if (!iomfb_channel_map(fb->pixel_format, i, map)) known = 0;
+    if (!known) { map[0] = 0; map[1] = 1; map[2] = 2; map[3] = 3; }  // assume BGRA
+
+    size_t rows = fb->height < src_h ? fb->height : src_h;
+    size_t cols = fb->width  < src_w ? fb->width  : src_w;
+    for (size_t y = 0; y < rows; y++) {
+        const uint8_t* s = src + (size_t)y * (size_t)src_w * 4;
+        uint8_t* d = dst + (size_t)y * fb->stride;
+        for (size_t x = 0; x < cols; x++) {
+            const uint8_t* sp = s + x * 4;
+            uint8_t* dp = d + x * 4;
+            for (int i = 0; i < 4; i++) dp[i] = (map[i] >= 0) ? sp[map[i]] : 0xff;
+        }
+    }
+    IOSurfaceUnlock(fb->surface, 0, NULL);
+
+    // Present: SwapBegin + SwapEnd (the userland flip the DCP consumes on the next vblank).
+    int token = 0;
+    int rc = -1;
+    if (sigsetjmp(g_present_jmp, 1) == 0) {
+        g_present_guarded = 1;
+        kern_return_t kr = f_iomfb_swap_begin(fb->conn, &token);
+        if (kr == KERN_SUCCESS) {
+            kr = f_iomfb_swap_end(fb->conn);
+            rc = (kr == KERN_SUCCESS) ? 0 : -1;
+        }
+        g_present_guarded = 0;
+    } else {
+        g_present_guarded = 0;
+    }
+    return rc;
+}
+
+// Present the menu: prefer the IOMFB framebuffer blit (boot-logo path); fall back to the
+// CoreDisplay present when the framebuffer surface is not reachable.
+static int present_menu(const uint8_t* fb, uint32_t width, uint32_t height) {
+    if (g_iomfb.valid) {
+        int rc = iomfb_blit(&g_iomfb, fb, width, height);
+        if (rc == 0) {
+            fprintf(stderr, "chooser: iomfb: blit %zux%zu (stride %zu, fmt '%c%c%c%c') + swap -> ok\n",
+                    g_iomfb.width, g_iomfb.height, g_iomfb.stride,
+                    (char)( g_iomfb.pixel_format        & 0xff),
+                    (char)((g_iomfb.pixel_format >>  8) & 0xff),
+                    (char)((g_iomfb.pixel_format >> 16) & 0xff),
+                    (char)((g_iomfb.pixel_format >> 24) & 0xff));
+            return 0;
+        }
+        fprintf(stderr, "chooser: iomfb: blit failed; falling back to CoreDisplay present\n");
+    }
+    return present_framebuffer(fb, width, height);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -667,18 +876,28 @@ static int resolve_branch(const char* choice, int present_flag) {
 
     hid_init();
 
-    // Framebuffer size: use the MAIN display's native size when presenting.
+    // Framebuffer size: when presenting, prefer the IOMFB framebuffer surface's own
+    // dimensions (the boot-logo blit target); otherwise use the MAIN display's native size
+    // for the CoreDisplay fallback path.
     uint32_t width = 960, height = 540;
     uint32_t scale = 2;
     if (present_flag) {
-        CGDirectDisplayID mainID = main_display_id();
-        if (mainID != 0) {
-            size_t w = CGDisplayPixelsWide(mainID);
-            size_t h = CGDisplayPixelsHigh(mainID);
-            if (w >= 1 && w <= 0x4000 && h >= 1 && h <= 0x4000) {
-                width = (uint32_t)w;
-                height = (uint32_t)h;
-                scale = w > 0x59f ? (w > 0x9ff ? 4 : 3) : 2;
+        if (iomfb_resolve(&g_iomfb) == 0 && g_iomfb.valid &&
+            g_iomfb.width >= 1 && g_iomfb.width <= 0x4000 &&
+            g_iomfb.height >= 1 && g_iomfb.height <= 0x4000) {
+            width = (uint32_t)g_iomfb.width;
+            height = (uint32_t)g_iomfb.height;
+            scale = width > 0x59f ? (width > 0x9ff ? 4 : 3) : 2;
+        } else {
+            CGDirectDisplayID mainID = main_display_id();
+            if (mainID != 0) {
+                size_t w = CGDisplayPixelsWide(mainID);
+                size_t h = CGDisplayPixelsHigh(mainID);
+                if (w >= 1 && w <= 0x4000 && h >= 1 && h <= 0x4000) {
+                    width = (uint32_t)w;
+                    height = (uint32_t)h;
+                    scale = w > 0x59f ? (w > 0x9ff ? 4 : 3) : 2;
+                }
             }
         }
     }
@@ -692,7 +911,7 @@ static int resolve_branch(const char* choice, int present_flag) {
 
     render_menu(fb, width, height, scale, timeout);
     if (present_flag) {
-        int rc = present_framebuffer(fb, width, height);
+        int rc = present_menu(fb, width, height);
         if (rc)
             fprintf(stderr, "chooser: menu present failed (rc=%d); keyboard still live\n", rc);
     }
@@ -731,7 +950,7 @@ static int resolve_branch(const char* choice, int present_flag) {
         if (remaining != last_countdown) {
             last_countdown = remaining;
             render_menu(fb, width, height, scale, remaining);
-            if (present_flag) present_framebuffer(fb, width, height);
+            if (present_flag) present_menu(fb, width, height);
         }
     }
 }
@@ -742,7 +961,7 @@ static int resolve_branch(const char* choice, int present_flag) {
 static void usage(FILE* out) {
     fprintf(out,
         "usage: chooser [--dry-run] [--choice macOS|shimmy] [--kickstart-windowserver]\n"
-        "               [--present] [--probe-present] [--probe-hid]\n"
+        "               [--present] [--probe-present] [--probe-framebuffer] [--probe-hid]\n"
         "               [--render <path.ppm>] [--render-size WxH]\n"
         "               [--checkin <name> [seconds]]\n"
         "  --dry-run               print the chosen branch + full plan, touch nothing\n"
@@ -750,6 +969,7 @@ static void usage(FILE* out) {
         "  --kickstart-windowserver  on the macOS branch, kickstart system/com.apple.WindowServer\n"
         "  --present               enable the live direct-scanout present (equiv SHIMMY_PRESENT=1)\n"
         "  --probe-present         READ-ONLY: dlsym the CoreDisplay present symbols + list displays\n"
+        "  --probe-framebuffer     READ-ONLY: report the IOMFB framebuffer base/stride/format\n"
         "  --probe-hid             READ-ONLY: open IOHIDManager and enumerate keyboards\n"
         "  --render <path.ppm>     render the menu to a PPM (captured framebuffer) and exit\n"
         "  --render-size WxH       framebuffer size for --render (default %dx%d)\n"
@@ -768,6 +988,7 @@ int main(int argc, char** argv) {
     int present_flag = 0;
     int kickstart_flag = 0;
     int probe_present = 0;
+    int probe_framebuffer = 0;
     int probe_hid = 0;
     const char* choice = NULL;
     const char* render_path = NULL;
@@ -787,6 +1008,8 @@ int main(int argc, char** argv) {
             present_flag = 1;
         } else if (!strcmp(a, "--probe-present")) {
             probe_present = 1;
+        } else if (!strcmp(a, "--probe-framebuffer")) {
+            probe_framebuffer = 1;
         } else if (!strcmp(a, "--probe-hid")) {
             probe_hid = 1;
         } else if (!strcmp(a, "--render")) {
@@ -878,6 +1101,41 @@ int main(int argc, char** argv) {
                    (int)CGDisplayIsOnline(ds[i]), (int)CGDisplayIsMain(ds[i]));
         }
         printf("present: main display id = 0x%08x\n", (unsigned)main_display_id());
+        return 0;
+    }
+
+    // --probe-framebuffer: READ-ONLY IOMFB framebuffer surface report (no SwapBegin/End, so
+    // the live display is never touched). Reports the framebuffer base/stride/format when the
+    // surface is reachable (root), else the graceful fallback (unprivileged -> NotPrivileged).
+    if (probe_framebuffer) {
+        int ok = iomfb_resolve(&g_iomfb);
+        printf("framebuffer: IOMobileFramebuffer dlopen -> %s\n",
+               g_iomfb.framework ? "OK" : "FAILED");
+        if (ok == 0 && g_iomfb.valid) {
+            char f[5];
+            f[0] = (char)( g_iomfb.pixel_format        & 0xff);
+            f[1] = (char)((g_iomfb.pixel_format >>  8) & 0xff);
+            f[2] = (char)((g_iomfb.pixel_format >> 16) & 0xff);
+            f[3] = (char)((g_iomfb.pixel_format >> 24) & 0xff);
+            f[4] = 0;
+            printf("framebuffer: connection=%p surface=%p\n",
+                   (void*)g_iomfb.conn, (void*)g_iomfb.surface);
+            printf("framebuffer: REACHABLE base=%p stride=%zu size=%zux%zu bpe=%zu format='%s' (id=%u)\n",
+                   IOSurfaceGetBaseAddress(g_iomfb.surface), g_iomfb.stride,
+                   g_iomfb.width, g_iomfb.height, g_iomfb.bytes_per_element, f,
+                   IOSurfaceGetID(g_iomfb.surface));
+        } else {
+            const char* stage = "unknown";
+            switch (g_iomfb.fail_stage) {
+                case 1: stage = "dlopen"; break;
+                case 2: stage = "dlsym"; break;
+                case 3: stage = "open/GetMainDisplay"; break;
+                case 4: stage = "GetLayerDefaultSurface"; break;
+                default: stage = "none"; break;
+            }
+            printf("framebuffer: NOT reachable (stage=%s err=0x%08x); graceful fallback\n",
+                   stage, (unsigned)g_iomfb.last_err);
+        }
         return 0;
     }
 
