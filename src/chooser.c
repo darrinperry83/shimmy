@@ -1,13 +1,12 @@
 // chooser.c — shimmy boot chooser (config default + keyboard override; display-less).
 //
-// Runs from launchd BEFORE WindowServer (LaunchDaemon com.shimmy.chooser, which
-// registers the com.apple.windowserver bootstrap service). The on-screen present
-// (IOMFB + CoreDisplay) is BLOCKED pre-WindowServer (the framebuffer surface returns
-// kIOReturnNotPrivileged and the display id is 0x0), so the chooser is display-less:
-// it reads a config default + one-shot (/usr/local/etc/shimmy/boot.conf) and a /dev/console key,
-// and either:
-//   * key o/O/1/m/M/Enter/timeout -> boot macOS (kickstart the real WindowServer), or
-//   * key 2/l/L                   -> boot shimmy/Linux (fork+exec the stand-in WindowServer).
+// Runs from launchd BEFORE WindowServer (LaunchDaemon com.shimmy.chooser, which declares the
+// com.apple.windowserver + .active bootstrap services with HideUntilCheckIn). It CLAIMS both
+// names IMMEDIATELY at startup (bootstrap_check_in, before the countdown), so the real
+// WindowServer's own check-in fails and it exits. It then decides, and:
+//   * macOS  -> release the two names, then kickstart the real WindowServer.
+//   * shimmy -> hand the already-claimed receive rights to the stand-in over the .active
+//               rendezvous (a Mach MOVE_RECEIVE handoff; no second check-in race).
 //
 // The key reader decides the branch; with no key (timeout) it falls back to the config default
 // (`default=macOS|shimmy`) or a one-shot (`once=macOS|shimmy`, which is cleared to macOS BEFORE
@@ -48,6 +47,42 @@
 #include <sys/wait.h>
 
 #include "chooser_font.h"
+
+// ---------------------------------------------------------------------------------------------
+// WindowServer service claim + handoff.
+//
+// The chooser claims `com.apple.windowserver` (+ `.active`) IMMEDIATELY at startup, BEFORE the
+// countdown, so the real WindowServer's own bootstrap_check_in fails and it exits. It then
+// decides (countdown + key + config):
+//   * macOS  -> release the two names, then kickstart the real WindowServer.
+//   * shimmy -> hand the ALREADY-CLAIMED receive rights to the stand-in over a Mach message.
+//
+// Handoff: fork+exec do NOT carry Mach port rights between tasks on this platform (verified
+// empirically), so the stand-in does not re-check-in (which would re-open the race). Instead the
+// chooser and stand-in rendezvous through the `.active` service (which no client sends SLS
+// traffic to): the stand-in bootstrap_look_up's `.active`, sends back its reply port, and the
+// chooser replies with BOTH receive rights as MACH_MSG_TYPE_MOVE_RECEIVE. The stand-in then owns
+// them with no second check-in.
+#define SHIMMY_SERVICE_PREHELD_ENV      "SHIMMY_SERVICE_PREHELD"
+#define SHIMMY_SERVICE_MAIN_ENV         "SHIMMY_SERVICE_MAIN_NAME"
+#define SHIMMY_SERVICE_ACTIVE_ENV       "SHIMMY_SERVICE_ACTIVE_NAME"
+
+#define SHIMMY_HANDOFF_REQ_ID           0x57534831u  // "WSH1": stand-in -> chooser (reply port)
+#define SHIMMY_HANDOFF_GRANT_ID         0x57534832u  // "WSH2": chooser -> stand-in (2 receive rights)
+
+// Wire structs MUST match byte-for-byte between chooser.c and the stand-in windowserver.c.
+typedef struct {
+    mach_msg_header_t          hdr;
+    mach_msg_body_t            body;
+    mach_msg_port_descriptor_t pd;      // reply port C (COPY_SEND)
+} shimmy_handoff_req_t;
+
+typedef struct {
+    mach_msg_header_t          hdr;
+    mach_msg_body_t            body;
+    mach_msg_port_descriptor_t pd_main;    // main service (MOVE_RECEIVE)
+    mach_msg_port_descriptor_t pd_active;  // active service (MOVE_RECEIVE)
+} shimmy_handoff_grant_t;
 
 // ---------------------------------------------------------------------------------------------
 // Present state (the private CoreDisplay scanout hops).
@@ -126,6 +161,12 @@ static int               g_key_head;        // next write slot
 static int               g_key_tail;        // next read slot
 static int               g_console_fd = 0;  // fd the console fallback reads (0 = stdin)
 
+// WindowServer service claim state.
+static mach_port_t g_ws_main   = MACH_PORT_NULL;  // receive right: com.apple.windowserver
+static mach_port_t g_ws_active = MACH_PORT_NULL;  // receive right: com.apple.windowserver.active
+static int         g_ws_claimed = 0;              // 1 once BOTH names are claimed
+static int         g_ws_register_mode = 0;        // 1 = headless test: bootstrap_register, not check_in
+
 // ---------------------------------------------------------------------------------------------
 // Config default + one-shot (display-less boot target).
 
@@ -201,6 +242,172 @@ static int config_default_branch(void) {
         return once;
     }
     return branch;
+}
+
+// ---------------------------------------------------------------------------------------------
+// WindowServer service claim / release / handoff.
+
+static const char* ws_main_name(void) {
+    const char* n = getenv("SHIMMY_WS_MAIN_NAME");
+    return (n && n[0]) ? n : "com.apple.windowserver";
+}
+static const char* ws_active_name(void) {
+    const char* n = getenv("SHIMMY_WS_ACTIVE_NAME");
+    return (n && n[0]) ? n : "com.apple.windowserver.active";
+}
+
+// Drop a claim port's send right (harmless when there is none, as after bootstrap_check_in)
+// and its receive right (the "release" that lets launchd re-advertise the name).
+static void ws_release_port(mach_port_t p) {
+    if (p == MACH_PORT_NULL) return;
+    mach_port_deallocate(mach_task_self(), p);                            // drop a send right, if any
+    mach_port_mod_refs(mach_task_self(), p, MACH_PORT_RIGHT_RECEIVE, -1); // drop the receive right
+}
+
+// Release the two claimed service names (reverse claim order: .active then main).
+static void release_windowserver_service(const char* why) {
+    if (g_ws_main != MACH_PORT_NULL || g_ws_active != MACH_PORT_NULL)
+        fprintf(stderr, "chooser: released -> %s\n", why);
+    if (g_ws_active != MACH_PORT_NULL) {
+        ws_release_port(g_ws_active);
+        fprintf(stderr, "chooser:   released %s\n", ws_active_name());
+        g_ws_active = MACH_PORT_NULL;
+    }
+    if (g_ws_main != MACH_PORT_NULL) {
+        ws_release_port(g_ws_main);
+        fprintf(stderr, "chooser:   released %s\n", ws_main_name());
+        g_ws_main = MACH_PORT_NULL;
+    }
+    g_ws_claimed = 0;
+}
+
+// CLAIM the two WindowServer service names FIRST — before any countdown — so the real
+// WindowServer cannot win the service race. Production path uses bootstrap_check_in (the plist
+// declares both names with HideUntilCheckIn); SHIMMY_WS_CLAIM_REGISTER=1 switches to
+// bootstrap_register with the SHIMMY_WS_*_NAME test names for headless validation.
+static int claim_windowserver_service(void) {
+    const char* main_name = ws_main_name();
+    const char* active_name = ws_active_name();
+
+    mach_port_t bp = MACH_PORT_NULL;
+    if (task_get_special_port(mach_task_self(), TASK_BOOTSTRAP_PORT, &bp) != KERN_SUCCESS) {
+        fprintf(stderr, "chooser: claim: no bootstrap port\n");
+        return -1;
+    }
+
+    if (g_ws_register_mode) {
+        // Headless test: allocate receive right + self send right, then bootstrap_register.
+        mach_port_t p = MACH_PORT_NULL;
+        if (mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &p) != KERN_SUCCESS) {
+            fprintf(stderr, "chooser: claim: allocate %s failed\n", main_name);
+            return -1;
+        }
+        mach_port_insert_right(mach_task_self(), p, p, MACH_MSG_TYPE_MAKE_SEND);
+        kern_return_t kr = bootstrap_register(bp, (char*)main_name, p);
+        if (kr != KERN_SUCCESS) {
+            fprintf(stderr, "chooser: claim: bootstrap_register %s failed: 0x%x (%s)\n",
+                    main_name, kr, bootstrap_strerror(kr));
+            ws_release_port(p);
+            return -1;
+        }
+        g_ws_main = p;
+
+        p = MACH_PORT_NULL;
+        if (mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &p) != KERN_SUCCESS) {
+            fprintf(stderr, "chooser: claim: allocate %s failed\n", active_name);
+            release_windowserver_service("claim failed");
+            return -1;
+        }
+        mach_port_insert_right(mach_task_self(), p, p, MACH_MSG_TYPE_MAKE_SEND);
+        kr = bootstrap_register(bp, (char*)active_name, p);
+        if (kr != KERN_SUCCESS) {
+            fprintf(stderr, "chooser: claim: bootstrap_register %s failed: 0x%x (%s)\n",
+                    active_name, kr, bootstrap_strerror(kr));
+            ws_release_port(p);
+            release_windowserver_service("claim failed");
+            return -1;
+        }
+        g_ws_active = p;
+    } else {
+        // Production: bootstrap_check_in, lowercase, main then .active (the order is pinned).
+        kern_return_t kr = bootstrap_check_in(bp, (char*)main_name, &g_ws_main);
+        if (kr != KERN_SUCCESS) {
+            fprintf(stderr, "chooser: claim: bootstrap_check_in(%s) failed: 0x%x (%s)\n",
+                    main_name, kr, bootstrap_strerror(kr));
+            return -1;
+        }
+        kr = bootstrap_check_in(bp, (char*)active_name, &g_ws_active);
+        if (kr != KERN_SUCCESS) {
+            fprintf(stderr, "chooser: claim: bootstrap_check_in(%s) failed: 0x%x (%s)\n",
+                    active_name, kr, bootstrap_strerror(kr));
+            release_windowserver_service("claim failed");
+            return -1;
+        }
+    }
+    fprintf(stderr, "chooser: claimed %s (port 0x%x)\n", main_name, g_ws_main);
+    fprintf(stderr, "chooser: claimed %s (port 0x%x)\n", active_name, g_ws_active);
+    g_ws_claimed = 1;
+    return 0;
+}
+
+// Parent half of the handoff: receive the stand-in's reply port on the .active service, then
+// send BOTH claimed receive rights to that port as MOVE_RECEIVE. On failure the chooser falls
+// back to macOS (release + kickstart).
+static int handoff_service_to_standin(void) {
+    uint8_t rbuf[512];
+    memset(rbuf, 0, sizeof rbuf);
+    // Finite timeout: if the stand-in never checks in on the .active rendezvous, drop back to
+    // macOS instead of hanging the boot.
+    kern_return_t kr = mach_msg((mach_msg_header_t*)rbuf,
+                                MACH_RCV_MSG | MACH_RCV_LARGE | MACH_RCV_TIMEOUT, 0, sizeof rbuf,
+                                g_ws_active, 10000, MACH_PORT_NULL);
+    if (kr != KERN_SUCCESS) {
+        fprintf(stderr, "chooser: handoff: recv stand-in reply port failed: 0x%x (%s)\n",
+                kr, mach_error_string(kr));
+        return -1;
+    }
+    shimmy_handoff_req_t* req = (shimmy_handoff_req_t*)rbuf;
+    if (req->hdr.msgh_id != SHIMMY_HANDOFF_REQ_ID) {
+        fprintf(stderr, "chooser: handoff: unexpected message id 0x%x on .active\n",
+                req->hdr.msgh_id);
+        return -1;
+    }
+    mach_port_t reply = req->pd.name;
+    if (reply == MACH_PORT_NULL) {
+        fprintf(stderr, "chooser: handoff: stand-in sent no reply port\n");
+        return -1;
+    }
+
+    shimmy_handoff_grant_t grant;
+    memset(&grant, 0, sizeof grant);
+    grant.hdr.msgh_bits = MACH_MSGH_BITS_COMPLEX |
+                          MACH_MSGH_BITS(MACH_MSG_TYPE_COPY_SEND, MACH_MSG_TYPE_MAKE_SEND_ONCE);
+    grant.hdr.msgh_remote_port = reply;
+    grant.hdr.msgh_local_port  = MACH_PORT_NULL;
+    grant.hdr.msgh_id         = SHIMMY_HANDOFF_GRANT_ID;
+    grant.hdr.msgh_size       = sizeof grant;
+    grant.body.msgh_descriptor_count = 2;
+    grant.pd_main.name        = g_ws_main;
+    grant.pd_main.disposition = MACH_MSG_TYPE_MOVE_RECEIVE;
+    grant.pd_main.type        = MACH_MSG_PORT_DESCRIPTOR;
+    grant.pd_active.name      = g_ws_active;
+    grant.pd_active.disposition = MACH_MSG_TYPE_MOVE_RECEIVE;
+    grant.pd_active.type      = MACH_MSG_PORT_DESCRIPTOR;
+
+    kr = mach_msg(&grant.hdr, MACH_SEND_MSG, sizeof grant, 0, MACH_PORT_NULL, 0, MACH_PORT_NULL);
+    if (kr != KERN_SUCCESS) {
+        fprintf(stderr, "chooser: handoff: send receive rights failed: 0x%x (%s)\n",
+                kr, mach_error_string(kr));
+        return -1;
+    }
+
+    fprintf(stderr, "chooser: handed to stand-in (%s 0x%x, %s 0x%x)\n",
+            ws_main_name(), g_ws_main, ws_active_name(), g_ws_active);
+    // The receive rights now live in the stand-in's task; clear our (now-invalid) names.
+    g_ws_main = MACH_PORT_NULL;
+    g_ws_active = MACH_PORT_NULL;
+    g_ws_claimed = 0;
+    return 0;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -815,22 +1022,20 @@ static void branch_shimmy(int dry_run) {
     const char* cmd = getenv("SHIMMY_WINDOWSERVER_CMD");
     const char* standin = (cmd && cmd[0]) ? cmd : "/usr/local/sbin/shim_windowserver";
 
-    const char* sys = getenv("SHIMMY_WINDOWSERVER_SYSTEM");
-    int test_names = (sys && sys[0] == '0' && sys[1] == '\0');
-
     const char* ws = getenv("SHIMMY_WARM_SWITCH_KICKSTART");
     int kickstart = (ws && ws[0] == '1' && ws[1] == '\0');
 
     puts("chooser: branch = shimmy (takeover)");
-    printf("chooser: stand-in = %s (%s)\n", standin,
-           test_names ? "test-name mode (safe: no real check-in)"
-                      : "RDNATIVE_WINDOWSERVER_SYSTEM=1 -> real check-in");
+    printf("chooser: stand-in = %s (pre-held service handoff)\n", standin);
 
     if (dry_run) {
-        printf("chooser: dry-run: would fork+exec %s with RDNATIVE_WINDOWSERVER_SYSTEM=1 so it\n", standin);
-        printf("chooser: dry-run:   checks in %s then %s and runs the ~37-function server,\n",
-               "com.apple.windowserver", "com.apple.windowserver.active");
-        puts("chooser: dry-run:   then on clean exit / macOS key (1/m) warm-switch to the real WindowServer");
+        printf("chooser: dry-run: would fork+exec %s with %s=1 so it\n",
+               standin, SHIMMY_SERVICE_PREHELD_ENV);
+        printf("chooser: dry-run:   rendezvous on %s and receives the ALREADY-CLAIMED\n",
+               ws_active_name());
+        printf("chooser: dry-run:   %s + %s receive rights (no second check-in),\n",
+               ws_main_name(), ws_active_name());
+        puts("chooser: dry-run:   then runs the ~37-function server; on clean exit / macOS key (1/m) warm-switch");
         printf("chooser: dry-run:   warm-switch kickstart: %s\n",
                kickstart ? "launchctl kickstart -k system/com.apple.WindowServer" : "disabled (print only)");
         return;
@@ -839,6 +1044,7 @@ static void branch_shimmy(int dry_run) {
     if (access(standin, X_OK) != 0) {
         fprintf(stderr, "chooser: stand-in not executable: %s (%s); fail-safe -> macOS\n",
                 standin, strerror(errno));
+        release_windowserver_service("stand-in missing");
         branch_macos(kickstart, 0);
         return;
     }
@@ -846,14 +1052,30 @@ static void branch_shimmy(int dry_run) {
     pid_t pid = fork();
     if (pid < 0) {
         perror("chooser: fork");
+        release_windowserver_service("fork failed");
         branch_macos(kickstart, 0);
         return;
     }
     if (pid == 0) {
-        if (!test_names) setenv("RDNATIVE_WINDOWSERVER_SYSTEM", "1", 1);
+        // Stand-in child: fork dropped the claimed Mach receive rights (verified), so it re-acquires
+        // them over the .active rendezvous. exec preserves ONLY task special ports, not the claim.
+        setenv(SHIMMY_SERVICE_PREHELD_ENV, "1", 1);
+        setenv(SHIMMY_SERVICE_MAIN_ENV, ws_main_name(), 1);
+        setenv(SHIMMY_SERVICE_ACTIVE_ENV, ws_active_name(), 1);
+        unsetenv("RDNATIVE_WINDOWSERVER_SYSTEM");
         execl(standin, standin, (char*)NULL);
         perror("chooser: execl stand-in");
         _exit(127);
+    }
+
+    // Parent: hand the claimed receive rights to the stand-in, then monitor for warm-switch.
+    if (handoff_service_to_standin() != 0) {
+        fprintf(stderr, "chooser: handoff failed; fail-safe -> macOS\n");
+        release_windowserver_service("handoff failed");
+        kill(pid, SIGTERM);
+        waitpid(pid, NULL, 0);
+        branch_macos(kickstart, 0);
+        return;
     }
 
     printf("chooser: stand-in pid %d running (macOS key 1/m or SIGTERM to warm-switch)\n", pid);
@@ -924,6 +1146,9 @@ static void branch_macos(int kickstart, int dry_run) {
         if (kickstart) puts("chooser: dry-run: would kickstart system/com.apple.WindowServer");
         return;
     }
+    // Release the claimed WindowServer services so launchd re-advertises the names and the real
+    // WindowServer can re-check-in. Do this BEFORE the kickstart.
+    release_windowserver_service("macOS");
     if (kickstart) {
         puts("chooser: kickstarting system/com.apple.WindowServer");
         int rc = system("/bin/launchctl kickstart -k system/com.apple.WindowServer");
@@ -1085,8 +1310,10 @@ static void usage(FILE* out) {
         "env: SHIMMY_BOOT_TIMEOUT (default 10), SHIMMY_BOOT_CHOICE, SHIMMY_PRESENT (0/1)\n"
         "     SHIMMY_BOOT_CONF            boot.conf path (default /usr/local/etc/shimmy/boot.conf)\n"
         "     SHIMMY_WINDOWSERVER_CMD     stand-in path (default %s)\n"
-        "     SHIMMY_WINDOWSERVER_SYSTEM  1 (default) real check-in; 0 = test names (safe)\n"
         "     SHIMMY_WARM_SWITCH_KICKSTART 0 (default) print only; 1 = really kickstart\n"
+        "     SHIMMY_WS_MAIN_NAME         claim name (default com.apple.windowserver)\n"
+        "     SHIMMY_WS_ACTIVE_NAME       claim name (default com.apple.windowserver.active)\n"
+        "     SHIMMY_WS_CLAIM_REGISTER    1 = headless test (bootstrap_register, not check_in)\n"
         "keys: o/O/1/m/M/Enter/Esc/timeout -> macOS (config default); 2/l/L -> shimmy\n",
         960, 540, "/usr/local/sbin/shim_windowserver");
 }
@@ -1270,7 +1497,15 @@ int main(int argc, char** argv) {
     // --render headless capture.
     if (render_path) return render_mode(render_path, (uint32_t)width, (uint32_t)height);
 
-    // Normal boot.
+    // Normal boot: CLAIM the WindowServer services FIRST — before the countdown — so the real
+    // WindowServer cannot win the race. (dry-run claims nothing, honouring "touch nothing".)
+    if (!dry_run) {
+        const char* reg = getenv("SHIMMY_WS_CLAIM_REGISTER");
+        g_ws_register_mode = (reg && reg[0] == '1' && reg[1] == '\0');
+        if (claim_windowserver_service() != 0)
+            fprintf(stderr, "chooser: claim failed; proceeding without claim (macOS-safe)\n");
+    }
+
     int present = present_enabled_flag(present_flag);
     int branch = resolve_branch(choice, present);
     if (dry_run)

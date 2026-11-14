@@ -6,15 +6,24 @@
 	<dict>
 		<key>SHIMMY_BOOT_TIMEOUT</key>
 		<string>10</string>
-		<key>SHIMMY_LINUX_CMD</key>
-		<string>/private/tmp/rmatrixos-shim/run.sh --desktop hyprland</string>
+		<key>SHIMMY_PRESENT</key>
+		<string>1</string>
+		<key>SHIMMY_WARM_SWITCH_KICKSTART</key>
+		<string>1</string>
+		<key>SHIMMY_WINDOWSERVER_CMD</key>
+		<string>/usr/local/sbin/shim_windowserver</string>
+		<key>SHIMMY_WINDOWSERVER_SYSTEM</key>
+		<string>1</string>
 	</dict>
 	<key>Label</key>
 	<string>com.shimmy.chooser</string>
 	<key>MachServices</key>
 	<dict>
 		<key>com.apple.windowserver</key>
-		<true/>
+		<dict>
+			<key>HideUntilCheckIn</key>
+			<true/>
+		</dict>
 		<key>com.apple.windowserver.active</key>
 		<dict>
 			<key>HideUntilCheckIn</key>
