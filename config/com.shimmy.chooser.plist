@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  shimmy boot chooser — an early root LaunchDaemon that runs BEFORE WindowServer and
+  branches on a key press. Installed to /Library/LaunchDaemons/com.shimmy.chooser.plist
+  by `shimmy takeover` (removed by `shimmy release`). It takes effect at the NEXT boot;
+  it is never loaded into the running system by the install step.
+
+  Ordering: RunAtLoad starts it during boot, before loginwindow (which launches the real
+  WindowServer on demand). Nice=-20 is the highest priority. macOS is always the default.
+
+  MachServices: the two lowercase names the real WindowServer checks in
+  (WINDOWSERVER_BOOTSTRAP_REGISTRATION.md). Declaring them HERE is what makes the chooser's
+  bootstrap_check_in succeed and makes the real WindowServer's own check-in fail at boot —
+  the "service race won at boot". `com.apple.windowserver` is always-visible (<true/>) and
+  `com.apple.windowserver.active` is HideUntilCheckIn, exactly as the real plist declares them.
+-->
+<dict>
+    <key>Label</key>
+    <string>com.shimmy.chooser</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/sbin/shimmy-chooser</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>Nice</key>
+    <integer>-20</integer>
+
+    <key>ProcessType</key>
+    <string>Interactive</string>
+
+    <key>MachServices</key>
+    <dict>
+        <key>com.apple.windowserver</key>
+        <true/>
+        <key>com.apple.windowserver.active</key>
+        <dict>
+            <key>HideUntilCheckIn</key>
+            <true/>
+        </dict>
+    </dict>
+
+    <!-- fd 0 for the key read; the framebuffer menu is the documented follow-up. -->
+    <key>StandardInPath</key>
+    <string>/dev/console</string>
+    <key>StandardOutPath</key>
+    <string>/var/log/shimmy-chooser.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/shimmy-chooser.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>SHIMMY_BOOT_TIMEOUT</key>
+        <string>10</string>
+    </dict>
+</dict>
+</plist>

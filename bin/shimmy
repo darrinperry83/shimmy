@@ -37,8 +37,10 @@ This file depends only on the Python 3 standard library.
 import argparse
 import json
 import os
+import plistlib
 import re
 import shlex
+import subprocess
 import sys
 from pathlib import Path
 
@@ -665,6 +667,85 @@ def cmd_build(args):
         return 1
 
 
+# --------------------------------------------------------------------------- #
+# boot chooser takeover / release
+# --------------------------------------------------------------------------- #
+# The chooser is a root LaunchDaemon that runs BEFORE WindowServer and branches
+# macOS vs shimmy (see docs/DESIGN-BOOT-CHOOSER.md). `takeover` installs the
+# arrangement (binary + plist) and `release` removes it. Both are reversible and
+# take effect at the NEXT boot — the install step never loads the chooser into the
+# running system, so it can never disturb the live WindowServer.
+CHOOSER_PLIST_SRC = REPO / "config" / "com.shimmy.chooser.plist"
+CHOOSER_PLIST_DST = "/Library/LaunchDaemons/com.shimmy.chooser.plist"
+CHOOSER_BIN_SRC = REPO / "chooser"
+CHOOSER_BIN_DST = "/usr/local/sbin/shimmy-chooser"
+CHOOSER_BUILD_PLIST = REPO / "build" / "com.shimmy.chooser.plist"
+
+
+def build_takeover_plist(dst, linux_cmd):
+    """Load the canonical chooser plist, inject the site-specific Linux launch
+    command (SHIMMY_LINUX_CMD), and write the result. The canonical file is never
+    modified in place."""
+    with open(CHOOSER_PLIST_SRC, "rb") as f:
+        pl = plistlib.load(f)
+    pl.setdefault("EnvironmentVariables", {})["SHIMMY_LINUX_CMD"] = linux_cmd
+    with open(dst, "wb") as f:
+        plistlib.dump(pl, f)
+    return dst
+
+
+def _sudo(cmd, dry_run):
+    argv = ["sudo"] + cmd
+    if dry_run:
+        print("  # " + " ".join(shlex.quote(a) for a in argv))
+        return 0
+    return subprocess.run(argv, check=True).returncode
+
+
+def cmd_takeover(args):
+    linux_cmd = args.linux_cmd or ("%s --desktop hyprland" % (REPO / "run.sh"))
+    if args.dry_run:
+        print("==> takeover (dry-run)")
+        print("  # build:  %s chooser" % (REPO / "build.sh"))
+    else:
+        print("==> takeover")
+        subprocess.run([str(REPO / "build.sh"), "chooser"], cwd=str(REPO), check=True)
+
+    # Generate the installed plist with the site-specific Linux launch command.
+    build_takeover_plist(CHOOSER_BUILD_PLIST, linux_cmd)
+    print("  plist source : %s" % CHOOSER_PLIST_SRC)
+    print("  plist install: %s (SHIMMY_LINUX_CMD=%s)" % (CHOOSER_PLIST_DST, linux_cmd))
+
+    rc = 0
+    rc |= _sudo(["install", "-m", "0755", str(CHOOSER_BIN_SRC), CHOOSER_BIN_DST], args.dry_run)
+    rc |= _sudo(["cp", str(CHOOSER_BUILD_PLIST), CHOOSER_PLIST_DST], args.dry_run)
+
+    if args.dry_run:
+        print("  # (validate the generated plist with: plutil -lint %s)" % CHOOSER_BUILD_PLIST)
+        print("NOTE: takes effect at the NEXT boot; the chooser is never loaded into the "
+              "running system, so the live WindowServer is untouched.")
+        return 0
+
+    if rc == 0:
+        print("installed chooser -> %s and %s" % (CHOOSER_BIN_DST, CHOOSER_PLIST_DST))
+        print("reboot to activate; `shimmy release` undoes it. macOS stays the default.")
+    return rc
+
+
+def cmd_release(args):
+    cmd = ["rm", "-f", CHOOSER_PLIST_DST, CHOOSER_BIN_DST]
+    if args.dry_run:
+        print("==> release (dry-run)")
+        _sudo(cmd, True)
+        print("NOTE: restoring normal macOS boot; no live service is touched.")
+        return 0
+    print("==> release")
+    rc = _sudo(cmd, False)
+    if rc == 0:
+        print("removed %s and %s — normal macOS boot restored." % (CHOOSER_PLIST_DST, CHOOSER_BIN_DST))
+    return rc
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="shimmy",
@@ -700,6 +781,17 @@ def main(argv=None):
     build_p.add_argument("--dry-run", action="store_true",
                          help="print the install command without exec")
 
+    take_p = sub.add_parser("takeover", help="install the boot chooser (next-boot macOS-vs-shimmy)")
+    take_p.add_argument("--dry-run", action="store_true",
+                        help="print the sudo commands + generated plist without installing")
+    take_p.add_argument("--linux-cmd", default=None,
+                        help="command the chooser execs on the shimmy branch "
+                             "(default: <repo>/run.sh --desktop hyprland)")
+
+    rel_p = sub.add_parser("release", help="remove the boot chooser (restore normal macOS boot)")
+    rel_p.add_argument("--dry-run", action="store_true",
+                       help="print the sudo commands without removing")
+
     args = parser.parse_args(argv)
 
     if args.command is None:
@@ -718,6 +810,10 @@ def main(argv=None):
             return cmd_run(args)
         if args.command == "build":
             return cmd_build(args)
+        if args.command == "takeover":
+            return cmd_takeover(args)
+        if args.command == "release":
+            return cmd_release(args)
         parser.print_help()
         return 1
     except ConfigError as e:

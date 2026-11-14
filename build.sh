@@ -150,11 +150,22 @@ build_mac_app() {
   echo "   -> ./rd_mac_probe"
 }
 
+build_chooser() {
+  # The boot chooser: a tiny, dependency-free root LaunchDaemon binary that runs BEFORE
+  # WindowServer and branches macOS vs shimmy. Only libsystem (servers/bootstrap + mach).
+  echo "== chooser =="
+  clang $CFLAGS -o chooser $SRC/chooser.c
+  codesign --force --sign - chooser
+  stamp chooser
+  echo "   -> ./chooser"
+}
+
 case "${1:-both}" in
   cli) build_third_party; build_cli ;;
   capres) build_capres ;;
   wlh) build_wlh ;;
   gui) build_third_party; build_gui; build_mac_app ;;
+  chooser) build_chooser ;;
   handoff) build_handoff ;;
   macapp) build_mac_app ;;
   # The default MUST build shim_wlh too. It used to build only cli+gui, and that silently cost a
@@ -167,6 +178,6 @@ case "${1:-both}" in
   # shim_wlh is the headless-Wayland binary, i.e. the one every GUI measurement that does not want
   # the window-server lock is supposed to use. Making it opt-in put the project's most-used test
   # binary on the one path a routine rebuild skipped. Build time is not the scarce resource here.
-  *)   build_third_party; build_cli; build_gui; build_wlh; build_capres; build_mac_app ;;
+  *)   build_third_party; build_cli; build_gui; build_wlh; build_capres; build_mac_app; build_chooser ;;
 esac
 echo "done. try:  ./shim_cli rootfs /bin/busybox echo hello-from-linux"

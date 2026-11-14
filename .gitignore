@@ -15,6 +15,7 @@ shim_cli
 shim_wlh
 rd_mac_app
 rd_mac_probe
+chooser
 shim_gui.pre-fullscreen-split
 rootfs
 src/test_fastcall
