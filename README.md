@@ -1,6 +1,6 @@
 # shimmy
 
-**Run Linux natively on your Mac. No VM. No emulation.**
+**Native Linux on your Mac. No VM. No emulation.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![shim CI](https://github.com/darrinperry83/shimmy/actions/workflows/ci.yml/badge.svg)](https://github.com/darrinperry83/shimmy/actions)
@@ -11,9 +11,9 @@
 
 shimmy runs an unmodified Linux userland natively on Apple Silicon. The Linux processes are not
 isolated in a virtual machine; they are real tasks scheduled by the Mac's own Mach kernel.
-Graphics render through Metal (the Apple GPU), audio through CoreAudio, and the display through
-the Mac's own compositor and display controller. The result is a thin translation layer over the
-scheduler and drivers you already have, with no CPU emulation and no virtual hardware.
+Graphics render through Metal on the Apple GPU, audio through CoreAudio, and the display through
+the Mac's own IOMFB display controller. The result is a thin translation layer over the scheduler
+and drivers you already have, with no CPU emulation and no virtual hardware.
 
 Boot to a TTY, log in, and run the window manager of your choice (Hyprland, KDE, Sway, GNOME, i3,
 or anything else in the Arch repositories) along with the full ARM64 package ecosystem through
@@ -26,9 +26,9 @@ Linux desktop and the Mac remains fully usable.
 **Pre-alpha, but the core works.** It boots a real Arch rootfs, renders Hyprland, KDE, and Omarchy
 on both displays through a native DRM-master compositor, and has working audio, input, a TTY
 console, and mac-app integration. The scanout takeover (the direct `present_iosurface` flip) is
-stable and visible. The active frontier is polishing the takeover (hiding the macOS UI and removing
-the taken-over display from macOS) and wiring the Metal renderer into the live guest, which still
-falls back to CPU softpipe.
+stable and visible. The Metal renderer is complete, but the live guest still falls back to CPU
+softpipe. The active frontier is polishing the takeover (hiding the macOS UI and removing the
+taken-over display from macOS) and wiring the Metal renderer into the live guest.
 
 See [Feature support](docs/FEATURES.md) for the current status of every subsystem.
 
@@ -60,12 +60,12 @@ and IOMFB drivers, so Linux feels like it is on the hardware while macOS stays f
 ## GPU and performance
 
 shimmy does not emulate a GPU. The `rdmetal` driver is a Mesa Gallium driver that translates the
-guest's OpenGL and EGL into Metal, so the compositor's rendering runs on the Apple Silicon GPU.
+guest's OpenGL and EGL into Metal, so the compositor's rendering targets the Apple Silicon GPU.
 
 - **Render path:** guest shaders -> NIR -> SPIR-V -> Metal Shading Language (spirv-cross) -> the Apple GPU.
 - **Current state:** clear, draw, texture sampling, vertex attributes, index buffers, and uniforms
-  are Metal-backed and verified. The compositor renders through the real GPU, not a software
-  rasterizer.
+  are Metal-backed and verified. The renderer is complete, but the live guest still runs on CPU
+  softpipe until the Metal path is wired in.
 - **Target:** full Metal-backed rendering at the display's refresh rate.
 
 This is the key difference from a virtual machine. There is no emulated GPU and no guest
@@ -156,12 +156,13 @@ switches between them (a key combo, or moving the pointer across the screen boun
 | Mode | macOS side | Linux side |
 |---|---|---|
 | **Windowed** | full macOS | Linux in a window (one display), fullscreen-able |
-| **Takeover** (single-display) | macOS on the builtin | Linux owns the display of your choice |
+| **Single-display takeover** | macOS on the builtin | Linux owns the display of your choice |
 | **Kiosk** | macOS on the builtin | one locked-down app on one display |
-| **Takeover** (all-displays) | suppressed | Linux owns all displays |
+| **All-displays takeover** | suppressed | Linux owns all displays |
 
-The takeover modes flip the Linux frame directly to the display via `present_iosurface` and remove
-the taken-over display from macOS. See [DESIGN.md](DESIGN.md) for the full mode and flick design.
+The takeover modes flip the Linux frame directly to the display via `present_iosurface`. The flip is
+stable and visible today; hiding the macOS UI and removing the taken-over display from macOS are
+still in progress. See [DESIGN.md](DESIGN.md) for the full mode and flick design.
 
 ## Development
 

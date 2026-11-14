@@ -35,25 +35,35 @@ rendered by the **rdmetal** driver and presented by the shim.
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Architectural north star: native compositor, no custom Wayland server
+## Architectural north star: NO custom `wlsrv` — stock packages, shim presents the flip
 
-The long-term target is for the compositor to run **natively**, not as a nested client of a
-custom server:
+The north star is explicit:
+
+- **NO custom `wlsrv`.** The shim does not run a Wayland server — not as the target, not at all.
+  `wlsrv` (and its nested-Wayland dmabuf import) is retired in full.
+- **The standard packages run natively.** Hyprland and KDE Plasma ship unmodified and drive
+  rdmetal directly over DRM/KMS/GBM. The **compositor is the DRM master** of `/dev/dri/card0`.
+- **The shim only presents the flip.** rdmetal hands the finished frame to the shim, whose sole
+  remaining rendering-path job is to present it: into a macOS window (`CAMetalLayer`) in windowed
+  mode, or straight to the display(s) via `present_iosurface` in takeover/kiosk.
 
 ```
-Hyprland / KDE  (native DRM master + its own Wayland server)
-   → /dev/dri/card0 (rdmetal)  → GBM  → render
-   → KMS/atomic page-flip      → rdmetal → Metal → display
+stock Hyprland / KDE  (DRM master; its own Wayland server for its own clients)
+   → /dev/dri/card0 (rdmetal)          → GBM  → render
+   → KMS/atomic page-flip (compositor) → rdmetal → Metal → frame
+                                                        │
+                          shim: present the flip ◄──────┘
+                 (window: CAMetalLayer  |  takeover/kiosk: present_iosurface)
 ```
 
-This retires `wlsrv.c`'s *presentation* role (the nested-Wayland dmabuf import). The shim keeps
-its other roles: input routing, cursor compositing, and the mac-app-window→Wayland-surface
-bridge (the shim acting as a Wayland *client* of the native compositor).
+The shim retains only the roles flip-presentation requires: input routing, cursor compositing,
+and the mac-app-window→Wayland-surface bridge (the shim acting as a Wayland *client* of the
+native compositor).
 
 To get there:
 1. rdmetal's DRM node becomes a full KMS/atomic device (modeset, page-flip).
 2. A `libseat` shim so the compositor's DRM backend can take the seat.
-3. Remove `wlsrv`'s presentation path; keep input/cursor/mac-window.
+3. Remove `wlsrv` entirely — it no longer exists; the shim's flip-presentation path remains.
 
 ## Product modes and the flick
 

@@ -10,7 +10,7 @@ a status legend, a per-subsystem table, and notes for the caveats.
 |---|---|
 | Boots Arch Linux (aarch64, glibc) to a TTY login | ✅ |
 | Native DRM-master compositor (Hyprland / KDE), both displays | ✅ |
-| Metal renderer (clear, draw, texture, vertex, index, uniform) | ✅ |
+| Metal renderer (clear, draw, texture, vertex, index, uniform), headless-validated | ✅ |
 | Audio (PipeWire -> CoreAudio) | ✅ |
 | Input (evdev/libinput keyboard + pointer) | ✅ |
 | TTY / virtual console with Ctrl+Alt+Fn | ✅ |
@@ -21,7 +21,7 @@ a status legend, a per-subsystem table, and notes for the caveats.
 | Self-contained build + GitHub CI | ✅ |
 | Live guest running GPU-accelerated (not softpipe) | 🚧 |
 | Takeover: hide macOS UI (no menu bar / Dock flashing) | 🚧 |
-| Takeover: remove the external display from macOS (virtual unplug) | 📋 |
+| Takeover: remove the external display from macOS (virtual unplug) | 🚧 |
 
 ## Status legend
 
@@ -40,13 +40,13 @@ has been verified end to end on the test machine.
 | Subsystem | Status | Bridge |
 |---|---|---|
 | CPU scheduling | ✅ | Linux processes run as Mach tasks; the Mach kernel schedules them |
-| GPU (rdmetal) | ✅ | Mesa Gallium driver that lowers guest GLES into Metal (clear, draw, texture, vertex, index, uniform) |
+| GPU (rdmetal) | ✅ | Mesa Gallium driver that lowers guest GLES into Metal (clear, draw, texture, vertex, index, uniform), headless-validated |
 | GPU in the live guest | 🚧 | the driver is complete, but the live compositor still falls back to CPU softpipe until the Metal path is wired into the live session |
 | Display (compositor) | ✅ | the compositor runs as the native DRM master, presents through the shim's Metal path |
 | Multi-display | ✅ | per-CRTC present on the external (3440x1440) and builtin (3600x2338) |
 | Display takeover (flip) | ✅ | direct `present_iosurface` -> IOMFB; stable and visible, held up overnight |
 | Takeover host suppression | 🚧 | the Apple menu bar / Dock still flash through between flips |
-| Takeover display removal | 📋 | drop the external from macOS (clear the `online` flag) so macOS stops seeing it |
+| Takeover display removal | 🚧 | virtual unplug of the external from macOS (clear the `online` flag) so macOS stops seeing it |
 | Audio | ✅ | PipeWire/ALSA -> CoreAudio, shim-generated sound card |
 | Input | ✅ | evdev/libinput fed from the mac's HID events |
 | TTY / virtual console | ✅ | `/dev/ttyN` + getty login + Ctrl+Alt+Fn switching |

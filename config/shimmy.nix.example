@@ -1,0 +1,42 @@
+# shimmy.nix.example — the whole Linux machine, in one file.
+#
+# Copy this to `shimmy.nix` and edit it. The machine is a pure function of the
+# config plus its pinned inputs:
+#
+#     machine = f(shimmy.nix, shimmy.lock)
+#
+# Change a field, re-run `shimmy switch` (mode / displays / flick) or
+# `shimmy run`, and the machine is rebuilt to match. Nothing else is touched by
+# hand. Full field reference: docs/CONFIG.md
+
+{
+  # How Linux and macOS share the hardware (the present sink).
+  #   "windowed"       Linux runs in a macOS window; macOS fully usable.
+  #   "single-display" one display becomes Linux; the rest stay macOS.
+  #   "kiosk"          one display runs a single locked app.
+  #   "all-displays"   every display becomes Linux; macOS suppressed.
+  mode = "single-display";
+
+  # Which displays Linux takes over (ignored in "windowed").
+  # Symbolic names ("external", "builtin", "all") or a display id/name.
+  displays = [ "external" ];
+
+  # The Linux userland profile — the "base system".
+  #   "arch"    bare Arch aarch64 + glibc; you install everything.
+  #   "omarchy" Arch + Hyprland + Quickshell, pre-configured.
+  #   "kiosk"   minimal rootfs that boots straight into one locked app.
+  rootfs = "omarchy";
+
+  # The window manager / desktop. Installed via pacman; the runner derives the
+  # launch command from the name (hyprland -> Hyprland, plasma ->
+  # startplasma-wayland, sway -> sway, ...).
+  windowManager = "hyprland";
+
+  # The application set, installed via pacman from the full Arch aarch64 repos.
+  # In "kiosk" mode the single entry here is the locked app.
+  apps = [ "foot" "chromium" "neovim" "firefox" "wireguard-tools" ];
+
+  # The flick: the hotkey that switches between Linux and macOS.
+  # One gesture everywhere — a toggle on a single screen, a swap on several.
+  flick.key = "ctrl-alt-f";
+}

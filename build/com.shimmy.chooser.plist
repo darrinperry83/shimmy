@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>SHIMMY_BOOT_TIMEOUT</key>
+		<string>10</string>
+		<key>SHIMMY_LINUX_CMD</key>
+		<string>/private/tmp/rmatrixos-shim/run.sh --desktop hyprland</string>
+	</dict>
+	<key>Label</key>
+	<string>com.shimmy.chooser</string>
+	<key>MachServices</key>
+	<dict>
+		<key>com.apple.windowserver</key>
+		<true/>
+		<key>com.apple.windowserver.active</key>
+		<dict>
+			<key>HideUntilCheckIn</key>
+			<true/>
+		</dict>
+	</dict>
+	<key>Nice</key>
+	<integer>-20</integer>
+	<key>ProcessType</key>
+	<string>Interactive</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/local/sbin/shimmy-chooser</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/var/log/shimmy-chooser.log</string>
+	<key>StandardInPath</key>
+	<string>/dev/console</string>
+	<key>StandardOutPath</key>
+	<string>/var/log/shimmy-chooser.log</string>
+</dict>
+</plist>
