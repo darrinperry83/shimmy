@@ -889,6 +889,8 @@ static int resolve_branch(const char* choice, int present_flag) {
             height = (uint32_t)g_iomfb.height;
             scale = width > 0x59f ? (width > 0x9ff ? 4 : 3) : 2;
         } else {
+            fprintf(stderr, "chooser: iomfb: resolve failed (stage=%d err=0x%x); CoreDisplay fallback\n",
+                    g_iomfb.fail_stage, (unsigned)g_iomfb.last_err);
             CGDirectDisplayID mainID = main_display_id();
             if (mainID != 0) {
                 size_t w = CGDisplayPixelsWide(mainID);
