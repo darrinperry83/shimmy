@@ -29,8 +29,8 @@ Commands:
     shimmy recover              the recovery shell (graphical installer / scripted backend)
     shimmy boot default <target>  set the boot chooser default (macOS | shimmy) — persistent
     shimmy boot once <target>     boot a target ONCE, then auto-revert to macOS (the safe way)
-    shimmy takeover             install the boot chooser (macOS stays the default)
-    shimmy release              remove the boot chooser (restore normal macOS boot)
+    shimmy takeover             rewrite the WindowServer job to run the stand-in (backup first)
+    shimmy release              restore the backed-up WindowServer job + remove the stand-in
 
 The YAML (or JSON) schema is the first cut; the DESIGN-NIX.md Nix-flavored
 evaluator is the stated future direction.  This loader therefore *also* detects
@@ -876,43 +876,34 @@ def cmd_recover(args):
 
 
 # --------------------------------------------------------------------------- #
-# boot chooser takeover / release
+# WindowServer job rewrite — takeover / release
 # --------------------------------------------------------------------------- #
-# The chooser is a root LaunchDaemon that runs BEFORE WindowServer and branches
-# macOS vs shimmy (see docs/DESIGN-BOOT-CHOOSER.md). `takeover` installs the
-# arrangement (binary + plist) and `release` removes it. Both are reversible and
-# take effect at the NEXT boot — the install step never loads the chooser into the
-# running system, so it can never disturb the live WindowServer.
-CHOOSER_PLIST_SRC = REPO / "config" / "com.shimmy.chooser.plist"
-CHOOSER_PLIST_DST = "/Library/LaunchDaemons/com.shimmy.chooser.plist"
-CHOOSER_BIN_SRC = REPO / "chooser"
-CHOOSER_BIN_DST = "/usr/local/sbin/shimmy-chooser"
+# SIP is DISABLED on this machine, so instead of an /Library override we edit the ORIGINAL
+# /System/Library/LaunchDaemons/com.apple.WindowServer.plist IN PLACE. `takeover`:
+#   1. backs up the pristine original to BACKUP_DIR (once),
+#   2. rewrites its ProgramArguments to /usr/local/sbin/shim_windowserver,
+#   3. adds EnvironmentVariables RDNATIVE_WINDOWSERVER_SYSTEM=1 (Label / MachServices /
+#      POSIXSpawnType / _Conclave are kept as-is), and
+#   4. installs the stand-in binary to /usr/local/sbin/shim_windowserver.
+# The stand-in then checks in com.apple.windowserver (+ .active) directly
+# (ws_bootstrap_check_in_system(), gated on RDNATIVE_WINDOWSERVER_SYSTEM=1 + root).
+#
+# `release` restores the backup (cp back over the system plist) and removes the stand-in + the
+# boot.conf. Both take effect at the NEXT boot — the live WindowServer is never disturbed.
 WINDOWSERVER_BIN_DST = "/usr/local/sbin/shim_windowserver"
-CHOOSER_BUILD_PLIST = REPO / "build" / "com.shimmy.chooser.plist"
+SYSTEM_WINDOWSERVER_PLIST = "/System/Library/LaunchDaemons/com.apple.WindowServer.plist"
+BACKUP_DIR = "/Library/Application Support/shimmy"
+ORIG_PLIST_BACKUP = BACKUP_DIR + "/com.apple.WindowServer.plist.orig"
 
-# The boot chooser's default-target config. The chooser reads this at boot (display-less) and
-# falls back to macOS when it is missing/unparseable. `shimmy boot default <target>` writes it;
-# `takeover` deliberately does NOT touch it, so macOS stays the default until the user opts in.
+# The pre-rewrite boot-chooser arrangement (superseded). `release` removes these too so a machine
+# that was set up with an older `takeover` is fully restored.
+LEGACY_CHOOSER_PLIST_DST = "/Library/LaunchDaemons/com.shimmy.chooser.plist"
+LEGACY_CHOOSER_BIN_DST = "/usr/local/sbin/shimmy-chooser"
+
+# The boot chooser's default-target config (kept for the `boot default|once` commands; the
+# chooser is no longer installed by `takeover`, and `release` removes this file).
 BOOT_CONF_PATH = "/usr/local/etc/shimmy/boot.conf"
 BOOT_TARGETS = ("macOS", "shimmy")
-
-
-def build_takeover_plist(dst):
-    """Load the canonical chooser plist and inject the windowserver-stand-in arrangement:
-    where the stand-in lives (SHIMMY_WINDOWSERVER_CMD), that it runs the REAL check-in at boot
-    (SHIMMY_WINDOWSERVER_SYSTEM=1), and that a warm-switch really kickstarts the real
-    WindowServer (SHIMMY_WARM_SWITCH_KICKSTART=1). The canonical file is never modified in
-    place."""
-    with open(CHOOSER_PLIST_SRC, "rb") as f:
-        pl = plistlib.load(f)
-    env = pl.setdefault("EnvironmentVariables", {})
-    env["SHIMMY_WINDOWSERVER_CMD"] = WINDOWSERVER_BIN_DST
-    env["SHIMMY_WINDOWSERVER_SYSTEM"] = "1"
-    env["SHIMMY_WARM_SWITCH_KICKSTART"] = "1"
-    env["SHIMMY_PRESENT"] = "1"
-    with open(dst, "wb") as f:
-        plistlib.dump(pl, f)
-    return dst
 
 
 def _sudo(cmd, dry_run):
@@ -926,53 +917,95 @@ def _sudo(cmd, dry_run):
 def cmd_takeover(args):
     ws_bin = args.windowserver or os.environ.get("SHIMMY_WINDOWSERVER_BIN")
     if not ws_bin:
-        print("shimmy: takeover needs the windowserver stand-in binary: pass --windowserver "
-              "<path> or set SHIMMY_WINDOWSERVER_BIN", file=sys.stderr)
+        print("shimmy: takeover needs the shim_windowserver stand-in binary: pass "
+              "--windowserver <path> or set SHIMMY_WINDOWSERVER_BIN", file=sys.stderr)
         return 1
     if args.dry_run:
         print("==> takeover (dry-run)")
-        print("  # build:  %s chooser" % (REPO / "build.sh"))
     else:
         print("==> takeover")
-        subprocess.run([str(REPO / "build.sh"), "chooser"], cwd=str(REPO), check=True)
 
-    # Generate the installed plist with the windowserver-stand-in arrangement.
-    build_takeover_plist(CHOOSER_BUILD_PLIST)
-    print("  plist source : %s" % CHOOSER_PLIST_SRC)
-    print("  plist install: %s" % CHOOSER_PLIST_DST)
+    # Edit the ORIGINAL system plist in place (SIP disabled). Read it once, keep Label /
+    # MachServices / POSIXSpawnType / _Conclave, and only rewrite ProgramArguments + add the env.
+    try:
+        with open(SYSTEM_WINDOWSERVER_PLIST, "rb") as f:
+            pl = plistlib.load(f)
+    except OSError as e:
+        print("shimmy: cannot read %s: %s" % (SYSTEM_WINDOWSERVER_PLIST, e), file=sys.stderr)
+        return 1
+
+    old_args = pl.get("ProgramArguments")
+    # The pristine backup is written BEFORE the in-memory edit.
+    backup_tmp = REPO / "build" / "com.apple.WindowServer.plist.orig"
+    edited_tmp = REPO / "build" / "com.apple.WindowServer.plist.edited"
+    with open(backup_tmp, "wb") as f:
+        plistlib.dump(pl, f)
+    pl["ProgramArguments"] = [WINDOWSERVER_BIN_DST]
+    env = pl.setdefault("EnvironmentVariables", {})
+    env["RDNATIVE_WINDOWSERVER_SYSTEM"] = "1"
+    with open(edited_tmp, "wb") as f:
+        plistlib.dump(pl, f)
+
+    print("  system plist : %s" % SYSTEM_WINDOWSERVER_PLIST)
+    print("  ProgramArguments: %r -> %r" % (old_args, [WINDOWSERVER_BIN_DST]))
+    print("  EnvironmentVariables: + RDNATIVE_WINDOWSERVER_SYSTEM=1")
+    print("  (Label / MachServices / POSIXSpawnType / _Conclave kept as-is)")
     print("  stand-in     : %s -> %s" % (ws_bin, WINDOWSERVER_BIN_DST))
+    print("  system backup: %s -> %s (once)" % (SYSTEM_WINDOWSERVER_PLIST, ORIG_PLIST_BACKUP))
 
     rc = 0
     rc |= _sudo(["mkdir", "-p", "/usr/local/sbin"], args.dry_run)
-    rc |= _sudo(["install", "-m", "0755", str(CHOOSER_BIN_SRC), CHOOSER_BIN_DST], args.dry_run)
+    rc |= _sudo(["mkdir", "-p", BACKUP_DIR], args.dry_run)
     rc |= _sudo(["install", "-m", "0755", str(ws_bin), WINDOWSERVER_BIN_DST], args.dry_run)
-    rc |= _sudo(["cp", str(CHOOSER_BUILD_PLIST), CHOOSER_PLIST_DST], args.dry_run)
+    # Back up the pristine original ONCE (skip when a backup already exists).
+    rc |= _sudo(["sh", "-c",
+                 "test -f %s || cp %s %s" % (shlex.quote(ORIG_PLIST_BACKUP),
+                                             SYSTEM_WINDOWSERVER_PLIST,
+                                             shlex.quote(ORIG_PLIST_BACKUP))],
+                args.dry_run)
+    # Rewrite the original in place.
+    rc |= _sudo(["cp", str(edited_tmp), SYSTEM_WINDOWSERVER_PLIST], args.dry_run)
 
     if args.dry_run:
-        print("  # (validate the generated plist with: plutil -lint %s)" % CHOOSER_BUILD_PLIST)
-        print("NOTE: takes effect at the NEXT boot; the chooser is never loaded into the "
-              "running system, so the live WindowServer is untouched.")
+        print("  # (validate the edited plist with: plutil -lint %s)" % edited_tmp)
+        print("NOTE: rewrites %s in place (SIP disabled). Takes effect at the NEXT boot; "
+              "the live WindowServer is untouched." % SYSTEM_WINDOWSERVER_PLIST)
         return 0
 
     if rc == 0:
-        print("installed chooser -> %s and stand-in -> %s, plist -> %s"
-              % (CHOOSER_BIN_DST, WINDOWSERVER_BIN_DST, CHOOSER_PLIST_DST))
-        print("reboot to activate; `shimmy release` undoes it. macOS stays the default.")
+        print("rewrote %s to run the stand-in, installed stand-in -> %s"
+              % (SYSTEM_WINDOWSERVER_PLIST, WINDOWSERVER_BIN_DST))
+        print("backed up the original system plist -> %s" % ORIG_PLIST_BACKUP)
+        print("REBOOT to activate. Recovery: `shimmy release`, or Cmd+R/Cmd+S then "
+              "`cp %s %s`." % (ORIG_PLIST_BACKUP, SYSTEM_WINDOWSERVER_PLIST))
     return rc
 
 
 def cmd_release(args):
-    cmd = ["rm", "-f", CHOOSER_PLIST_DST, CHOOSER_BIN_DST, WINDOWSERVER_BIN_DST]
     if args.dry_run:
         print("==> release (dry-run)")
-        _sudo(cmd, True)
-        print("NOTE: restoring normal macOS boot; no live service is touched.")
+    else:
+        print("==> release")
+
+    print("  restore: %s -> %s" % (ORIG_PLIST_BACKUP, SYSTEM_WINDOWSERVER_PLIST))
+
+    rc = 0
+    # Restore the pristine original over the system plist (no-op when no backup exists).
+    rc |= _sudo(["sh", "-c",
+                 "test -f %s && cp %s %s" % (shlex.quote(ORIG_PLIST_BACKUP),
+                                             shlex.quote(ORIG_PLIST_BACKUP),
+                                             SYSTEM_WINDOWSERVER_PLIST)],
+                args.dry_run)
+    # Remove the stand-in + boot.conf (+ legacy chooser artifacts).
+    rc |= _sudo(["rm", "-f", WINDOWSERVER_BIN_DST, BOOT_CONF_PATH,
+                 LEGACY_CHOOSER_PLIST_DST, LEGACY_CHOOSER_BIN_DST], args.dry_run)
+
+    if args.dry_run:
+        print("NOTE: restoring the real WindowServer; no live service is touched.")
         return 0
-    print("==> release")
-    rc = _sudo(cmd, False)
     if rc == 0:
-        print("removed %s, %s and %s — normal macOS boot restored."
-              % (CHOOSER_PLIST_DST, CHOOSER_BIN_DST, WINDOWSERVER_BIN_DST))
+        print("restored %s and removed the stand-in + boot.conf — the real WindowServer job "
+              "returns at the next boot." % SYSTEM_WINDOWSERVER_PLIST)
     return rc
 
 
@@ -1089,14 +1122,16 @@ def main(argv=None):
     build_p.add_argument("--dry-run", action="store_true",
                          help="print the install command without exec")
 
-    take_p = sub.add_parser("takeover", help="install the boot chooser (next-boot macOS-vs-shimmy)")
+    take_p = sub.add_parser("takeover",
+                            help="rewrite the WindowServer job to run the stand-in (backup first)")
     take_p.add_argument("--dry-run", action="store_true",
-                        help="print the sudo commands + generated plist without installing")
+                        help="print the sudo commands + edited plist without installing")
     take_p.add_argument("--windowserver", default=None,
                         help="path to the shim_windowserver stand-in binary to install "
                              "(default: $SHIMMY_WINDOWSERVER_BIN)")
 
-    rel_p = sub.add_parser("release", help="remove the boot chooser (restore normal macOS boot)")
+    rel_p = sub.add_parser("release",
+                           help="restore the backed-up WindowServer job + remove the stand-in")
     rel_p.add_argument("--dry-run", action="store_true",
                        help="print the sudo commands without removing")
 

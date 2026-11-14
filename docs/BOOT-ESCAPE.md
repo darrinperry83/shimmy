@@ -1,49 +1,42 @@
 # Boot escape: getting back to macOS
 
-The boot chooser is designed so that **macOS is always reachable**, even if shimmy, the
-keyboard, and the display all fail. This page documents every way back.
+The WindowServer takeover is designed so that **macOS is always reachable**, even if the stand-in,
+the keyboard, and the display all fail. The takeover edits the original
+`/System/Library/LaunchDaemons/com.apple.WindowServer.plist` **in place** (SIP is disabled), after
+backing it up — so recovery is simply restoring that backup.
 
-The four escapes, in order of preference:
+The escapes, in order of preference:
 
-1. Reboot (the one-shot auto-revert).
+1. `shimmy release` (from a working macOS).
 2. Single-user mode (Cmd+S).
 3. macOS Recovery (Cmd+R).
-4. The crash watchdog.
+4. The stand-in's warm-switch (clean exit releases the service).
 
 ---
 
-## 1. The one-shot (the safe escape)
+## 1. `shimmy release` (the normal escape)
 
-Do NOT use `boot default shimmy` for everyday booting (it is persistent and needs a working
-keyboard override to escape). Use the one-shot instead:
+From a working macOS (or any shell where the repo is reachable):
 
 ```sh
-sudo ./bin/shimmy boot once shimmy
+sudo ./bin/shimmy release
 ```
 
-The chooser boots shimmy **once** and, before branching, rewrites the boot config back to
-`default=macOS`. So the next boot is always macOS.
-
-| Action | Result |
-|---|---|
-| `boot once shimmy` | next boot = shimmy, then auto-reverts to macOS |
-| reboot (or hold power) | macOS |
-| `boot default shimmy` | persistent shimmy (the risky option) |
-| `boot default macOS` | persistent macOS |
-
-The one-shot is consumed *before* the branch is taken (clear-before-branch), so even a crash
-mid-shimmy-boot leaves macOS as the next default.
+This restores the backed-up original plist over `/System/Library/LaunchDaemons/com.apple.WindowServer.plist`
+and removes the stand-in (`/usr/local/sbin/shim_windowserver`) and the boot config
+(`/usr/local/etc/shimmy/boot.conf`). The real WindowServer job returns at the next boot.
 
 ---
 
 ## 2. Single-user mode (Cmd+S)
 
-Hold **Cmd+S** at boot. This boots the main macOS in single-user mode, which skips launchd
-(and therefore the chooser), dropping to a root shell.
+Hold **Cmd+S** at boot. This boots the main macOS in single-user mode, which skips launchd (and
+therefore the edited WindowServer job), dropping to a root shell.
 
 ```sh
 /sbin/mount -uw /                                        # mount the root filesystem writable
-printf 'default=macOS\n' > /usr/local/etc/shimmy/boot.conf
+cp '/Library/Application Support/shimmy/com.apple.WindowServer.plist.orig' \
+   /System/Library/LaunchDaemons/com.apple.WindowServer.plist
 reboot
 ```
 
@@ -59,31 +52,35 @@ From **Utilities -> Terminal**:
 ```sh
 diskutil list                                            # find the main volume (e.g. "Macintosh HD", disk3s1)
 diskutil mount disk3s1                                   # mount it at /Volumes/Macintosh HD
-printf 'default=macOS\n' > '/Volumes/Macintosh HD/usr/local/etc/shimmy/boot.conf'
+cp '/Volumes/Macintosh HD/Library/Application Support/shimmy/com.apple.WindowServer.plist.orig' \
+   '/Volumes/Macintosh HD/System/Library/LaunchDaemons/com.apple.WindowServer.plist'
 ```
 
-Then reboot. `/usr/local/etc/` is not SIP-protected, so the recovery Terminal (running as root)
-writes it without issue.
+Then reboot.
+
+> **Note:** `/System` is normally SIP-protected, but SIP is **disabled** on this machine (which is
+> why the takeover can edit the plist in place in the first place). In Recovery the write to
+> `/System/Library/LaunchDaemons/...` therefore succeeds. If SIP were re-enabled, remove the backup
+> restore and instead reboot into single-user mode with `csrutil disable` from Recovery, or use
+> `shimmy release` from a normal boot.
 
 ---
 
-## 4. The crash watchdog
+## 4. The warm-switch
 
-The chooser waits on the shimmy stand-in. If it exits uncleanly (a crash or a signal), the
-chooser relaunches the real WindowServer and hands back to macOS. This is automatic and does not
-depend on any input.
+The stand-in's server loop handles SIGTERM/SIGINT as a clean exit that releases the two
+`com.apple.windowserver` receive rights it checked in. If the Linux guest (or the stand-in's own
+logic) exits cleanly, the service goes dead and the real WindowServer can re-check-in and take
+over. This depends on the stand-in still running well enough to exit cleanly, so the restore
+commands above are the dependable path.
 
 ---
 
-## The config file
+## The backup
 
-The chooser reads `/usr/local/etc/shimmy/boot.conf` at boot. Recognized forms:
-
-```ini
-default=macOS     # persistent macOS
-default=shimmy    # persistent shimmy (risky)
-once=shimmy       # boot shimmy once, then auto-revert to macOS
-once=macOS        # boot macOS once (harmless)
-```
-
-Missing or unparseable file means macOS.
+`shimmy takeover` copies the original system plist aside (once) to
+`/Library/Application Support/shimmy/com.apple.WindowServer.plist.orig` **before** rewriting it.
+The backup is the pristine original, and it is exactly what `shimmy release` (or a manual `cp`)
+restores. Keep it; without it the only manual fix is to re-enter the original
+`ProgramArguments` (`/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer`
+`-daemon`) and drop the added `RDNATIVE_WINDOWSERVER_SYSTEM` environment variable by hand.

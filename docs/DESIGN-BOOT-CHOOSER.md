@@ -1,5 +1,11 @@
 # Boot chooser — boot macOS or shimmy
 
+> **Superseded.** The boot chooser has been dropped in favour of editing the WindowServer job
+> directly: `shimmy takeover` rewrites the original `/System/.../com.apple.WindowServer.plist` to
+> run the `shim_windowserver` stand-in (no chooser, no countdown, no exec-fallback). See
+> [`DESIGN-WINDOWSERVER-REWRITE.md`](DESIGN-WINDOWSERVER-REWRITE.md). This page is kept for
+> historical reference only.
+
 The shim runs as an early launchd daemon, **before WindowServer**, and branches on a key press.
 The choice decides whether macOS boots normally or the shim takes over as the WindowServer
 stand-in. macOS is always the safe default.
