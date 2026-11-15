@@ -14,12 +14,14 @@ read but not granted host filesystem write access by the test profile.
 """
 
 import argparse
+import fcntl
 import os
 from pathlib import Path
 import resource
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -175,6 +177,60 @@ def main() -> int:
             finally:
                 os.close(inherited_fd)
 
+            # The host scan must include descriptors above the usual 0..255
+            # range and non-file capabilities such as connected Unix sockets.
+            base_fd = os.open(secret, os.O_RDONLY)
+            high_fd = fcntl.fcntl(base_fd, fcntl.F_DUPFD, 300)
+            try:
+                high_path = f"/proc/self/fd/{high_fd}"
+                high_args = ["/bin/cat", high_path]
+                high_open_rc, high_open_out = run_guest(binary, root, high_args,
+                    profile, group, pass_fds=(high_fd,))
+                if high_open_rc != 0 or "SHIMMY_TEST_SECRET" not in high_open_out:
+                    raise AssertionError("high numbered file descriptor probe did not reach guest")
+                high_clean_rc, high_clean_out = run_guest(binary, root, high_args,
+                    profile, group, pass_fds=(high_fd,), clean_initial=True)
+                if high_clean_rc == 0 or "SHIMMY_TEST_SECRET" in high_clean_out:
+                    raise AssertionError("sanitizer leaked high numbered host file descriptor")
+                high_child_rc, high_child_out = run_guest(binary, root,
+                    ["/bin/sh", "-c", "sh -c " +
+                     shlex.quote("cat " + high_path)], profile, group,
+                    pass_fds=(high_fd,), clean_initial=True)
+                if high_child_rc == 0 or "SHIMMY_TEST_SECRET" in high_child_out:
+                    raise AssertionError("descendant recovered sanitized host descriptor")
+            finally:
+                os.close(high_fd)
+                os.close(base_fd)
+
+            socket_result = "socket-fd-untested-no-bash"
+            if (root / "bin/bash").exists():
+                sock_a, sock_b = socket.socketpair()
+                socket_fd = fcntl.fcntl(sock_a.fileno(), fcntl.F_DUPFD, 512)
+                try:
+                    sock_b.sendall(b"SHIMMY_SOCKET_SECRET\n")
+                    socket_args = ["/bin/bash", "-c",
+                        f'IFS= read -r -u {socket_fd} x || exit 91; printf "%s\\n" "$x"']
+                    sock_open_rc, sock_open_out = run_guest(binary, root, socket_args,
+                        profile, group, pass_fds=(socket_fd,))
+                    if sock_open_rc != 0 or "SHIMMY_SOCKET_SECRET" not in sock_open_out:
+                        raise AssertionError("inherited Unix socket probe did not reach guest")
+                    sock_clean_rc, sock_clean_out = run_guest(binary, root, socket_args,
+                        profile, group, pass_fds=(socket_fd,), clean_initial=True)
+                    if sock_clean_rc == 0 or "SHIMMY_SOCKET_SECRET" in sock_clean_out:
+                        raise AssertionError("sanitizer leaked inherited Unix socket")
+                    socket_result = "socket-fd-closed"
+                finally:
+                    os.close(socket_fd)
+                    sock_a.close()
+                    sock_b.close()
+
+            blocked_scan = profile + '(deny file-read* (subpath "/dev/fd"))'
+            scan_rc, scan_out = run_guest(binary, root,
+                ["/bin/cat", "/etc/os-release"], blocked_scan, group,
+                clean_initial=True)
+            if scan_rc == 0 or "cannot sanitize inherited host descriptors" not in scan_out:
+                raise AssertionError("sanitizer did not fail closed on fd enumeration error")
+
             # Sanitization is first-entry only: a descriptor that the guest
             # opens itself must survive its ordinary fork/exec path.
             guest_fd_rc, guest_fd_output = run_guest(binary, root,
@@ -197,7 +253,9 @@ def main() -> int:
 
             result = ("PASS root-read host-read-denied child-read-denied "
                       "grandchild-read-denied host-write-denied launcher-fd-closed "
-                      "shim-initial-fd-closed guest-fd-exec-preserved stdio-preserved "
+                      "shim-initial-fd-closed high-fd-closed high-fd-child-closed "
+                      + socket_result + " "
+                      "scan-failure-closed guest-fd-exec-preserved stdio-preserved "
                       "KNOWN_LIMITATION unsanitized-preopened-fd-bypasses-path-policy")
             if args.network_url:
                 result += " guest-network"

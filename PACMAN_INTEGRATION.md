@@ -124,12 +124,27 @@ policy. No equivalent retry or workaround was run, and the clone's policy was
 restored to `Required TrustedOnly`. This leaves normal signed repository sync
 and dependency resolution unproven.
 
+Arch Linux ARM's [official package-signing page](https://archlinuxarm.org/about/package-signing)
+explicitly says its repository databases are unsigned and recommends
+`SigLevel = Required DatabaseOptional`: package signatures are required, while
+missing database signatures are permitted. A read-only follow-up confirmed
+HTTP 200 for the configured mirror's `core.db` and `extra.db`, but HTTP 404 for
+both `.db.sig` files. Thus no Arch Linux ARM mirror can satisfy the tested
+requirement for mandatory database signatures. The source test root still
+has `SigLevel = Never` and `LocalFileSigLevel = Optional`; neither it nor the
+live root was changed. The rejected policy change remains untested.
+
 The host policy is experimental. A deliberately inherited host file descriptor
 can bypass pathname denial. The test launcher closes such descriptors, and
 opt-in `RDHOST_FD_CLEAN=1` at Shimmy's first entry also closes a deliberately
 passed host descriptor without closing standard streams or guest-opened files
 on later exec. This opt-in and the test profile are not a production launcher;
-the caller and its child lifecycle still need review. The external curl
+the caller and its child lifecycle still need review. Further tests passed a
+high-numbered file descriptor and connected Unix socket through an unsanitized
+launch; opt-in cleanup removed both, including the file capability in a guest
+grandchild. A blocked `/dev/fd` scan made the launch fail closed. The initial
+allowlist is only standard streams 0, 1 and 2; intentional activation fds
+above 2 require a separate allowlist design. The external curl
 path is not pacman's Landlock sandbox, and package hooks and host service
 permissions have only been exercised for this small package. No production
 fallback has been enabled.

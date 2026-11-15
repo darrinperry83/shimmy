@@ -94,6 +94,17 @@ does not make the test policy a production boundary: a caller can omit the
 opt-in, inherited descriptors can exist before a different launcher applies
 its sandbox, and metadata and host-service allowances remain broad.
 
+The follow-up test passed a file at fd 300 or above and a connected Unix socket
+at fd 512 or above. Without cleanup the guest read the file and received a
+socket message; with cleanup neither capability reached the guest, including
+through a guest grandchild. Explicitly denying `/dev/fd` enumeration made the
+opt-in launch exit before loading the guest. The initial allowlist is exactly
+fd 0, 1 and 2, verified with piped standard input and captured output. A
+guest-opened fd still survived guest exec. An initial launch that intentionally
+receives activation fds above 2 must not opt into this blanket cleanup; it
+needs a separately designed, validated fd allowlist. The opt-in is a defense
+against accidental inheritance, not a stand-alone security boundary.
+
 An isolated Arch clone was tested with the same host policy extended to allow
 writes only within that disposable root and its private socket namespace.
 Guest curl downloaded an official package and detached signature. With a
@@ -111,6 +122,11 @@ HTTP 200 for `core.db` and `extra.db`, and HTTP 404 for both detached `.db.sig`
 files. The source test root currently has `SigLevel = Never` and
 `LocalFileSigLevel = Optional`, so its existing configuration cannot be used
 as evidence of a trustworthy sync. No source or live pacman policy changed.
+Arch Linux ARM's own [package-signing documentation](https://archlinuxarm.org/about/package-signing)
+states that repository databases are not signed while packages are, and
+recommends `Required DatabaseOptional` for its repositories. Therefore another
+Arch Linux ARM mirror cannot satisfy a strict requirement for signed database
+files. The previously rejected optional-database retry was not run.
 
 ## Safe engineering path
 
