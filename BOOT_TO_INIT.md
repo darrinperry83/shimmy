@@ -273,3 +273,36 @@ stay up, and no DNS query through it succeeded. The next investigation is the
 guest service-bus path/namespace used by `systemd-resolved`; this result is
 not DNS readiness. Only the disposable root was booted. The live network and
 installed root were not changed.
+
+## Resolver bus ordering trace (2026-11-15)
+
+An isolated full Arch boot with a private `RDSOCKETGROUP` reached a fresh
+`localhost login:`. Socket tracing showed that `systemd-resolved` attempted
+`/run/dbus/system_bus_socket` through the correct private host path before
+`dbus.socket` had bound it. The first connection returned `ENOENT`; this was
+an ordering failure, not evidence of a bad path translation. Once the socket
+existed, a guest `busctl --system list` completed successfully against the
+same private broker. This verifies a basic D-Bus handshake and name listing,
+but does not establish that every service protocol works.
+
+The resolver service repeatedly failed during early startup and, in one run,
+hit systemd's start limit. Resetting that failed unit and starting it after
+the broker was ready, **only inside the disposable guest**, produced
+`Active: active (running)` and `Status: "Processing requests..."` with its
+varlink sockets present. A later independent run also observed the resolver
+process surviving four seconds after the bus appeared. These observations
+show that the bus connection can work; they do not prove stable automatic
+startup. The test's `resolvectl query example.com` still timed out after
+connecting to the private bus path, and another bounded query returned
+`Connection reset by peer` as that test session ended. No DNS answer through
+`systemd-resolved` was verified.
+
+The installed `systemd-resolved.service` has `DefaultDependencies=no`, starts
+before `sysinit.target`, and does not declare `After=dbus.socket`.
+`dbus.socket` was observed binding later in this guest boot. Adding an
+untested dependency could create a boot-order cycle, so no unit policy or
+Shimmy source behavior was changed on this evidence. Further work should
+capture the resolver's bus-name acquisition and reply path while the broker
+and resolver are both stable, then distinguish a service protocol failure
+from a client or transport failure. The installed root, host network settings,
+and live Shimmy session were not changed.
