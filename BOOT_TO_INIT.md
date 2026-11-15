@@ -342,3 +342,24 @@ server, while link scopes showed no usable route. A host-derived route/link
 availability check is the next blocker. No DNS success or live-network change
 is claimed; the resolver configuration and restart delay existed only in the
 disposable test root.
+
+## Host carrier state and controlled DNS result (2026-11-15)
+
+The `Network is down` response came from systemd v261's
+`dns_scope_network_good()` check: the global DNS scope needs a non-loopback
+link with `IFF_UP`, `IFF_LOWER_UP`, and a relevant address. Shimmy's route
+snapshot supplied host-derived `UP` and addresses but omitted Linux
+`IFF_LOWER_UP` even for an active Mac link. It now sets `LOWER_UP` only when
+the Mac reports `UP` and `RUNNING` and `SIOCGIFMEDIA` confirms a valid,
+active medium. Interfaces with unsupported or inactive media remain without
+that flag. The native snapshot test checked all 23 observed host links and
+found two with proven carrier; it also covers the inactive/unknown cases.
+
+After this change, a fresh isolated full Arch boot reached the login prompt,
+and `systemd-resolved` stayed present for the test. With a test-only DNS
+server at a host loopback UDP responder, `resolvectl query
+shimmy-dns-test.example` returned `203.0.113.7` from the network in 26.3 ms.
+The responder captured two packets. This proves a controlled DNS request and
+reply through `systemd-resolved` for that fixture. It does not establish
+external DNS reliability, hot-plug timing, or that all host link types are
+represented. No live network setting or installed root was changed.

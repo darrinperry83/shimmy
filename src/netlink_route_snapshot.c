@@ -4,6 +4,7 @@
 #include <ifaddrs.h>
 #include <net/if.h>
 #include <net/if_dl.h>
+#include <net/if_media.h>
 #include <net/if_types.h>
 #include <netinet/in.h>
 #include <stddef.h>
@@ -80,6 +81,16 @@ int rd_route_collect_links(struct rd_route_link* links, size_t capacity) {
     if (p->ifa_flags & IFF_UP) out->linux_flags |= 0x1;
     if (p->ifa_flags & IFF_LOOPBACK) out->linux_flags |= 0x8;
     if (p->ifa_flags & IFF_RUNNING) out->linux_flags |= 0x40;
+    // Darwin IFF_RUNNING alone only says resources are allocated. Linux
+    // IFF_LOWER_UP means physical/link-layer carrier. Claim it only when
+    // SIOCGIFMEDIA reports a valid, active connection for this interface.
+    struct ifmediareq media;
+    memset(&media, 0, sizeof media);
+    strncpy(media.ifm_name, out->name, sizeof media.ifm_name - 1);
+    if ((p->ifa_flags & (IFF_UP | IFF_RUNNING)) == (IFF_UP | IFF_RUNNING) &&
+        ioctl(query, SIOCGIFMEDIA, &media) == 0 &&
+        (media.ifm_status & (IFM_AVALID | IFM_ACTIVE)) == (IFM_AVALID | IFM_ACTIVE))
+      out->linux_flags |= 0x10000; // Linux IFF_LOWER_UP
     if (p->ifa_flags & IFF_MULTICAST) out->linux_flags |= 0x1000;
     struct ifreq req;
     memset(&req, 0, sizeof req);

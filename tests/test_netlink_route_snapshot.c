@@ -4,6 +4,10 @@
 #include <stdio.h>
 #include <string.h>
 #include <net/if.h>
+#include <net/if_media.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <unistd.h>
 #include "netlink_route_snapshot.h"
 
 static uint16_t u16(const unsigned char* p) { uint16_t v; memcpy(&v, p, 2); return v; }
@@ -38,11 +42,22 @@ int main(void) {
   struct rd_route_link host[128];
   int n = rd_route_collect_links(host, 128);
   assert(n > 0);
+  int media_socket = socket(AF_INET, SOCK_DGRAM, 0);
+  assert(media_socket >= 0);
+  int carrier_links = 0;
   for (int i = 0; i < n; i++) {
     assert(host[i].index == if_nametoindex(host[i].name));
     assert(rd_route_encode_link(&host[i], 55, 500, packet, sizeof packet) > 0);
+    struct ifmediareq media = {0};
+    strncpy(media.ifm_name, host[i].name, sizeof media.ifm_name - 1);
+    int proven_carrier = (host[i].linux_flags & (0x1 | 0x40)) == (0x1 | 0x40) &&
+                         ioctl(media_socket, SIOCGIFMEDIA, &media) == 0 &&
+                         (media.ifm_status & (IFM_AVALID | IFM_ACTIVE)) == (IFM_AVALID | IFM_ACTIVE);
+    assert(!!(host[i].linux_flags & 0x10000) == !!proven_carrier);
+    carrier_links += proven_carrier;
     for (int j = 0; j < i; j++) assert(host[j].index != host[i].index);
   }
+  close(media_socket);
   errno = 0;
   assert(rd_route_collect_links(NULL, 0) == -1 && errno == ENOSPC);
   struct rd_route_address ipv4 = { .index = 7, .family = 2, .prefix_length = 24,
@@ -78,6 +93,6 @@ int main(void) {
   assert(v4 > 0 && v6 > 0);
   errno = 0;
   assert(rd_route_collect_addresses(host_addr, 128, 99) == -1 && errno == EINVAL);
-  printf("PASS host link/address snapshots and Linux encoding (%d links, %d IPv4, %d IPv6)\n",
-         n, v4, v6);
+  printf("PASS host link/address snapshots and Linux encoding (%d links, %d carrier, %d IPv4, %d IPv6)\n",
+         n, carrier_links, v4, v6);
 }
