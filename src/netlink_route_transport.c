@@ -13,9 +13,10 @@
 
 #define RD_RTNL_MAX_SOCKETS 64
 #define RD_RTNL_MAX_LINKS 128
+#define RD_RTNL_MAX_ADDRESSES 128
 #define RD_RTNL_MAX_REPLY 32768
 
-struct route_socket { int fd, peer, linux_type; dev_t device; ino_t inode; };
+struct route_socket { int fd, peer, linux_type; unsigned port_id; dev_t device; ino_t inode; };
 static struct route_socket sockets[RD_RTNL_MAX_SOCKETS];
 static size_t socket_count;
 static pthread_mutex_t route_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -53,7 +54,15 @@ int rd_rtnl_socket_type(int fd) {
   return type;
 }
 
-int rd_rtnl_open(int linux_type, int nonblock, int cloexec) {
+unsigned rd_rtnl_port_id(int fd) {
+  pthread_mutex_lock(&route_lock);
+  int slot = slot_locked(fd);
+  unsigned port = slot < 0 ? 0 : sockets[slot].port_id;
+  pthread_mutex_unlock(&route_lock);
+  return port;
+}
+
+int rd_rtnl_open(int linux_type, int nonblock, int cloexec, unsigned port_id) {
   if (linux_type != SOCK_DGRAM && linux_type != SOCK_RAW) { errno = EOPNOTSUPP; return -1; }
   // A route endpoint must not escape an exec: its response peer lives inside
   // this shim process and cannot be reconstructed after exec. Reject rather
@@ -74,7 +83,8 @@ int rd_rtnl_open(int linux_type, int nonblock, int cloexec) {
   if (socket_count == RD_RTNL_MAX_SOCKETS) {
     pthread_mutex_unlock(&route_lock); close(pair[0]); close_peer(pair[1]); errno = EMFILE; return -1;
   }
-  sockets[socket_count++] = (struct route_socket){ pair[0], pair[1], linux_type, st.st_dev, st.st_ino };
+  sockets[socket_count++] = (struct route_socket){ pair[0], pair[1], linux_type,
+                                                   port_id, st.st_dev, st.st_ino };
   pthread_mutex_unlock(&route_lock);
   return pair[0];
 }
@@ -99,7 +109,8 @@ void rd_rtnl_dup(int oldfd, int newfd) {
     struct stat st;
     if (fstat(newfd, &st) == 0)
       sockets[socket_count++] = (struct route_socket){ newfd, sockets[old].peer,
-                                                     sockets[old].linux_type, st.st_dev, st.st_ino };
+                                                     sockets[old].linux_type,
+                                                     sockets[old].port_id, st.st_dev, st.st_ino };
   }
   pthread_mutex_unlock(&route_lock);
 }
@@ -124,35 +135,68 @@ static void put32(unsigned char* dst, uint32_t value) { memcpy(dst, &value, 4); 
 static size_t align4(size_t n) { return (n + 3u) & ~3u; }
 
 int rd_rtnl_send(int fd, const void* request, size_t length) {
-  if (!request || length < 32 || length > 4096) { errno = EINVAL; return -1; }
+  if (!request || length < 24 || length > 4096) { errno = EINVAL; return -1; }
   const unsigned char* req = request;
+  uint32_t wire_length = read32(req);
+  if (wire_length < 24 || wire_length > length) { errno = EINVAL; return -1; }
+  for (size_t i = wire_length; i < length; i++)
+    if (req[i] != 0) { errno = EINVAL; return -1; }
   // One complete GETLINK dump request per datagram. Refuse unknown attributes,
   // control operations, and malformed multipart requests before enqueueing any
   // reply. A silent partial dump would be mistaken for real network state.
   static const unsigned char empty_ifinfo[16] = {0};
-  if (read32(req) != length || read16(req + 4) != 18 /*RTM_GETLINK*/ ||
-      read16(req + 6) != 0x301 /*REQUEST|DUMP, no ACK requested*/ ||
-      memcmp(req + 16, empty_ifinfo, sizeof empty_ifinfo) != 0 || length != 32) {
+  int link_request = read16(req + 4) == 18 /*RTM_GETLINK*/;
+  int link_family = req[16] == 0 || req[16] == 2 || req[16] == 10 || req[16] == 17;
+  int plain = wire_length == 32 && link_family &&
+              memcmp(req + 17, empty_ifinfo, 15) == 0;
+  // iproute2 asks for AF_PACKET plus IFLA_EXT_MASK=(VF|SKIP_STATS).
+  // Shimmy exposes no virtual functions and emits no stats, so that exact
+  // filter has a truthful empty result for its optional extensions.
+  int ip_extended = wire_length == 40 && (req[16] == 0 || req[16] == 17 /*AF_PACKET*/) &&
+                    memcmp(req + 17, empty_ifinfo, 15) == 0 &&
+                    read16(req + 32) == 8 && read16(req + 34) == 29 /*IFLA_EXT_MASK*/ &&
+                    read32(req + 36) == 9 /*VF|SKIP_STATS*/;
+  int address_request = read16(req + 4) == 22 /*RTM_GETADDR*/ && wire_length == 24 &&
+                        (req[16] == 0 || req[16] == 2 || req[16] == 10) &&
+                        memcmp(req + 17, empty_ifinfo, 7) == 0;
+  if (read16(req + 6) != 0x301 /*REQUEST|DUMP, no ACK requested*/ ||
+      (!(link_request && (plain || ip_extended)) && !address_request)) {
     errno = EOPNOTSUPP; return -1;
   }
   uint32_t sequence = read32(req + 8);
-  struct rd_route_link links[RD_RTNL_MAX_LINKS];
-  int count = rd_route_collect_links(links, RD_RTNL_MAX_LINKS);
-  if (count < 0) return -1;
   unsigned char reply[RD_RTNL_MAX_REPLY];
   size_t offset = 0;
-  for (int i = 0; i < count; i++) {
-    int n = rd_route_encode_link(&links[i], sequence, reply + offset, sizeof reply - offset - 16);
-    if (n < 0) return -1;
-    offset += align4((size_t)n);
+  if (link_request) {
+    struct rd_route_link links[RD_RTNL_MAX_LINKS];
+    int count = rd_route_collect_links(links, RD_RTNL_MAX_LINKS);
+    if (count < 0) return -1;
+    for (int i = 0; i < count; i++) {
+      if (offset + 20 >= sizeof reply) { errno = ENOSPC; return -1; }
+      int n = rd_route_encode_link(&links[i], sequence, rd_rtnl_port_id(fd),
+                                   reply + offset, sizeof reply - offset - 20);
+      if (n < 0) return -1;
+      offset += align4((size_t)n);
+    }
+  } else {
+    struct rd_route_address addresses[RD_RTNL_MAX_ADDRESSES];
+    int count = rd_route_collect_addresses(addresses, RD_RTNL_MAX_ADDRESSES, req[16]);
+    if (count < 0) return -1;
+    for (int i = 0; i < count; i++) {
+      if (offset + 20 >= sizeof reply) { errno = ENOSPC; return -1; }
+      int n = rd_route_encode_address(&addresses[i], sequence, rd_rtnl_port_id(fd),
+                                      reply + offset, sizeof reply - offset - 20);
+      if (n < 0) return -1;
+      offset += align4((size_t)n);
+    }
   }
-  if (offset + 16 > sizeof reply) { errno = ENOSPC; return -1; }
-  put32(reply + offset, 16);
+  if (offset + 20 > sizeof reply) { errno = ENOSPC; return -1; }
+  put32(reply + offset, 20);
   put16(reply + offset + 4, 3 /*NLMSG_DONE*/);
   put16(reply + offset + 6, 2 /*NLM_F_MULTI*/);
   put32(reply + offset + 8, sequence);
-  put32(reply + offset + 12, 0);
-  offset += 16;
+  put32(reply + offset + 12, rd_rtnl_port_id(fd));
+  put32(reply + offset + 16, 0); // NLMSG_DONE status (zero = complete)
+  offset += 20;
   pthread_mutex_lock(&route_lock);
   int slot = slot_locked(fd);
   int result = slot < 0 ? -1 : (int)send(sockets[slot].peer, reply, offset, 0);

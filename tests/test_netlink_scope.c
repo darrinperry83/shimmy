@@ -63,12 +63,16 @@ int main(void) {
   memcpy(req, &nlen, 4); memcpy(req + 4, &getlink, 2);
   memcpy(req + 6, &dump, 2); memcpy(req + 8, &sequence, 4);
   assert(sc(206, route, (unsigned long)req, sizeof req, 0, 0) == 32); // sendto
+  struct linux_msghdr length_probe = {0};
+  long datagram_length = sc(212, route, (unsigned long)&length_probe, 0x22,
+                            0, 0); // MSG_PEEK|MSG_TRUNC, no iovec
+  assert(datagram_length > 32);
   unsigned char reply[32768];
   long received = sc(207, route, (unsigned long)reply, sizeof reply, 0, 0); // recvfrom
-  assert(received > 32);
+  assert(received == datagram_length);
   uint16_t first_type, final_type;
   memcpy(&first_type, reply + 4, 2);
-  memcpy(&final_type, reply + received - 12, 2);
+  memcpy(&final_type, reply + received - 16, 2);
   assert(first_type == 16 && final_type == 3); // NEWLINK ... NLMSG_DONE
   assert(sc(206, route, (unsigned long)req, 31, 0, 0) == -22);
   struct iovec send_iov = { req, sizeof req }, recv_iov = { reply, sizeof reply };

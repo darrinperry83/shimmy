@@ -143,21 +143,30 @@ At that stage `NETLINK_ROUTE` returned `EAFNOSUPPORT`: there was no request/repl
 the encoder as a working resolver service would be misleading. Host interface
 presence alone also does not prove that an interface is usable inside the guest.
 
-The bounded `NETLINK_ROUTE` transport now accepts `SOCK_DGRAM` or `SOCK_RAW`
-only with `SOCK_CLOEXEC`, and only a read-only `RTM_GETLINK` dump request with
-an empty `ifinfomsg`. It sends actual host link snapshots as Linux
-`RTM_NEWLINK` messages followed by `NLMSG_DONE`, preserving the request sequence.
-Requests and replies have fixed size and count ceilings; malformed requests,
-`RTM_GETADDR`, `RTM_GETROUTE`, multicast subscriptions, unsupported options and
-extended link masks fail explicitly. The private response descriptor is reserved
-from guest `close_range`, and ordinary close and duplication maintain its
-registry. Focused tests cover message framing, sequence numbers, concurrent
-sockets, duplicates and failure paths. A guest `ip link show` opens the route
-socket but requests `IFLA_EXT_MASK=9`, which this subset rejects. A fresh isolated
-full boot still reaches login with D-Bus settled. `systemd-resolved` still fails:
-systemd 261 requires `NETLINK_PKTINFO` during bind and later link/address event
-subscriptions and `RTM_GETADDR`. **The transport is one coherent read-only
-subset, not a working resolver or general netlink implementation.**
+The bounded `NETLINK_ROUTE` transport accepts `SOCK_DGRAM` or `SOCK_RAW`
+only with `SOCK_CLOEXEC`. It implements read-only `RTM_GETLINK` and
+`RTM_GETADDR` dumps from the host's current interfaces. Link replies carry
+actual names, indices, flags, MTUs and link-layer addresses; address replies
+carry actual IPv4/IPv6 addresses, prefix lengths and scopes. The exact
+`IFLA_EXT_MASK=9` requested by iproute2 is accepted because Shimmy exposes no
+virtual functions or statistics; other masks fail explicitly. Multipart replies
+preserve the request sequence and local netlink port ID, and finish with a
+zero-status `NLMSG_DONE`. Linux's zero-iovec `MSG_PEEK|MSG_TRUNC` length probe is
+also supported. Fixed size and count ceilings reject partial dumps; malformed
+requests, `RTM_GETROUTE`, multicast subscriptions and unsupported options fail.
+The private response descriptor is reserved from guest `close_range`, and
+ordinary close and duplication maintain its registry.
+
+Focused wire-format and socket tests pass. On a disposable Arch root, guest
+`ip link show`, `ip addr show`, `ip -4 addr show` and `ip -6 addr show` all exit
+zero and display the host snapshot. A fresh isolated full boot still reaches
+login with D-Bus settled. Address origin and lifetime are not known from
+`getifaddrs`; iproute2 may label a non-loopback address `dynamic` without proof
+of DHCP. Guest availability of a host interface is also not established by
+listing it. `systemd-resolved` still fails with `Protocol not available`:
+systemd 261 requires `NETLINK_PKTINFO` during bind and later event subscriptions.
+**These are read-only snapshots, not a working resolver or general netlink
+implementation.**
 
 Regression commands: `clang -arch arm64 -O2 -Wall -Wextra -Werror -I src -o
 build/test_netlink_route_transport tests/test_netlink_route_transport.c

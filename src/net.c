@@ -2000,7 +2000,7 @@ static long sys_socket(int ldomain, int ltype, int protocol) {
     int base_type = ltype & ~(L_SOCK_NONBLOCK | L_SOCK_CLOEXEC);
     if (protocol == 0 && (base_type == SOCK_DGRAM || base_type == SOCK_RAW)) {
       int fd = rd_rtnl_open(base_type, (ltype & L_SOCK_NONBLOCK) != 0,
-                            (ltype & L_SOCK_CLOEXEC) != 0);
+                            (ltype & L_SOCK_CLOEXEC) != 0, (unsigned)syscalls_guest_pid());
       return fd < 0 ? lerr() : fd;
     }
     if (protocol != 15 || (ltype & ~(L_SOCK_NONBLOCK | L_SOCK_CLOEXEC)) != SOCK_DGRAM)
@@ -2218,7 +2218,7 @@ static long sys_getsockname(int fd, unsigned long uaddr, unsigned long ulen, int
     if (!uaddr || !ulen) return -L_EFAULT;
     uint32_t avail; memcpy(&avail, (const void*)ulen, 4);
     unsigned char addr[12] = {0}; uint16_t fam = L_AF_NETLINK;
-    uint32_t pid = (uint32_t)syscalls_guest_pid();
+    uint32_t pid = rd_rtnl_port_id(fd);
     memcpy(addr, &fam, 2); memcpy(addr + 4, &pid, 4);
     if (avail > sizeof addr) avail = sizeof addr;
     memcpy((void*)uaddr, addr, avail);
@@ -2404,7 +2404,40 @@ static long sys_sendmmsg(int fd, struct lin_mmsghdr* lv, unsigned vlen, int lfla
 static long sys_recvmsg(int fd, struct lin_msghdr* lm, int lflags) {
   if (!lm) return -L_EFAULT;
   if (rd_rtnl_is_fd(fd)) {
-    if (!lm->msg_iov || lm->msg_iovlen == 0 || lm->msg_iovlen > INT_MAX) return -L_EINVAL;
+    if (lm->msg_iovlen > INT_MAX || (lm->msg_iovlen && !lm->msg_iov)) return -L_EINVAL;
+    ssize_t full_length = -1;
+    if (lflags & L_MSG_TRUNC) {
+      // iproute2 probes one netlink datagram with MSG_PEEK|MSG_TRUNC and an
+      // empty iovec. Linux returns its *full* length; Darwin returns zero.
+      unsigned char probe[32768];
+      full_length = recv(fd, probe, sizeof probe, MSG_PEEK |
+                         (lflags & L_MSG_DONTWAIT ? MSG_DONTWAIT : 0));
+      if (full_length < 0) return lerr();
+      if (lflags & L_MSG_PEEK) {
+        size_t capacity = 0;
+        const struct iovec* iov = (const struct iovec*)lm->msg_iov;
+        for (size_t i = 0; i < lm->msg_iovlen; i++) {
+          if (iov[i].iov_len > SIZE_MAX - capacity) return -L_EINVAL;
+          capacity += iov[i].iov_len;
+        }
+        if (capacity) {
+          struct msghdr peek = {0};
+          peek.msg_iov = (struct iovec*)lm->msg_iov;
+          peek.msg_iovlen = (int)lm->msg_iovlen;
+          if (recvmsg(fd, &peek, MSG_PEEK |
+                      (lflags & L_MSG_DONTWAIT ? MSG_DONTWAIT : 0)) < 0) return lerr();
+        }
+        if (lm->msg_name) {
+          unsigned char addr[12] = {0}; uint16_t fam = L_AF_NETLINK;
+          memcpy(addr, &fam, 2);
+          size_t copy = lm->msg_namelen < sizeof addr ? lm->msg_namelen : sizeof addr;
+          memcpy((void*)lm->msg_name, addr, copy);
+        }
+        lm->msg_namelen = 12; lm->msg_controllen = 0;
+        lm->msg_flags = capacity < (size_t)full_length ? L_MSG_TRUNC : 0;
+        return full_length;
+      }
+    }
     struct msghdr hm = {0};
     hm.msg_iov = (struct iovec*)lm->msg_iov; hm.msg_iovlen = (int)lm->msg_iovlen;
     ssize_t n = recvmsg(fd, &hm, msgflags_l2h(lflags));
@@ -2417,7 +2450,7 @@ static long sys_recvmsg(int fd, struct lin_msghdr* lm, int lflags) {
     }
     lm->msg_namelen = 12; lm->msg_controllen = 0;
     lm->msg_flags = hm.msg_flags & MSG_TRUNC ? L_MSG_TRUNC : 0;
-    return n;
+    return full_length >= 0 ? full_length : n;
   }
   struct msghdr hm; memset(&hm, 0, sizeof hm);
   struct sockaddr_storage hs; memset(&hs, 0, sizeof hs);
