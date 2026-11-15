@@ -63,6 +63,7 @@ static int g_idle_saw_address;
 // net.c owns the kqueue-backed epoll; on close(2) it must drop the fd from every epoll set
 // (Linux drops a watched fd from epoll automatically on close; kqueue does not).
 extern void net_fd_closed(int fd);
+extern void rd_rtnl_dup(int oldfd, int newfd);
 #include "gmem.h"
 #ifdef RDGPU_CLIENT
 #include "rdgpu_mock_gate.h"
@@ -2782,6 +2783,7 @@ static long do_fcntl(int fd, int cmd, unsigned long arg) {
   switch (cmd) {
     case LF_DUPFD: case LF_DUPFD_CLOEXEC: {
       int nf = fcntl(fd, cmd == LF_DUPFD ? F_DUPFD : F_DUPFD_CLOEXEC, (int)arg);
+      if (nf >= 0) rd_rtnl_dup(fd, nf);
       if (nf >= 0 && pidfd_shim_pid(fd) > 0) pidfd_shim_register(nf, pidfd_shim_pid(fd));
       if (nf >= 0 && drm_owns_fd(fd)) drm_register_fd(nf);   // a dup is still the render node
       if (nf >= 0 && snd_owns_fd(fd)) snd_dup_fd(fd, nf);    // a dup of a snd node keeps its role

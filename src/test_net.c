@@ -558,8 +558,8 @@ static void t_sockopt_af(void) {
             9 /*NETLINK_AUDIT*/) == -97 /*EAFNOSUPPORT*/,
         "NETLINK_AUDIT must fail without an audit backend");
   CHECK(SC3(N_socket, 16 /*AF_NETLINK*/, LSOCK_DGRAM,
-            0 /*NETLINK_ROUTE*/) == -97 /*EAFNOSUPPORT*/,
-        "NETLINK_ROUTE must fail without link and address dump support");
+            0 /*NETLINK_ROUTE*/) == -95 /*EOPNOTSUPP*/,
+        "NETLINK_ROUTE without CLOEXEC cannot survive shim re-exec");
   CHECK(SC3(N_socket, 16 /*AF_NETLINK*/, 3 /*SOCK_RAW*/,
             15 /*NETLINK_KOBJECT_UEVENT*/) == -97 /*EAFNOSUPPORT*/,
         "only the monitored datagram netlink type is supported");

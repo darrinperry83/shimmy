@@ -9,6 +9,7 @@ struct rd_route_link {
   unsigned index;
   unsigned linux_flags;
   unsigned mtu;
+  unsigned short linux_type;
   char name[IFNAMSIZ];
 };
 

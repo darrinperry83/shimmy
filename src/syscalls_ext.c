@@ -65,6 +65,7 @@ void fx_note(const char* fmt, ...);
 #include <sys/un.h>
 
 extern void net_fd_closed(int fd);   // net.c — drop fd from every epoll/kqueue
+extern void rd_rtnl_dup(int oldfd, int newfd);
 
 // ---------------------------------------------------------------------------
 // Linux constants (the guest's values — do NOT use the host headers' versions)
@@ -754,6 +755,7 @@ static long do_dup3(int oldfd, int newfd, int flags) {
   if (flags & ~LX_O_CLOEXEC) return -LX_EINVAL;
   if (fcntl(oldfd, F_GETFD) < 0) return eret();  // validate before clobbering newfd
   if (dup2(oldfd, newfd) < 0) return eret();
+  rd_rtnl_dup(oldfd, newfd);
   if (pidfd_shim_pid(oldfd) > 0) pidfd_shim_register(newfd, pidfd_shim_pid(oldfd));
   if (flags & LX_O_CLOEXEC) fcntl(newfd, F_SETFD, fcntl(newfd, F_GETFD) | FD_CLOEXEC);
   return newfd;
@@ -894,6 +896,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     // A dup of the DRM render node is still the render node. gbm dups the fd, and without this
     // the copy reported /dev/null's device numbers and Mesa went looking for /sys/dev/char/0:12290.
     if (r >= 0 && pidfd_shim_pid((int)a0) > 0) pidfd_shim_register(r, pidfd_shim_pid((int)a0));
+    if (r >= 0) rd_rtnl_dup((int)a0, r);
     if (r >= 0 && drm_owns_fd((int)a0)) drm_register_fd(r);
     if (r >= 0 && snd_owns_fd((int)a0)) snd_dup_fd((int)a0, r);
     if (r >= 0 && evdev_owns_fd((int)a0)) evdev_register_fd(r, evdev_device_of_fd((int)a0));
@@ -1772,6 +1775,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
       } else {
         drm_forget_fd((int)fd);                                 // see the close(2) case for why
         evdev_forget_fd((int)fd);
+        net_fd_closed((int)fd);
         close((int)fd);
       }
     }

@@ -118,11 +118,11 @@ and left zero disposable processes. These checks do not claim a clean boot:
 `SOL_NETLINK` options 11, 12 and 3 returning `ENOPROTOOPT`; Shimmy does not
 implement those netlink options, so the service failure remains honest.
 
-The next netlink audit found a more fundamental limit: the old socket path
+The first netlink audit found a more fundamental limit: the old socket path
 returned a quiet AF_UNIX datagram for *every* AF_NETLINK protocol. In
 [systemd 261's resolver source](https://github.com/systemd/systemd/blob/v261/src/resolve/resolved-manager.c),
 `manager_rtnl_listen()` needs `NETLINK_ROUTE` link and address dumps, which
-that quiet socket cannot provide. Shimmy now exposes only its existing
+that quiet socket cannot provide. At that stage Shimmy exposed only its existing
 `NETLINK_KOBJECT_UEVENT` datagram monitor subset and rejects route, audit,
 unknown protocols and unsupported socket types at creation. A focused native
 test verifies the monitor's real `SO_RCVBUF` mapping, rejects unsupported
@@ -138,10 +138,33 @@ collects the host's actual interface names, indices, flags and MTUs, deduplicate
 them by index, and encodes Linux `RTM_NEWLINK` messages with the caller's sequence
 number. A deterministic wire-format test plus a live host-interface snapshot
 test pass. This is the first read-only piece of the required `RTM_GETLINK` dump.
-`NETLINK_ROUTE` still returns `EAFNOSUPPORT`: there is no request/reply socket,
+At that stage `NETLINK_ROUTE` returned `EAFNOSUPPORT`: there was no request/reply socket,
 `NLMSG_DONE` completion, `RTM_GETADDR` dump or event stream yet, and exposing
 the encoder as a working resolver service would be misleading. Host interface
 presence alone also does not prove that an interface is usable inside the guest.
+
+The bounded `NETLINK_ROUTE` transport now accepts `SOCK_DGRAM` or `SOCK_RAW`
+only with `SOCK_CLOEXEC`, and only a read-only `RTM_GETLINK` dump request with
+an empty `ifinfomsg`. It sends actual host link snapshots as Linux
+`RTM_NEWLINK` messages followed by `NLMSG_DONE`, preserving the request sequence.
+Requests and replies have fixed size and count ceilings; malformed requests,
+`RTM_GETADDR`, `RTM_GETROUTE`, multicast subscriptions, unsupported options and
+extended link masks fail explicitly. The private response descriptor is reserved
+from guest `close_range`, and ordinary close and duplication maintain its
+registry. Focused tests cover message framing, sequence numbers, concurrent
+sockets, duplicates and failure paths. A guest `ip link show` opens the route
+socket but requests `IFLA_EXT_MASK=9`, which this subset rejects. A fresh isolated
+full boot still reaches login with D-Bus settled. `systemd-resolved` still fails:
+systemd 261 requires `NETLINK_PKTINFO` during bind and later link/address event
+subscriptions and `RTM_GETADDR`. **The transport is one coherent read-only
+subset, not a working resolver or general netlink implementation.**
+
+Regression commands: `clang -arch arm64 -O2 -Wall -Wextra -Werror -I src -o
+build/test_netlink_route_transport tests/test_netlink_route_transport.c
+src/netlink_route_transport.c src/netlink_route_snapshot.c &&
+build/test_netlink_route_transport`; `tests/test_netlink_scope.c` exercises the
+same path through guest socket syscalls. The isolated boot used a disposable
+clone under `build/`; the clone and guest processes were removed afterward.
 
 ## Isolated interactive terminal result (2026-11-15)
 

@@ -11,12 +11,13 @@ static uint32_t u32(const unsigned char* p) { uint32_t v; memcpy(&v, p, 4); retu
 
 int main(void) {
   struct rd_route_link link = { .index = 7, .linux_flags = 0x1041, .mtu = 1500,
+                                .linux_type = 1,
                                 .name = "en0" };
   unsigned char packet[128];
   assert(rd_route_encode_link(&link, 0x12345678, packet, sizeof packet) == 48);
   assert(u32(packet) == 48 && u16(packet + 4) == 16); // RTM_NEWLINK
   assert(u16(packet + 6) == 2 && u32(packet + 8) == 0x12345678);
-  assert(u32(packet + 12) == 0 && u32(packet + 20) == 7);
+  assert(u32(packet + 12) == 0 && u16(packet + 18) == 1 && u32(packet + 20) == 7);
   assert(u32(packet + 24) == 0x1041);
   assert(u16(packet + 32) == 8 && u16(packet + 34) == 3); // IFLA_IFNAME
   assert(strcmp((char*)packet + 36, "en0") == 0);

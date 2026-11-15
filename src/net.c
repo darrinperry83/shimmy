@@ -50,6 +50,7 @@
 #include "syscalls.h"
 #include "snd_alsa.h"
 #include "pidfd_shim.h"
+#include "netlink_route_transport.h"
 
 // ---------------------------------------------------------------------------
 // Linux aarch64 syscall numbers we own
@@ -99,6 +100,7 @@ enum {
 #define L_ENAMETOOLONG 36
 #define L_ENOSYS 38
 #define L_ENOTSOCK 88
+#define L_ENOTCONN 107
 #define L_ENOPROTOOPT 92
 #define L_EAFNOSUPPORT 97
 #define L_EOPNOTSUPP 95
@@ -1141,6 +1143,16 @@ static long do_setsockopt(int fd, int llevel, int lname, const void* val, uint32
 }
 static long do_getsockopt(int fd, int llevel, int lname, void* val, uint32_t* len) {
   int hlevel = 0, hname = 0;
+  if (rd_rtnl_is_fd(fd) && llevel == L_SOL_SOCKET && lname == 3 /*SO_TYPE*/) {
+    if (!val || !len || *len < sizeof(int)) return -L_EINVAL;
+    int type = rd_rtnl_socket_type(fd);
+    memcpy(val, &type, sizeof type); *len = sizeof type; return 0;
+  }
+  if (rd_rtnl_is_fd(fd) && llevel == L_SOL_SOCKET && (lname == 38 || lname == 39)) {
+    if (!val || !len || *len < sizeof(int)) return -L_EINVAL;
+    int answer = lname == 38 ? 0 /*NETLINK_ROUTE*/ : L_AF_NETLINK;
+    memcpy(val, &answer, sizeof answer); *len = sizeof answer; return 0;
+  }
   // SO_PEERCRED. Darwin's LOCAL_PEERCRED returns a struct xucred, which is NOT Linux's ucred, so
   // the option was refused outright. The three fields Linux wants are all obtainable, though:
   // LOCAL_PEERPID for the pid and getpeereid() for uid/gid.
@@ -1468,6 +1480,7 @@ static void ep_unapply(int kq, int fd) {
 // forever — fcntl(11)+close(11) in a 100%-CPU loop until the 90s start timeout.
 void net_fd_closed(int fd) {
   if (fd < 0) return;
+  rd_rtnl_close(fd);
   if (notifyfd_is(fd)) notifydbg("pid=%d CLOSE notify fd=%d\n", (int)getpid(), fd);
   notifyfd_del(fd);
   pthread_mutex_lock(&g_lock);
@@ -1979,12 +1992,17 @@ static long sys_pipe2(int* ufd, int flags) {
 static long sys_socket(int ldomain, int ltype, int protocol) {
   // AF_NETLINK does not exist on macOS. The one limited compatibility surface
   // here is libudev's KOBJECT_UEVENT datagram monitor: it can open and bind a
-  // quiet socket, but no host hotplug events are translated yet. In particular,
-  // NETLINK_ROUTE is NOT a route/link dump backend. systemd-resolved requests
-  // RTM_GETLINK/GETADDR dumps and would otherwise receive a success-shaped
-  // socket that can never answer. Reject unsupported protocols at creation.
+  // quiet socket, but no host hotplug events are translated yet. NETLINK_ROUTE
+  // has only a read-only RTM_GETLINK snapshot request/reply path. It does not
+  // promise address dumps, routes or change notifications.
   if (ldomain == L_AF_NETLINK) {
     // NETLINK_AUDIT (9) also has no backend; fail before libaudit tries sendto.
+    int base_type = ltype & ~(L_SOCK_NONBLOCK | L_SOCK_CLOEXEC);
+    if (protocol == 0 && (base_type == SOCK_DGRAM || base_type == SOCK_RAW)) {
+      int fd = rd_rtnl_open(base_type, (ltype & L_SOCK_NONBLOCK) != 0,
+                            (ltype & L_SOCK_CLOEXEC) != 0);
+      return fd < 0 ? lerr() : fd;
+    }
     if (protocol != 15 || (ltype & ~(L_SOCK_NONBLOCK | L_SOCK_CLOEXEC)) != SOCK_DGRAM)
       return -L_EAFNOSUPPORT;
     int nonblock = (ltype & L_SOCK_NONBLOCK) != 0, cloexec = (ltype & L_SOCK_CLOEXEC) != 0;
@@ -2087,7 +2105,16 @@ static long sys_bind(int fd, const void* uaddr, uint32_t len) {
   // arrive, which is correct for a shim with no kernel uevent source.
   if (uaddr && len >= 2) {
     uint16_t fam; memcpy(&fam, uaddr, 2);
-    if (fam == L_AF_NETLINK) return 0;
+    if (fam == L_AF_NETLINK) {
+      if (rd_rtnl_is_fd(fd)) {
+        if (len < 12) return -L_EINVAL;
+        uint32_t pid, groups;
+        memcpy(&pid, (const char*)uaddr + 4, 4);
+        memcpy(&groups, (const char*)uaddr + 8, 4);
+        return pid || groups ? -L_EOPNOTSUPP : 0; // no custom port or event subscription
+      }
+      return 0; // quiet KOBJECT_UEVENT monitor
+    }
   }
   struct sockaddr_storage hs; socklen_t hlen = 0;
   long r = sa_to_host(uaddr, len, 1, &hs, &hlen);
@@ -2127,6 +2154,9 @@ static long sys_bind(int fd, const void* uaddr, uint32_t len) {
   return out;
 }
 static long sys_connect(int fd, const void* uaddr, uint32_t len) {
+  if (rd_rtnl_is_fd(fd)) {
+    return -L_EOPNOTSUPP; // no connected netlink peer state
+  }
   struct sockaddr_storage hs; socklen_t hlen = 0;
   long r = sa_to_host(uaddr, len, 0, &hs, &hlen);
   if (getenv("RDNETSOCK") && uaddr && len >= 2) {
@@ -2183,6 +2213,18 @@ static long sys_accept4(int fd, unsigned long uaddr, unsigned long ulen, int fla
   return nfd;
 }
 static long sys_getsockname(int fd, unsigned long uaddr, unsigned long ulen, int peer) {
+  if (rd_rtnl_is_fd(fd)) {
+    if (peer) return -L_ENOTCONN; // connect state is not tracked
+    if (!uaddr || !ulen) return -L_EFAULT;
+    uint32_t avail; memcpy(&avail, (const void*)ulen, 4);
+    unsigned char addr[12] = {0}; uint16_t fam = L_AF_NETLINK;
+    uint32_t pid = (uint32_t)syscalls_guest_pid();
+    memcpy(addr, &fam, 2); memcpy(addr + 4, &pid, 4);
+    if (avail > sizeof addr) avail = sizeof addr;
+    memcpy((void*)uaddr, addr, avail);
+    uint32_t full = sizeof addr; memcpy((void*)ulen, &full, 4);
+    return 0;
+  }
   struct sockaddr_storage hs; socklen_t hlen = sizeof hs;
   memset(&hs, 0, sizeof hs);
   int r = peer ? getpeername(fd, (struct sockaddr*)&hs, &hlen)
@@ -2193,6 +2235,17 @@ static long sys_getsockname(int fd, unsigned long uaddr, unsigned long ulen, int
 
 static long sys_sendto(int fd, const void* buf, size_t len, int lflags,
                        const void* uaddr, uint32_t alen) {
+  if (rd_rtnl_is_fd(fd)) {
+    if (uaddr) {
+      if (alen < 12) return -L_EINVAL;
+      uint16_t family; uint32_t pid, groups;
+      memcpy(&family, uaddr, 2); memcpy(&pid, (const char*)uaddr + 4, 4);
+      memcpy(&groups, (const char*)uaddr + 8, 4);
+      if (family != L_AF_NETLINK || pid || groups) return -L_EOPNOTSUPP;
+    }
+    int n = rd_rtnl_send(fd, buf, len);
+    return n < 0 ? lerr() : n;
+  }
   int hflags = msgflags_l2h(lflags);
   long res;
   if (uaddr && alen) {
@@ -2228,6 +2281,19 @@ static long sys_sendto(int fd, const void* buf, size_t len, int lflags,
 }
 static long sys_recvfrom(int fd, void* buf, size_t len, int lflags,
                          unsigned long uaddr, unsigned long ulen) {
+  if (rd_rtnl_is_fd(fd)) {
+    ssize_t n = recv(fd, buf, len, msgflags_l2h(lflags));
+    if (n < 0) return lerr();
+    if (uaddr && ulen) {
+      uint32_t avail; memcpy(&avail, (const void*)ulen, 4);
+      unsigned char addr[12] = {0}; uint16_t fam = L_AF_NETLINK;
+      memcpy(addr, &fam, 2);
+      if (avail > sizeof addr) avail = sizeof addr;
+      memcpy((void*)uaddr, addr, avail);
+      uint32_t full = sizeof addr; memcpy((void*)ulen, &full, 4);
+    }
+    return n;
+  }
   int hflags = msgflags_l2h(lflags);
   struct sockaddr_storage hs; socklen_t hlen = sizeof hs;
   memset(&hs, 0, sizeof hs);
@@ -2243,6 +2309,26 @@ static long sys_recvfrom(int fd, void* buf, size_t len, int lflags,
 
 static long sys_sendmsg(int fd, const struct lin_msghdr* lm, int lflags) {
   if (!lm) return -L_EFAULT;
+  if (rd_rtnl_is_fd(fd)) {
+    if (lm->msg_iovlen == 0 || lm->msg_iovlen > 16 || lm->msg_control) return -L_EINVAL;
+    if (lm->msg_name) {
+      if (lm->msg_namelen < 12) return -L_EINVAL;
+      uint16_t family; uint32_t pid, groups;
+      memcpy(&family, (const void*)lm->msg_name, 2);
+      memcpy(&pid, (const char*)lm->msg_name + 4, 4);
+      memcpy(&groups, (const char*)lm->msg_name + 8, 4);
+      if (family != L_AF_NETLINK || pid || groups) return -L_EOPNOTSUPP;
+    }
+    const struct iovec* iov = (const struct iovec*)lm->msg_iov;
+    unsigned char request[4096]; size_t length = 0;
+    for (size_t i = 0; i < lm->msg_iovlen; i++) {
+      if (!iov[i].iov_base || iov[i].iov_len > sizeof request - length) return -L_EINVAL;
+      memcpy(request + length, iov[i].iov_base, iov[i].iov_len);
+      length += iov[i].iov_len;
+    }
+    int n = rd_rtnl_send(fd, request, length);
+    return n < 0 ? lerr() : n;
+  }
   struct msghdr hm; memset(&hm, 0, sizeof hm);
   struct sockaddr_storage hs; socklen_t hslen = 0;
   if (lm->msg_name && lm->msg_namelen) {
@@ -2317,6 +2403,22 @@ static long sys_sendmmsg(int fd, struct lin_mmsghdr* lv, unsigned vlen, int lfla
 
 static long sys_recvmsg(int fd, struct lin_msghdr* lm, int lflags) {
   if (!lm) return -L_EFAULT;
+  if (rd_rtnl_is_fd(fd)) {
+    if (!lm->msg_iov || lm->msg_iovlen == 0 || lm->msg_iovlen > INT_MAX) return -L_EINVAL;
+    struct msghdr hm = {0};
+    hm.msg_iov = (struct iovec*)lm->msg_iov; hm.msg_iovlen = (int)lm->msg_iovlen;
+    ssize_t n = recvmsg(fd, &hm, msgflags_l2h(lflags));
+    if (n < 0) return lerr();
+    if (lm->msg_name) {
+      unsigned char addr[12] = {0}; uint16_t fam = L_AF_NETLINK;
+      memcpy(addr, &fam, 2);
+      size_t copy = lm->msg_namelen < sizeof addr ? lm->msg_namelen : sizeof addr;
+      memcpy((void*)lm->msg_name, addr, copy);
+    }
+    lm->msg_namelen = 12; lm->msg_controllen = 0;
+    lm->msg_flags = hm.msg_flags & MSG_TRUNC ? L_MSG_TRUNC : 0;
+    return n;
+  }
   struct msghdr hm; memset(&hm, 0, sizeof hm);
   struct sockaddr_storage hs; memset(&hs, 0, sizeof hs);
   // Always capture the sender address — even when the guest's msg_name is NULL — so the SCM_CREDENTIALS

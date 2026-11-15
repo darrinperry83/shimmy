@@ -3,6 +3,8 @@
 #include <errno.h>
 #include <ifaddrs.h>
 #include <net/if.h>
+#include <net/if_dl.h>
+#include <net/if_types.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -46,11 +48,25 @@ int rd_route_collect_links(struct rd_route_link* links, size_t capacity) {
     if (!index) continue;
     size_t i = 0;
     for (; i < count; i++) if (links[i].index == index) break;
-    if (i < count) continue;
+    if (i < count) {
+      if (p->ifa_addr && p->ifa_addr->sa_family == AF_LINK) {
+        const struct sockaddr_dl* dl = (const struct sockaddr_dl*)p->ifa_addr;
+        links[i].linux_type = dl->sdl_type == IFT_ETHER ? 1 /*ARPHRD_ETHER*/ :
+                              dl->sdl_type == IFT_LOOP ? 772 /*ARPHRD_LOOPBACK*/ :
+                              65534 /*ARPHRD_NONE*/;
+      }
+      continue;
+    }
     if (count == capacity) { close(query); freeifaddrs(all); errno = ENOSPC; return -1; }
     struct rd_route_link* out = &links[count];
     memset(out, 0, sizeof *out);
     out->index = index;
+    out->linux_type = 65534; // unknown host link layer: do not claim Ethernet
+    if (p->ifa_addr && p->ifa_addr->sa_family == AF_LINK) {
+      const struct sockaddr_dl* dl = (const struct sockaddr_dl*)p->ifa_addr;
+      out->linux_type = dl->sdl_type == IFT_ETHER ? 1 :
+                        dl->sdl_type == IFT_LOOP ? 772 : 65534;
+    }
     strncpy(out->name, p->ifa_name, sizeof out->name - 1);
     if (p->ifa_flags & IFF_UP) out->linux_flags |= 0x1;
     if (p->ifa_flags & IFF_LOOPBACK) out->linux_flags |= 0x8;
@@ -83,7 +99,7 @@ int rd_route_encode_link(const struct rd_route_link* link, uint32_t sequence,
   struct rd_nlmsghdr header = { (uint32_t)total, 16 /*RTM_NEWLINK*/, 2 /*NLM_F_MULTI*/,
                                 sequence, 0 /*kernel sender*/ };
   memcpy(dst, &header, sizeof header);
-  struct rd_ifinfomsg info = { 0, 0, 0, (int32_t)link->index,
+  struct rd_ifinfomsg info = { 0, 0, link->linux_type, (int32_t)link->index,
                                link->linux_flags, 0 };
   memcpy(dst + sizeof header, &info, sizeof info);
   size_t offset = sizeof header + sizeof info;
