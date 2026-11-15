@@ -101,7 +101,25 @@ The main fixes that made this possible:
   disables cleanly. The UTMP boot unit then completes.
 
 This proves a login milestone, not a clean desktop boot. The journal still
-shows other unit failures, including network resolution, and there has been no
-interactive password/login session or GUI boot verification. Only the isolated
-fixture and candidate binary were used; the live `shim_cli` and installed
-rootfs were not modified.
+shows other unit failures, including network resolution. Interactive login is
+tested below; GUI boot remains unverified. Only the isolated fixture and test
+binary were used; the installed rootfs was not modified.
+
+## Isolated interactive terminal result (2026-11-15)
+
+`RD_LOGIN_ROOT=<private build/ clone> RD_TEST_JOB_CONTROL=1 python3
+tests/run-interactive-login.py` boots systemd, logs in as a throwaway `shimtest`
+account, and reaches Bash. `id -un` and `id -u` return `shimtest` and `22001`.
+The test then starts `sleep 20` in the foreground, interrupts it with Ctrl-C,
+starts another `sleep 20`, suspends it with Ctrl-Z, observes `Stopped` in
+`jobs`, and runs a following shell command. Both complete well before the
+20-second sleep timeout. The test sets core dumps to zero and uses a private
+root and input FIFO; it does not use personal credentials or the live session.
+
+Darwin refused `TIOCSCTTY` after `/bin/login` started a new session, leaving
+Bash without job control. Shimmy now tracks session ownership and foreground
+process group for its virtual consoles across guest processes. This applies
+only to Shimmy-owned VT slaves; ordinary ptys continue using host tty calls.
+Console Ctrl-C and Ctrl-Z target the registered foreground guest process group.
+This validates the tested Bash interaction on the isolated headless boot; GUI
+input and a complete desktop session remain unverified.

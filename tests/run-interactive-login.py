@@ -92,6 +92,24 @@ try:
                     type_keys("id -un; id -u\n")
                     ok = wait_text("\nshimtest\n", 8) and wait_text("\n22001\n", 3)
                 print("LOGIN_SHELL_AND_ID" if ok else "LOGIN_SHELL_MISSING", flush=True)
+                if ok and os.environ.get("RD_TEST_JOB_CONTROL") == "1":
+                    if console.exists() and "no job control in this shell" in console.read_text(errors="replace"):
+                        ok = False
+                    else:
+                        type_keys("sleep 20\n")
+                        time.sleep(1)
+                        type_keys("\x03")
+                        type_keys("printf '\\nINT_DONE\\n'\n")
+                        interrupted = wait_text("\nINT_DONE\n", 6)
+                        type_keys("sleep 20\n")
+                        time.sleep(1)
+                        type_keys("\x1a")
+                        type_keys("jobs\n")
+                        stopped = wait_text("Stopped", 6)
+                        type_keys("printf '\\nSTOP_DONE\\n'\n")
+                        resumed = wait_text("\nSTOP_DONE\n", 6)
+                        ok = interrupted and stopped and resumed
+                    print("JOB_CONTROL_OK" if ok else "JOB_CONTROL_FAILED", flush=True)
 finally:
     # Exact binary + private root match prevents interference with a live Shimmy session.
     listing = subprocess.check_output(["ps", "-axo", "pid=,command="], text=True)

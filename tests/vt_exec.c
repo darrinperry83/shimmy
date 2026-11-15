@@ -9,6 +9,7 @@
 #include <string.h>
 #include <errno.h>
 int linux_errno_from_host(int e) { return e; }
+int guest_child_known(int pid) { (void)pid; return 0; }
 int shim_fd_reserve(int fd) {
   if (fd < 256) { int h=fcntl(fd,F_DUPFD_CLOEXEC,256); if(h>=0){close(fd);fd=h;} }
   fcntl(fd,F_SETFD,FD_CLOEXEC); return fd;

@@ -2649,14 +2649,17 @@ static long do_ioctl(int fd, unsigned long req, unsigned long arg) {
     case L_FIONBIO:   { int on = *(const int*)arg; return herr(ioctl(fd, FIONBIO, &on)); }
     case L_FIOCLEX:   return herr(fcntl(fd, F_SETFD, FD_CLOEXEC));
     case L_FIONCLEX:  return herr(fcntl(fd, F_SETFD, 0));
-    case L_TIOCGPGRP: { pid_t p = tcgetpgrp(fd); if (p < 0) return herrno();
+    case L_TIOCGPGRP: { int virtual_p = 0; pid_t p = vt_get_foreground(fd, &virtual_p) == 0 ? (pid_t)virtual_p : tcgetpgrp(fd);
+                        if (p < 0) return herrno();
                         *(int*)arg = (int)p; return 0; }
-    case L_TIOCSPGRP: return herr(tcsetpgrp(fd, (pid_t)*(const int*)arg));
-    case L_TIOCGSID:  { pid_t s = getsid(0); if (s < 0) return herrno();
+    case L_TIOCSPGRP: { int want=*(const int*)arg; int rc=vt_owns_fd(fd) ? vt_set_foreground(fd,want) : tcsetpgrp(fd,(pid_t)want);
+                        return herr(rc); }
+    case L_TIOCGSID:  { int virtual_s = 0; pid_t s = vt_get_session(fd, &virtual_s) == 0 ? (pid_t)virtual_s : getsid(0); if (s < 0) return herrno();
                         *(int*)arg = (int)s; return 0; }
     case L_TIOCEXCL:  return herr(ioctl(fd, TIOCEXCL));
     case L_TIOCNXCL:  return herr(ioctl(fd, TIOCNXCL));
-    case L_TIOCSCTTY: return herr(ioctl(fd,TIOCSCTTY,0));
+    case L_TIOCSCTTY: { int rc=vt_owns_fd(fd) ? vt_claim_ctty(fd) : ioctl(fd,TIOCSCTTY,0);
+                        return herr(rc); }
     case L_TIOCNOTTY: return herr(ioctl(fd, TIOCNOTTY));
     case L_TIOCOUTQ:  { int n = 0; if (ioctl(fd, TIOCOUTQ, &n) < 0) return herrno();
                         *(int*)arg = n; return 0; }

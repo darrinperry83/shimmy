@@ -32,6 +32,10 @@ int  vt_node_number(const char* gpath);   // 1..6 for /dev/ttyN, else 0
 int  vt_open_node(const char* gpath);     // -> fresh slave fd (host fd) or negative errno
 int  vt_owns_fd(int fd);                  // is fd (or any dup of it) one of our pty slaves?
 int  vt_number_for_fd(int fd);            // guest tty number for a pty slave, or 0
+int  vt_claim_ctty(int fd);
+int  vt_get_foreground(int fd, int* pgid);
+int  vt_set_foreground(int fd, int pgid);
+int  vt_get_session(int fd, int* sid);
 void vt_stat_identity(const char* gpath, uint64_t* dev, uint64_t* ino);
 void vt_fake_stat(unsigned int* mode, uint64_t* rdev, const char* gpath);
 

@@ -18,6 +18,10 @@
 #include <termios.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
+#include <sys/file.h>
+#include <signal.h>
+#include <limits.h>
+#include "guestthread.h"
 #include <poll.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -82,6 +86,100 @@ static int g_fb_w, g_fb_h;
 
 static int g_dump;                       // RDCONS_DUMP: dump text + non-black verdict
 
+typedef struct { unsigned magic; int sid; int foreground; } vt_tty_state;
+#define VT_TTY_MAGIC 0x56545459u
+
+static int vt_state_fd(int n) {
+    const char* boot = getenv("RDSHIM_BOOT");
+    if (!boot || !*boot) return -1;
+    for (const char* p = boot; *p; p++) if (*p < '0' || *p > '9') return -1;
+    char path[PATH_MAX];
+    snprintf(path, sizeof path, "/tmp/rdvt-%s-%d.state", boot, n);
+    int fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
+    if (fd < 0) return -1;
+    struct stat st;
+    if (fstat(fd, &st) || !S_ISREG(st.st_mode) || st.st_uid != geteuid()) {
+        close(fd); return -1;
+    }
+    return fd;
+}
+
+static int vt_state_read_locked(int fd, vt_tty_state* state) {
+    memset(state, 0, sizeof *state);
+    ssize_t n = pread(fd, state, sizeof *state, 0);
+    if (n < 0) return -1;
+    if (n != sizeof *state || state->magic != VT_TTY_MAGIC) {
+        memset(state, 0, sizeof *state); state->magic = VT_TTY_MAGIC;
+    }
+    return 0;
+}
+
+static int vt_state_update(int n, vt_tty_state* state, int write_back) {
+    int fd = vt_state_fd(n);
+    if (fd < 0) return -1;
+    int rc = -1;
+    if (flock(fd, LOCK_EX) == 0) {
+        vt_tty_state current;
+        if (vt_state_read_locked(fd, &current) == 0) {
+            if (write_back) {
+                if (state->sid) current.sid = state->sid;
+                if (state->foreground) current.foreground = state->foreground;
+                rc = pwrite(fd, &current, sizeof current, 0) == sizeof current ? 0 : -1;
+            } else { *state = current; rc = 0; }
+        }
+        flock(fd, LOCK_UN);
+    }
+    close(fd);
+    return rc;
+}
+
+int vt_claim_ctty(int fd) {
+    int n = vt_number_for_fd(fd);
+    if (!n) { errno = ENOTTY; return -1; }
+    if (getsid(0) != getpid()) { errno = EPERM; return -1; }
+    vt_tty_state state = { .magic = VT_TTY_MAGIC, .sid = (int)getsid(0), .foreground = (int)getpgrp() };
+    return vt_state_update(n, &state, 1);
+}
+
+int vt_get_foreground(int fd, int* pgid) {
+    int n = vt_number_for_fd(fd);
+    if (!n) return -1;
+    vt_tty_state state;
+    if (vt_state_update(n, &state, 0) || !state.foreground) return -1;
+    *pgid = state.foreground;
+    return 0;
+}
+
+int vt_get_session(int fd, int* sid) {
+    int n = vt_number_for_fd(fd);
+    if (!n) return -1;
+    vt_tty_state state;
+    if (vt_state_update(n, &state, 0) || !state.sid) return -1;
+    *sid = state.sid;
+    return 0;
+}
+
+int vt_set_foreground(int fd, int pgid) {
+    int n = vt_number_for_fd(fd);
+    if (!n) { errno = ENOTTY; return -1; }
+    if (pgid <= 0 || !guest_child_known(pgid)) { errno = EPERM; return -1; }
+    vt_tty_state state;
+    if (vt_state_update(n, &state, 0)) return -1;
+    if (state.sid != (int)getsid(0)) { errno = EPERM; return -1; }
+    if (getpgid((pid_t)pgid) != (pid_t)pgid || getsid((pid_t)pgid) != state.sid) {
+        errno = EPERM; return -1;
+    }
+    vt_tty_state update = { .magic = VT_TTY_MAGIC, .foreground = pgid };
+    return vt_state_update(n, &update, 1);
+}
+
+static int vt_get_foreground_fd_number(int n, int* pgid) {
+    vt_tty_state state;
+    if (vt_state_update(n, &state, 0) || !state.foreground) return -1;
+    *pgid = state.foreground;
+    return 0;
+}
+
 int vt_enabled(void) {
     if (g_enabled < 0) {
         const char* e = getenv("RDVT");
@@ -139,8 +237,20 @@ void vt_feed_key(const char* utf8, size_t n) {
     if (act < 1 || act > VT_MAX_TEXT) return;
     vt_unit* u = &g_vt[act - 1];
     if (u->master > 0) {
-        ssize_t w = write(u->master, utf8, n);
-        (void)w;
+        if (!memchr(utf8, 3, n) && !memchr(utf8, 26, n)) {
+            (void)write(u->master, utf8, n);
+            return;
+        }
+        for (size_t i = 0; i < n; i++) {
+            unsigned char c = (unsigned char)utf8[i];
+            int pgid = 0;
+            if ((c == 3 || c == 26) && vt_get_foreground_fd_number(act, &pgid) == 0 &&
+                guest_child_known(pgid) && getpgid((pid_t)pgid) == (pid_t)pgid) {
+                (void)kill(-(pid_t)pgid, c == 3 ? SIGINT : SIGTSTP);
+            } else {
+                (void)write(u->master, &c, 1);
+            }
+        }
     }
 }
 
