@@ -306,3 +306,12 @@ capture the resolver's bus-name acquisition and reply path while the broker
 and resolver are both stable, then distinguish a service protocol failure
 from a client or transport failure. The installed root, host network settings,
 and live Shimmy session were not changed.
+
+One source-level lead needs a targeted runtime test: `peer_ucred()` in
+`src/net.c` reports UID/GID 0 for every guest socket peer when `RDUID0` is
+enabled, while `src/syscalls.c` tracks per-process guest UIDs and the Arch
+`org.freedesktop.resolve1.conf` grants ownership of that bus name to
+`systemd-resolve`. A broker that sees the resolver as UID 0 could reject its
+name request. This is an inference from code and policy, not an observed broker
+denial. A correction must report the actual peer's guest credentials across
+Shimmy processes; substituting the current process's UID would be incorrect.
