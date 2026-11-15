@@ -298,6 +298,14 @@ static int flick_matches(NSEvent* e) {
 // Main thread only (called from the local NSEvent monitor inside -[NSApp run]).
 static void flick_toggle(void) {
   int next = !atomic_load(&gFlickTakeover);
+  // The control message is one-way, but a failed send means the scanout service did
+  // not receive it. Keep the presenter and window in their current mode in that case.
+  int prc = rdgpu_scanout_set_online(next ? 0 : 1);   // online=0 -> Linux owns, 1 -> macOS owns
+  if (prc != 0) {
+    fprintf(stderr, "[flick] toggle refused: scanout online=%d rc=%d; keeping takeover %s\n",
+            next ? 0 : 1, prc, next ? "OFF" : "ON");
+    return;
+  }
   atomic_store(&gFlickTakeover, next);
   // The shim's own present sink: order the guest window back in when macOS re-composites, out when
   // the direct scanout owns the display. The frame present path follows gpuwin_takeover_active().
@@ -305,7 +313,6 @@ static void flick_toggle(void) {
     if (next) { if (gWin.isVisible) [gWin orderOut:nil]; }
     else      { if (!gWin.isVisible) [gWin makeKeyAndOrderFront:nil]; }
   }
-  int prc = rdgpu_scanout_set_online(next ? 0 : 1);   // online=0 -> Linux owns, 1 -> macOS owns
   fprintf(stderr, "[flick] TOGGLE -> takeover %s; scanout online=%d rc=%d\n",
           next ? "ON (Linux owns display(s))" : "OFF (macOS re-composites)",
           next ? 0 : 1, prc);
