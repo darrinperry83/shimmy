@@ -56,67 +56,46 @@ dump is via `RDCONS_DUMPFILE` (a path; set it to capture the tty1 login state).
 
 ## 4. Current state (exactly where we are)
 
-systemd now boots as PID 1 and gets VERY far:
-- **journald is ACTIVE** ("Started Journal Service").
-- **udev coldplug finishes** ("Finished Coldplug All udev Devices").
-- **"Created slice /system/getty"** appears.
-- The syscall surface is broadly working: PID-1 identity, cgroup v2, timerfd, pidfd, socket
-  activation, SCM_CREDENTIALS (sd_notify), the `/proc`+`/sys`+`/dev` synthesis.
+systemd now boots as PID 1 and reaches the **login stage**:
+- **journald ACTIVE** ("Started Journal Service").
+- **udevd ACTIVE** ("Started Rule-based Manager for Device Events and Files").
+- **logind ACTIVE** ("Started User Login Management").
+- **"Reached target Basic System" / "Reached target Network" / "Reached target Login Prompts".**
+- **"Started Getty on tty1."** — but agetty never actually runs.
 
-The boot is **blocked at two units that never go ACTIVE**, and both share ONE root cause
-(§5):
-- `systemd-userdbd.service` never starts (its socket activation never fires).
-- `systemd-udevd.service` stalls in rule-parsing (its `getgrnam` NSS lookup talks varlink to
-  the never-started userdbd, so it times out at 90s).
-- `systemd-update-utmp` also hangs on the journal stdout stream.
+The two REMAINING blockers (separate, §5):
+- **`getty@tty1` fails to open `/dev/tty1`** → "Failed to set up standard input: No such file
+  or directory" → agetty never runs → no `login:` prompt.
+- **`systemd-resolved` exits 1** (start-limit-hit), a separate daemon failure.
 
 ---
 
-## 5. THE CURRENT BUG (fix this)
+## 5. THE CURRENT BUGS (fix these)
 
-**A LISTENING AF_UNIX SOCK_STREAM socket with a pending connection does NOT wake the owner's
-`epoll_wait`, so `accept()` never runs.**
+### 5a. `getty@tty1` fails to open `/dev/tty1` (THE remaining login blocker)
 
-Measured facts (from `RDNETSOCK=1`, log `/tmp/rd_netsock_dbg.txt`):
-- A **SOCK_DGRAM** socket (e.g. fd 32, journal/socket) DOES fire `kevent` (EVFILT_READ).
-- A **SOCK_STREAM LISTENING** socket (e.g. PID 1's `/run/systemd/userdb/io.systemd.Multiplexer`
-  on fd 46) with a client `connect()` pending does **NOT** fire `kevent` — `EP_APPLY` registers
-  `EPOLLIN` (events=0x1) into the kqueue AFTER `listen`, the client connect succeeds, but no
-  `KEVENT fd=46` ever appears.
-- So the guest's `epoll_wait` never returns EPOLLIN for the listening socket, `accept()` is never
-  called, and the daemon behind it (userdbd, and journald's stdout stream) never starts.
+agetty never runs because the executor's open of `TTYPath=/dev/tty1` returns **ENOENT** ("Failed
+to set up standard input: No such file or directory"). The `[vt] tty1 ready` lines prove the pty
+pair IS created, and `vt_open_node()` (`src/vt.c`) returns `-ENOTTY` when the vt master isn't
+ready — so the ENOENT is upstream in `resolve_f` (the `/dev/tty1` path resolution in
+`src/syscalls.c`), likely a timing/path issue between when the vt is created and when getty opens
+`/dev/tty1`. Trace the `openat("/dev/tty1")` resolution (`RDEXECDBG` logs openat paths) and fix it
+so agetty's stdin opens the tty and the login prompt appears.
 
-This is the SAME bug class the code already works around for DATAGRAM sockets. Look in
-`src/net.c` at `sys_epoll_pwait` / `ep_apply` / the "epoll recovery" block (which, for datagrams,
-checks `MSG_PEEK>0` and re-applies the kqueue registration + hands back EPOLLIN).
+### 5b. `systemd-resolved` exits 1 (separate)
 
-### The fix (recommended)
+`systemd-resolved.service` exits `status=1/FAILURE` in a start-limit-hit loop. No explicit error
+in the journal yet — trace its syscalls to find the failure. (Non-fatal to the login, but should
+be fixed for a clean boot.)
 
-Extend that recovery to **STREAM LISTENING** sockets:
+### (Already fixed, for reference)
 
-1. Detect a listening socket via `getsockopt(fd, SOL_SOCKET, SO_ACCEPTCONN, ...)`.
-2. For a listening socket that is absent from the `kevent()` result, prove a connection is
-   pending. `SO_NREAD` returns 0 for listen sockets, so the reliable proof is a **non-blocking
-   `accept()`**: set `O_NONBLOCK`, `accept()` one connection, then **re-queue it** (the accepted
-   socket must be handed back so the guest's own `accept()` succeeds — e.g. keep it and serve it
-   from the shim's fd table, or find the socket option that suppresses EVFILT_READ on listen
-   sockets and drop it).
-3. Hand back `EPOLLIN` so the guest's `epoll_wait` wakes and it calls `accept()`.
-
-Alternative (cleaner, if findable): identify WHY the shim's setup suppresses `EVFILT_READ` for
-STREAM listen sockets (a `SOCK_CLOEXEC`/`SOCK_NONBLOCK` application, `SO_NOSIGPIPE`,
-`kill_sigpipe`, or a wrong `listen()` emulation) and drop it. Note a plain host test
-(bind/listen/EVFILT_READ/kevent + fork/connect) DOES fire for STREAM, so it is NOT a raw-kqueue
-limitation — it is something the shim does to STREAM listening sockets specifically.
-
-### Secondary (after the main fix)
-
-- `systemd-userdbd.socket` has `Symlinks=` (`io.systemd.DropIn`, `io.systemd.NameServiceSwitch`)
-  that the shim creates only in the ROOTFS, but socket `connect()` maps paths into the per-boot
-  group prefix — so nss-systemd's `connect()` to those aliases returns ENOENT. Create the symlink
-  aliases in the group namespace too (or make `unix_path_to_host` resolve the rootfs symlink).
-- Optionally add the missing groups (`i2c`, `clock`, …) to the rootfs `/etc/group` to silence the
-  `Failed to resolve group '...'` udev warnings and remove the NSS round-trip.
+The STREAM-listen accept/epoll bug IS FIXED: `net.c` `sys_epoll_pwait`'s recovery path now
+detects a LISTENING STREAM socket from `accept()`'s errno (EAGAIN = listening/empty;
+EINVAL/EOPNOTSUPP/ENOTSOCK = not listening), non-blocking-accept()s the pending connection(s)
+and re-queues them (`acceptq_push`); `sys_accept4` drains the queue (`acceptq_pop`). Also
+`unix_path_to_host` now resolves rootfs symlinks for `connect()` (the userdbd socket `Symlinks=`
+aliases). This is what made udevd/logind ACTIVE.
 
 ---
 
@@ -132,6 +111,9 @@ All in `shim-metal-clear/src` (build clean):
 - `src/net.c:527-535` — hash long abstract unix-socket names to a 16-hex FNV-1a token (userdbd's
   ~44-byte abstract name hex-encoded to ~88 bytes overflowed macOS's 104-byte `sun_path` →
   `ENAMETOOLONG`).
+- `src/net.c` `sys_epoll_pwait`/`sys_accept4` — STREAM-listening-socket accept re-queue (the
+  acceptq_push/acceptq_pop recovery), and `unix_path_to_host` resolves rootfs symlinks for
+  `connect()`. This is what made udevd + logind ACTIVE and reached "Login Prompts".
 - Earlier (already in): PID-1 `getpid()==1` (`src/syscalls.c:344` `syscalls_guest_pid`), cgroup
   v2 synthesis, timerfd `TIME_T_MAX` saturation, pidfd registry (fd never recycled), inotify
   write-end reserved, `pack_fds` (shim fds relocated to `>= 256`), SCM_CREDENTIALS via
