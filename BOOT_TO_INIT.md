@@ -251,3 +251,25 @@ therefore exits after that. The separate isolated full boot reached a fresh
 login prompt with D-Bus settled, but `systemd-resolved` still failed and no
 DNS query through it passed. The installed root and live network settings were
 not changed.
+
+## Narrow path-MTU socket mapping (2026-11-15)
+
+systemd v261 sets `IP_MTU_DISCOVER=IP_PMTUDISC_DONT` (value 0) for its IPv4
+LLMNR sockets to clear the Don't-Fragment bit. Linux defines this mode as
+"never send DF frames". Darwin's IPv4 `IP_DONTFRAG=0` clears its per-socket
+Don't-Fragment setting. Shimmy now translates that one mode, including
+readback, and rejects Linux modes 1–5 because Darwin's boolean flag does not
+implement their route and path-MTU semantics. The test exercises UDP and TCP
+set, UDP get, unsupported modes, malformed lengths, the actual Darwin socket
+state, and a loopback UDP send after clearing the flag. It does not inspect a
+captured IPv4 header on the wire.
+
+With this mapping, an isolated full Arch boot again reached a fresh login
+prompt with D-Bus broker and launcher processes settled. The resolver journal
+no longer showed the `IP_MTU_DISCOVER` error. It reported that the host mDNS
+port was already occupied, disabled its mDNS support, then failed to connect
+to the guest system bus (`No such file or directory`). The resolver did not
+stay up, and no DNS query through it succeeded. The next investigation is the
+guest service-bus path/namespace used by `systemd-resolved`; this result is
+not DNS readiness. Only the disposable root was booted. The live network and
+installed root were not changed.

@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
 #include <sys/types.h>
 #include <sys/uio.h>
 #include "net.h"
@@ -36,6 +38,27 @@ int main(void) {
   assert(readback == 1 && len == sizeof readback);
   assert(sc(208, receiver, 0, 8, (unsigned long)&enabled, 1, 0) < 0);
   assert(sc(208, receiver, 0, 999, (unsigned long)&enabled, sizeof enabled, 0) < 0);
+  int mode = 0;
+  assert(sc(208, receiver, 0, 10, (unsigned long)&mode, sizeof mode, 0) == 0);
+  readback = -1; len = sizeof readback;
+  assert(sc(209, receiver, 0, 10, (unsigned long)&readback, (unsigned long)&len, 0) == 0);
+  assert(readback == 0 && len == sizeof readback);
+  for (mode = 1; mode <= 5; mode++)
+    assert(sc(208, receiver, 0, 10, (unsigned long)&mode, sizeof mode, 0) == -95);
+  mode = 0;
+  assert(sc(208, receiver, 0, 10, (unsigned long)&mode, 1, 0) == -22);
+  assert(sc(208, receiver, 0, 10, 0, sizeof mode, 0) == -14);
+  int dontfrag = 1; socklen_t hostlen = sizeof dontfrag;
+  assert(setsockopt((int)receiver, IPPROTO_IP, IP_DONTFRAG, &dontfrag, hostlen) == 0);
+  readback = -1; len = sizeof readback;
+  assert(sc(209, receiver, 0, 10, (unsigned long)&readback, (unsigned long)&len, 0) == -95);
+  assert(sc(208, receiver, 0, 10, (unsigned long)&mode, sizeof mode, 0) == 0);
+  assert(getsockopt((int)receiver, IPPROTO_IP, IP_DONTFRAG, &dontfrag, &hostlen) == 0);
+  assert(dontfrag == 0);
+  long tcp = sc(198, 2, 1, 0, 0, 0, 0);
+  assert(tcp >= 0);
+  assert(sc(208, tcp, 0, 10, (unsigned long)&mode, sizeof mode, 0) == 0);
+  close((int)tcp);
   unsigned char addr[16] = {2, 0, 0, 0, 127, 0, 0, 1};
   long bind_result = sc(200, receiver, (unsigned long)addr, sizeof addr, 0, 0, 0);
   if (bind_result) fprintf(stderr, "loopback bind result %ld\n", bind_result);
@@ -88,5 +111,5 @@ int main(void) {
   }
   assert(saw_pktinfo && saw_ttl);
   close((int)sender); close((int)receiver);
-  puts("PASS IPv4 IP_PKTINFO/IP_RECVTTL option and ancillary translation");
+  puts("PASS IPv4 packet-info, TTL, and disable-DF socket behavior");
 }

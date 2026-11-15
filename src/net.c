@@ -1117,6 +1117,17 @@ struct lin_timeval { int64_t tv_sec; int64_t tv_usec; };   // Linux suseconds_t 
 struct lin_timespec64 { int64_t tv_sec; int64_t tv_nsec; };
 static long do_setsockopt(int fd, int llevel, int lname, const void* val, uint32_t len) {
   int hlevel = 0, hname = 0;
+  if (llevel == L_SOL_IP && lname == 10 /*IP_MTU_DISCOVER*/) {
+    if (!val) return -L_EFAULT;
+    if (len != sizeof(int)) return -L_EINVAL;
+    int mode; memcpy(&mode, val, sizeof mode);
+    // Linux IP_PMTUDISC_DONT explicitly clears IPv4 DF. Darwin IP_DONTFRAG=0
+    // enforces that same packet-header choice. Other Linux PMTU modes have
+    // route/cache semantics that IP_DONTFRAG alone cannot provide.
+    if (mode != 0) return -L_EOPNOTSUPP;
+    int dontfrag = 0;
+    return lret(setsockopt(fd, IPPROTO_IP, IP_DONTFRAG, &dontfrag, sizeof dontfrag));
+  }
   if (rd_rtnl_is_fd(fd) && llevel == 270 /*SOL_NETLINK*/ &&
       (lname == 1 /*ADD_MEMBERSHIP*/ || lname == 2 /*DROP_MEMBERSHIP*/)) {
     if (!val || len < sizeof(int)) return -L_EINVAL;
@@ -1162,6 +1173,16 @@ static long do_setsockopt(int fd, int llevel, int lname, const void* val, uint32
 }
 static long do_getsockopt(int fd, int llevel, int lname, void* val, uint32_t* len) {
   int hlevel = 0, hname = 0;
+  if (llevel == L_SOL_IP && lname == 10 /*IP_MTU_DISCOVER*/) {
+    if (!val || !len) return -L_EFAULT;
+    if (*len < sizeof(int)) return -L_EINVAL;
+    int dontfrag = 0; socklen_t hostlen = sizeof dontfrag;
+    if (getsockopt(fd, IPPROTO_IP, IP_DONTFRAG, &dontfrag, &hostlen) < 0) return lerr();
+    if (hostlen != sizeof dontfrag || dontfrag != 0) return -L_EOPNOTSUPP;
+    int mode = 0; // IP_PMTUDISC_DONT is the only equivalent supported mode.
+    memcpy(val, &mode, sizeof mode); *len = sizeof mode;
+    return 0;
+  }
   if (rd_rtnl_is_fd(fd) && llevel == 270 /*SOL_NETLINK*/ && lname == 9 /*NETLINK_LIST_MEMBERSHIPS*/) {
     if (!len) return -L_EFAULT;
     size_t size = *len;
