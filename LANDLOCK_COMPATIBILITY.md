@@ -37,6 +37,33 @@ would also affect unrelated support threads. It cannot honestly return success
 without a verified mapping for the requested rights, path hierarchy, rule
 stacking, inherited children and already-open descriptors.
 
+A further end-to-end probe used an existing Linux root read-only and a
+throwaway file in this repository's `build/` directory. The default `/Users`
+share let guest `/bin/cat` read the file (exit 0). Running the same Shimmy
+command under a host `sandbox-exec` profile denying read access to that one
+canonical host path made guest `cat` fail with `Operation not permitted` (exit
+1). The throwaway file was removed. This proves the host process policy reaches
+the guest's host-shared file access. The profile otherwise allowed access by
+default, so it **does not** confine a download worker or justify disabling
+pacman's Landlock requirement.
+
+The default rootfs and Shimmy executable also live under `/Users` on this
+machine. A broad host deny rule for `/Users` would block the guest root itself
+unless an explicit allowlist were proved. Guest `RDSHARE=` can hide shared
+paths from Shimmy's path translation, but it cannot isolate native calls in
+the shared host address space. Neither is a sufficient replacement for a
+host-enforced process boundary.
+
+A narrow allowlist probe denied file reads and writes under `/Users/dperry`,
+then allowed read-only access to the Shimmy executable and Linux root plus
+metadata traversal for parent directories. Guest `cat /etc/os-release` exited
+0, while a guest read of the throwaway file elsewhere in the home tree failed
+with `Operation not permitted`. A stricter default-deny filesystem profile did
+not run even native `/usr/bin/true`: it aborted with signal 6 and no output.
+The missing runtime allowance is undiagnosed. These probes support further
+work on a whole-instance host confinement profile; neither is a complete
+package-worker policy, and neither was shipped as a launcher.
+
 ## Safe engineering path
 
 1. Keep Landlock unsupported until its requested policy is enforced. Do not
