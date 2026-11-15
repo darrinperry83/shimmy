@@ -454,7 +454,7 @@ void console_render(const console* c, uint8_t* rgba, int width, int height, int 
             const uint8_t* glyph = glyph_for(cell->ch);
             int draw_cursor = c->cursor_visible && c->cursor_on && row == c->cur_y && col == c->cur_x;
             for (int yy = 0; yy < ch; yy++) {
-                uint8_t rowbits = (yy < fh) ? glyph[yy] : 0;
+                uint8_t rowbits = (yy < fh) ? glyph[fh - 1 - yy] : 0;
                 uint8_t* p = rgba + (size_t)(py + yy) * stride + (size_t)px * 4;
                 for (int xx = 0; xx < fw; xx++) {
                     int set = (rowbits & (0x80 >> xx)) != 0;
