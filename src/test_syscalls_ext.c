@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <signal.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
@@ -101,6 +102,23 @@ int main(void) {
   // Scratch tree. <root>/tmp doubles as the memfd backing dir (see memfd_dir()).
   if (system("mkdir -p " TESTROOT "/tmp " TESTROOT "/sub") != 0) { }
   syscalls_ext_set_root(TESTROOT);
+  SECTION("90 capget ABI negotiation");
+  {
+    struct { uint32_t version; int32_t pid; } hdr = {0, 0};
+    uint32_t data[7];
+    for (size_t i = 0; i < 7; i++) data[i] = 0xdeadbeefU;
+    CHECK(SC2(90, &hdr, 0) == -LX_EINVAL, "unknown version must negotiate with EINVAL");
+    CHECK(hdr.version == 0x20080522U, "version negotiation returned %#x", hdr.version);
+    CHECK(SC2(90, &hdr, data) == 0, "version 3 query failed");
+    for (size_t i = 0; i < 6; i++)
+      CHECK(data[i] == 0, "capability word %zu is nonzero", i);
+    CHECK(data[6] == 0xdeadbeefU, "capget wrote beyond two data entries");
+    hdr.version = 0x19980330U;
+    for (size_t i = 0; i < 7; i++) data[i] = 0xdeadbeefU;
+    CHECK(SC2(90, &hdr, data) == 0, "version 1 query failed");
+    CHECK(data[0] == 0 && data[1] == 0 && data[2] == 0 &&
+          data[3] == 0xdeadbeefU, "version 1 data size is wrong");
+  }
   unlink(H("/f1.txt")); unlink(H("/link")); unlink(H("/target.txt"));
   unlink(H("/tr.txt")); unlink(H("/cfr_src")); unlink(H("/cfr_dst"));
   unlink(H("/ren_a")); unlink(H("/ren_b"));

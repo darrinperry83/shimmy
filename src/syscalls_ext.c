@@ -876,9 +876,23 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return ok0(utimensat(hdirfd, host, ts, host_at_flags((int)a3)));
   }
   case 89: return -LX_EPERM;                                   // acct
-  case 90:                                                     // capget: report "no capabilities"
-    if (a1) memset((void*)a1, 0, 3 * 8);
+  case 90: {                                                   // capget: report "no capabilities"
+    // Linux negotiates the capability ABI with a NULL data pointer. libcap-ng
+    // begins with version 0 and needs EINVAL plus the supported version in the
+    // header before it can perform a real capability query.
+    if (!a0) return -LX_EFAULT;
+    uint32_t* header = (uint32_t*)a0;
+    const uint32_t current = 0x20080522U; // _LINUX_CAPABILITY_VERSION_3
+    uint32_t nwords = (header[0] == 0x19980330U) ? 1 : 2;
+    if (header[0] != current && header[0] != 0x20071026U &&
+        header[0] != 0x19980330U) {
+      header[0] = current;
+      return -LX_EINVAL;
+    }
+    if (!a1) return 0;
+    memset((void*)a1, 0, nwords * 12);
     return 0;
+  }
   case 91: return -LX_EPERM;                                   // capset
   case 92: return 0;                                           // personality: accept, ignore
 
