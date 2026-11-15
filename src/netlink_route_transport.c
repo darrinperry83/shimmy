@@ -16,7 +16,7 @@
 #define RD_RTNL_MAX_ADDRESSES 128
 #define RD_RTNL_MAX_REPLY 32768
 
-struct route_socket { int fd, peer, linux_type; unsigned port_id; dev_t device; ino_t inode; };
+struct route_socket { int fd, peer, linux_type, pktinfo; unsigned port_id; dev_t device; ino_t inode; };
 static struct route_socket sockets[RD_RTNL_MAX_SOCKETS];
 static size_t socket_count;
 static pthread_mutex_t route_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -62,6 +62,28 @@ unsigned rd_rtnl_port_id(int fd) {
   return port;
 }
 
+int rd_rtnl_set_pktinfo(int fd, int enabled) {
+  pthread_mutex_lock(&route_lock);
+  int slot = slot_locked(fd);
+  if (slot >= 0) {
+    int peer = sockets[slot].peer;
+    for (size_t i = 0; i < socket_count; i++)
+      if (sockets[i].peer == peer) sockets[i].pktinfo = !!enabled;
+  }
+  pthread_mutex_unlock(&route_lock);
+  if (slot < 0) { errno = EBADF; return -1; }
+  return 0;
+}
+
+int rd_rtnl_get_pktinfo(int fd) {
+  pthread_mutex_lock(&route_lock);
+  int slot = slot_locked(fd);
+  int value = slot < 0 ? -1 : sockets[slot].pktinfo;
+  pthread_mutex_unlock(&route_lock);
+  if (slot < 0) errno = EBADF;
+  return value;
+}
+
 int rd_rtnl_open(int linux_type, int nonblock, int cloexec, unsigned port_id) {
   if (linux_type != SOCK_DGRAM && linux_type != SOCK_RAW) { errno = EOPNOTSUPP; return -1; }
   // A route endpoint must not escape an exec: its response peer lives inside
@@ -84,7 +106,7 @@ int rd_rtnl_open(int linux_type, int nonblock, int cloexec, unsigned port_id) {
     pthread_mutex_unlock(&route_lock); close(pair[0]); close_peer(pair[1]); errno = EMFILE; return -1;
   }
   sockets[socket_count++] = (struct route_socket){ pair[0], pair[1], linux_type,
-                                                   port_id, st.st_dev, st.st_ino };
+                                                   0, port_id, st.st_dev, st.st_ino };
   pthread_mutex_unlock(&route_lock);
   return pair[0];
 }
@@ -110,6 +132,7 @@ void rd_rtnl_dup(int oldfd, int newfd) {
     if (fstat(newfd, &st) == 0)
       sockets[socket_count++] = (struct route_socket){ newfd, sockets[old].peer,
                                                      sockets[old].linux_type,
+                                                     sockets[old].pktinfo,
                                                      sockets[old].port_id, st.st_dev, st.st_ino };
   }
   pthread_mutex_unlock(&route_lock);

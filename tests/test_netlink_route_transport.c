@@ -66,6 +66,11 @@ int main(void) {
   errno = 0;
   assert(rd_rtnl_open(SOCK_DGRAM, 0, 0, 111) == -1 && errno == EOPNOTSUPP);
   int first = rd_rtnl_open(SOCK_DGRAM, 0, 1, 111), second = rd_rtnl_open(SOCK_RAW, 0, 1, 222);
+  assert(first >= 0 && second >= 0);
+  assert(rd_rtnl_get_pktinfo(first) == 0);
+  assert(rd_rtnl_set_pktinfo(first, 1) == 0);
+  assert(rd_rtnl_get_pktinfo(first) == 1);
+  assert(rd_rtnl_get_pktinfo(second) == 0);
   assert(first >= 0 && second >= 0 && first != second);
   assert(rd_rtnl_is_fd(first) && rd_rtnl_is_fd(second));
   unsigned char a[32], b[32]; request(a, 101); request(b, 202);
@@ -128,11 +133,15 @@ int main(void) {
   assert(rd_rtnl_send(first, addr_req, sizeof addr_req) == -1 && errno == EOPNOTSUPP);
   assert(dup2(first, second) == second); // closes prior destination implicitly
   rd_rtnl_dup(first, second);
+  assert(rd_rtnl_get_pktinfo(second) == 1);
   request(a, 101);
   assert(rd_rtnl_send(second, a, 32) == 32);
   check_dump(second, 101, 16, 0);
   int duplicate = dup(first); assert(duplicate >= 0);
   rd_rtnl_dup(first, duplicate);
+  assert(rd_rtnl_get_pktinfo(duplicate) == 1);
+  assert(rd_rtnl_set_pktinfo(duplicate, 0) == 0);
+  assert(rd_rtnl_get_pktinfo(first) == 0);
   rd_rtnl_close(first); close(first);
   assert(rd_rtnl_send(duplicate, a, 32) == 32);
   check_dump(duplicate, 101, 16, 0);

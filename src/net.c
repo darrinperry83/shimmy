@@ -1112,6 +1112,13 @@ struct lin_timeval { int64_t tv_sec; int64_t tv_usec; };   // Linux suseconds_t 
 struct lin_timespec64 { int64_t tv_sec; int64_t tv_nsec; };
 static long do_setsockopt(int fd, int llevel, int lname, const void* val, uint32_t len) {
   int hlevel = 0, hname = 0;
+  if (rd_rtnl_is_fd(fd) && llevel == 270 /*SOL_NETLINK*/ && lname == 3 /*NETLINK_PKTINFO*/) {
+    if (!val || len < sizeof(int)) return -L_EINVAL;
+    int enabled; memcpy(&enabled, val, sizeof enabled);
+    // Packet-info describes the multicast group of an incoming packet. Our
+    // supported dump replies are unicast, so they carry no pktinfo cmsg.
+    return rd_rtnl_set_pktinfo(fd, enabled) < 0 ? lerr() : 0;
+  }
   // SO_PASSCRED is still a no-op AT THE HOST -- Darwin has no such option -- but it is no longer
   // a no-op to US: it is the receiver announcing that it wants SCM_CREDENTIALS, and recvmsg
   // synthesises them. Recorded before the generic OPT_NOOP path swallows it.
@@ -1143,6 +1150,19 @@ static long do_setsockopt(int fd, int llevel, int lname, const void* val, uint32
 }
 static long do_getsockopt(int fd, int llevel, int lname, void* val, uint32_t* len) {
   int hlevel = 0, hname = 0;
+  if (rd_rtnl_is_fd(fd) && llevel == 270 /*SOL_NETLINK*/ && lname == 9 /*NETLINK_LIST_MEMBERSHIPS*/) {
+    // This read-only route socket has no memberships. Linux permits a size
+    // query with NULL data and zero length, which systemd uses on bind.
+    if (!len) return -L_EFAULT;
+    *len = 0;
+    return 0;
+  }
+  if (rd_rtnl_is_fd(fd) && llevel == 270 /*SOL_NETLINK*/ && lname == 3 /*NETLINK_PKTINFO*/) {
+    if (!val || !len || *len < sizeof(int)) return -L_EINVAL;
+    int enabled = rd_rtnl_get_pktinfo(fd);
+    if (enabled < 0) return lerr();
+    memcpy(val, &enabled, sizeof enabled); *len = sizeof enabled; return 0;
+  }
   if (rd_rtnl_is_fd(fd) && llevel == L_SOL_SOCKET && lname == 3 /*SO_TYPE*/) {
     if (!val || !len || *len < sizeof(int)) return -L_EINVAL;
     int type = rd_rtnl_socket_type(fd);

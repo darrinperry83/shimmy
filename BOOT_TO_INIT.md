@@ -168,6 +168,18 @@ systemd 261 requires `NETLINK_PKTINFO` during bind and later event subscriptions
 **These are read-only snapshots, not a working resolver or general netlink
 implementation.**
 
+The next isolated resolver trace reached `NETLINK_PKTINFO` (option 3), then
+`NETLINK_LIST_MEMBERSHIPS` (option 9), then `NETLINK_ADD_MEMBERSHIP` (option 1).
+The route socket now stores the packet-info toggle and reports an empty
+membership list. Its supported dump replies are unicast and correctly carry
+no multicast packet-info control message. Duped descriptors share the toggle.
+The resolver still stops at `NETLINK_ADD_MEMBERSHIP`: promising a link/address
+subscription without host-backed change notifications would leave it with stale
+state. This option remains explicitly unsupported. The trace used a disposable
+Arch root; normal boot again reached login with D-Bus settled. A future event
+backend must translate actual host link/address changes and preserve group
+identity before the resolver can subscribe.
+
 Regression commands: `clang -arch arm64 -O2 -Wall -Wextra -Werror -I src -o
 build/test_netlink_route_transport tests/test_netlink_route_transport.c
 src/netlink_route_transport.c src/netlink_route_snapshot.c &&

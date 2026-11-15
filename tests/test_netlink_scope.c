@@ -44,7 +44,7 @@ int main(void) {
   assert(sc(208, fd, 1, 8, (unsigned long)&buf, sizeof buf) == 0); // SO_RCVBUF
   const int unsupported_options[] = {3, 11, 12};
   for (size_t i = 0; i < sizeof unsupported_options / sizeof unsupported_options[0]; i++) {
-    // No pktinfo, extended ACK, or strict-check behavior is implemented.
+    // KOBJECT has no pktinfo, extended ACK, or strict-check behavior.
     assert(sc(208, fd, 270, unsupported_options[i], (unsigned long)&buf, sizeof buf) == -92);
   }
   close((int)fd);
@@ -56,7 +56,19 @@ int main(void) {
   int domain = 0; uint32_t domain_len = sizeof domain;
   assert(sc(209, route, 1, 39, (unsigned long)&domain, (unsigned long)&domain_len) == 0);
   assert(domain == 16 && domain_len == sizeof domain);
-  for (int option = 3; option <= 12; option += option == 3 ? 8 : 1)
+  int pktinfo = 1; uint32_t pktinfo_len = sizeof pktinfo;
+  assert(sc(208, route, 270, 3, (unsigned long)&pktinfo, sizeof pktinfo) == 0);
+  pktinfo = 0;
+  assert(sc(209, route, 270, 3, (unsigned long)&pktinfo, (unsigned long)&pktinfo_len) == 0);
+  assert(pktinfo == 1 && pktinfo_len == sizeof pktinfo);
+  assert(sc(208, route, 270, 3, (unsigned long)&pktinfo, 1) == -22);
+  uint32_t groups_len = 0;
+  assert(sc(209, route, 270, 9, 0, (unsigned long)&groups_len) == 0);
+  assert(groups_len == 0);
+  assert(sc(209, route, 270, 9, 0, 0) == -14);
+  int link_group = 1;
+  assert(sc(208, route, 270, 1, (unsigned long)&link_group, sizeof link_group) == -92);
+  for (int option = 11; option <= 12; option++)
     assert(sc(208, route, 270, option, (unsigned long)&domain, sizeof domain) == -92);
   unsigned char req[32] = {0};
   uint32_t nlen = 32, sequence = 1234; uint16_t getlink = 18, dump = 0x301;
@@ -76,17 +88,20 @@ int main(void) {
   assert(first_type == 16 && final_type == 3); // NEWLINK ... NLMSG_DONE
   assert(sc(206, route, (unsigned long)req, 31, 0, 0) == -22);
   struct iovec send_iov = { req, sizeof req }, recv_iov = { reply, sizeof reply };
+  unsigned char control[64] = {0};
   unsigned char address[12] = {0}; uint16_t family = 16;
   memcpy(address, &family, 2);
   struct linux_msghdr send_msg = { .name = (uint64_t)address, .namelen = sizeof address,
                                     .iov = (uint64_t)&send_iov, .iovlen = 1 };
   assert(sc(211, route, (unsigned long)&send_msg, 0, 0, 0) == 32);
   struct linux_msghdr recv_msg = { .name = (uint64_t)address, .namelen = sizeof address,
-                                    .iov = (uint64_t)&recv_iov, .iovlen = 1 };
+                                    .iov = (uint64_t)&recv_iov, .iovlen = 1,
+                                    .control = (uint64_t)control, .controllen = sizeof control };
   memset(address, 0, sizeof address);
   assert(sc(212, route, (unsigned long)&recv_msg, 0, 0, 0) > 32);
   memcpy(&family, address, 2);
-  assert(family == 16 && recv_msg.namelen == 12);
+  assert(family == 16 && recv_msg.namelen == 12 && recv_msg.controllen == 0);
+  assert(sc(207, route, (unsigned long)reply, sizeof reply, 0x40, 0) == -11);
   address[8] = 1; // multicast groups cannot be supplied
   assert(sc(200, route, (unsigned long)address, sizeof address, 0, 0) == -95);
   net_fd_closed((int)route); close((int)route);
