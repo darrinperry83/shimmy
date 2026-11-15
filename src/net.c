@@ -773,6 +773,65 @@ static int passcred_get(int fd) {
   for (int i = 0; i < g_passcred_n; i++) if (g_passcred[i] == fd) return 1;
   return 0;
 }
+// Darwin's SO_ACCEPTCONN query fails on Unix sockets. A nonblocking accept
+// distinguishes listeners from other sockets, but a pending connection must
+// remain available to the guest's subsequent accept4(). Keep it here rather
+// than silently discarding it during the query.
+struct accept_pending {
+  int listener, client;
+  dev_t dev; ino_t ino;
+  struct sockaddr_storage addr; socklen_t addrlen;
+  struct accept_pending* next;
+};
+static pthread_mutex_t g_accept_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct accept_pending* g_accept_pending;
+static int accept_pending_push(int listener, int client,
+                               const struct sockaddr* addr, socklen_t addrlen) {
+  struct stat st;
+  if (fstat(listener, &st) < 0) return -1;
+  struct accept_pending* p = calloc(1, sizeof *p);
+  if (!p) return -1;
+  p->listener = listener; p->client = client;
+  p->dev = st.st_dev; p->ino = st.st_ino;
+  p->addrlen = addrlen < sizeof p->addr ? addrlen : sizeof p->addr;
+  if (addr && p->addrlen) memcpy(&p->addr, addr, p->addrlen);
+  pthread_mutex_lock(&g_accept_lock);
+  p->next = g_accept_pending; g_accept_pending = p;
+  pthread_mutex_unlock(&g_accept_lock);
+  return 0;
+}
+static int accept_pending_pop(int listener, struct sockaddr* addr, socklen_t* addrlen) {
+  struct stat st;
+  if (fstat(listener, &st) < 0) return -1;
+  pthread_mutex_lock(&g_accept_lock);
+  struct accept_pending** link = &g_accept_pending;
+  while (*link) {
+    struct accept_pending* p = *link;
+    if (p->listener == listener && (p->dev != st.st_dev || p->ino != st.st_ino)) {
+      // The numeric fd was closed and reused. Never hand its old connection
+      // to the new listener.
+      *link = p->next;
+      close(p->client);
+      free(p);
+      continue;
+    }
+    if (p->listener == listener && p->dev == st.st_dev && p->ino == st.st_ino) {
+      *link = p->next;
+      int client = p->client;
+      if (addr && addrlen) {
+        socklen_t copied = *addrlen < p->addrlen ? *addrlen : p->addrlen;
+        if (copied) memcpy(addr, &p->addr, copied);
+        *addrlen = p->addrlen;
+      }
+      free(p);
+      pthread_mutex_unlock(&g_accept_lock);
+      return client;
+    }
+    link = &p->next;
+  }
+  pthread_mutex_unlock(&g_accept_lock);
+  return -1;
+}
 // socketpair() bookkeeping. macOS will not tell us who holds the other end of a socketpair --
 // getsockopt(SOL_LOCAL, LOCAL_PEERPID) is ENOTCONN, MEASURED, for both SOCK_STREAM and SOCK_DGRAM
 // -- and there is no working sender-stamped alternative either: Darwin defines the SCM_CREDS
@@ -912,6 +971,32 @@ static long do_getsockopt(int fd, int llevel, int lname, void* val, uint32_t* le
   if (llevel == L_SOL_SOCKET && lname == 16) {     // SO_PASSCRED: report what we recorded
     if (val && len && *len >= 4) { uint32_t v = (uint32_t)passcred_get(fd); memcpy(val, &v, 4); *len = 4; }
     else if (len) *len = 0;
+    return 0;
+  }
+  if (llevel == L_SOL_SOCKET && lname == 30) {     // SO_ACCEPTCONN
+    if (!val || !len || *len < sizeof(int)) return -L_EINVAL;
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0) return lerr();
+    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) return lerr();
+    struct sockaddr_storage sa; socklen_t salen = sizeof sa;
+    int client = accept(fd, (struct sockaddr*)&sa, &salen);
+    int saved_errno = errno;
+    fcntl(fd, F_SETFL, flags);
+    int listening = 0;
+    if (client >= 0) {
+      if (accept_pending_push(fd, client, (struct sockaddr*)&sa, salen) < 0) {
+        close(client);
+        return -L_ENOMEM;
+      }
+      listening = 1;
+    } else if (saved_errno == EAGAIN || saved_errno == EWOULDBLOCK) {
+      listening = 1;
+    } else if (saved_errno != EINVAL && saved_errno != EOPNOTSUPP) {
+      errno = saved_errno;
+      return lerr();
+    }
+    memcpy(val, &listening, sizeof listening);
+    *len = sizeof listening;
     return 0;
   }
   if (llevel == L_SOL_SOCKET && (lname == 38 || lname == 39)) {
@@ -1669,7 +1754,8 @@ static long sys_connect(int fd, const void* uaddr, uint32_t len) {
 static long sys_accept4(int fd, unsigned long uaddr, unsigned long ulen, int flags) {
   struct sockaddr_storage hs; socklen_t hlen = sizeof hs;
   memset(&hs, 0, sizeof hs);
-  int nfd = accept(fd, (struct sockaddr*)&hs, &hlen);
+  int nfd = accept_pending_pop(fd, (struct sockaddr*)&hs, &hlen);
+  if (nfd < 0) nfd = accept(fd, (struct sockaddr*)&hs, &hlen);
   if (nfd < 0) return lerr();
   kill_sigpipe(nfd);
   apply_fd_flags(nfd, (flags & L_SOCK_NONBLOCK) != 0, (flags & L_SOCK_CLOEXEC) != 0);

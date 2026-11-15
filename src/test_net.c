@@ -66,6 +66,7 @@
 #define LSO_PASSCRED 16
 #define LSO_PROTOCOL 38
 #define LSO_DOMAIN 39
+#define LSO_ACCEPTCONN 30
 #define LEPOLL_CTL_ADD 1
 #define LEPOLL_CTL_DEL 2
 #define LEPOLLIN  0x001u
@@ -573,9 +574,37 @@ static void t_sockopt_af(void) {
   OK("AF_INET6 reported back to the guest as 10, len 28");
   close((int)s6);
 
-  long bad = SC3(N_socket, 16 /*AF_NETLINK*/, LSOCK_DGRAM, 0);
-  CHECK(bad == -97, "AF_NETLINK -> %ld (want -97 EAFNOSUPPORT)", bad);
-  OK("unmappable address family -> -EAFNOSUPPORT(-97)");
+  long monitor = SC3(N_socket, 16 /*AF_NETLINK*/, LSOCK_DGRAM, 0);
+  CHECK(monitor >= 0, "NETLINK_ROUTE monitor socket -> %ld", monitor);
+  if (monitor >= 0) close((int)monitor);
+}
+
+static void t_acceptconn(void) {
+  SECTION("SO_ACCEPTCONN preserves pending connections");
+  const char* path = "/tmp/accept-probe";
+  const char* host = PREFIX "/tmp/accept-probe";
+  unlink(host);
+  long listener = SC3(N_socket, LAF_UNIX, LSOCK_STREAM, 0);
+  CHECK(listener >= 0, "listener socket -> %ld", listener);
+  struct lin_sockaddr_un u;
+  un_path(&u, path);
+  uint32_t n = un_len(&u, strlen(path) + 1);
+  CHECK(SC3(N_bind, listener, &u, n) == 0, "bind listener");
+  CHECK(SC2(N_listen, listener, 4) == 0, "listen");
+  int v = -1; uint32_t len = sizeof v;
+  CHECK(SC5(N_getsockopt, listener, LSOL_SOCKET, LSO_ACCEPTCONN, &v, &len) == 0 && v == 1,
+        "SO_ACCEPTCONN on empty listener -> %d", v);
+  long client = SC3(N_socket, LAF_UNIX, LSOCK_STREAM, 0);
+  CHECK(client >= 0 && SC3(N_connect, client, &u, n) == 0, "connect client");
+  v = -1; len = sizeof v;
+  CHECK(SC5(N_getsockopt, listener, LSOL_SOCKET, LSO_ACCEPTCONN, &v, &len) == 0 && v == 1,
+        "SO_ACCEPTCONN with queued client -> %d", v);
+  long accepted = SC4(N_accept4, listener, 0, 0, 0);
+  CHECK(accepted >= 0, "accept after metadata query -> %ld", accepted);
+  if (accepted >= 0) close((int)accepted);
+  if (client >= 0) close((int)client);
+  if (listener >= 0) close((int)listener);
+  unlink(host);
 }
 
 // ---------------------------------------------------------------------------
@@ -639,15 +668,15 @@ static void t_cmsg(void) {
 static void t_ownership(void) {
   SECTION("net_owns_syscall coverage");
   static const unsigned long owned[] = { 19,20,21,22,59,72,73,198,199,200,201,202,203,204,
-                                         205,206,207,208,209,210,211,212,242 };
+                                         205,206,207,208,209,210,211,212,242,243 };
   for (size_t i = 0; i < sizeof owned / sizeof *owned; i++)
     CHECK(net_owns_syscall(owned[i]), "net_owns_syscall(%lu) should be true", owned[i]);
   // Anything else must fall through to linux_syscall().
   static const unsigned long foreign[] = { 0,17,18,23,24,25,56,57,62,63,64,66,78,93,94,
-                                           129,213,241,243,260,435,441 };
+                                           129,213,241,260,435,441 };
   for (size_t i = 0; i < sizeof foreign / sizeof *foreign; i++)
     CHECK(!net_owns_syscall(foreign[i]), "net_owns_syscall(%lu) should be false", foreign[i]);
-  OK("owns exactly 23 syscall numbers (incl. pipe2=59), rejects everything else");
+  OK("owns exactly 24 syscall numbers (incl. pipe2 and recvmmsg), rejects everything else");
 }
 
 int main(void) {
@@ -669,6 +698,7 @@ int main(void) {
   t_eventfd();
   t_pipe2();
   t_sockopt_af();
+  t_acceptconn();
   t_cmsg();
 
   printf("\n================================\n");
