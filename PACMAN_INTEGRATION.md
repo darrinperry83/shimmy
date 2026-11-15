@@ -83,6 +83,37 @@ keyring or turn the live root's `SigLevel = Never` into a trusted configuration.
 Repository sync still stops at Landlock; see
 [LANDLOCK_COMPATIBILITY.md](LANDLOCK_COMPATIBILITY.md).
 
+## Approved disposable repository sync test (2026-11-15)
+
+The user approved a test in a disposable Arch clone with package signatures
+required and no live-system changes. In that clone only, pacman used its
+external guest curl downloader under the experimental whole-process host
+sandbox, with `RDHOST_FD_CLEAN=1`. Its policy was `SigLevel = Required
+DatabaseOptional`, `LocalFileSigLevel = Required TrustedOnly`, and
+`RemoteFileSigLevel = Required TrustedOnly`. The unsigned `[aur]` override
+was disabled in the clone. No Landlock success was faked and no live pacman
+configuration or root was altered.
+
+`pacman -Sy` exited 0 and created `core.db` (257,426 bytes), `extra.db`
+(10,780,422 bytes), and `alarm.db` (62,255 bytes). The mirror returned 404
+for optional database signature files, as anticipated from Arch Linux ARM's
+published policy. These repository indexes therefore **were not
+cryptographically authenticated** in this test. Pacman then installed
+`tree 2.1.0-1` from the synchronized repository using `-Sdd`, and the binary
+ran. `pacman-key --verify` reported a good, fully trusted signature from the
+Arch Linux ARM Build System for the downloaded package. A one-byte-tampered
+copy with the original signature was rejected by `pacman -Udd` as an invalid
+PGP signature; the installed binary still ran afterward. `pacman -R` then
+removed the package successfully.
+
+`-dd` bypassed dependency resolution because the source test root had no
+local pacman database. This test proves synchronized metadata can drive a
+signed package install/removal in the disposable environment, **not** normal
+dependency resolution or a secure production package manager. The host
+profile and opt-in descriptor cleanup remain an experimental whole-process
+boundary, not pacman's Landlock sandbox. Keyring provenance was not audited
+independently. The clone and its configuration were removed after the test.
+
 ## Whole-process confinement experiment
 
 On 2026-11-15 a separate disposable Arch clone ran under the default-deny
