@@ -764,7 +764,7 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
     // /dev/dri/renderD128" and never brings up its EGL scene — which looks exactly like a client
     // that cannot reach the compositor. The top-level invocation worked only because RDDRM was in
     // the launch environment; the exec'd child got a fresh environment without it.
-    "RDDRM", "RDDRM_TRACE", "RDGPU_PRESENT_STATS",
+    "RDDRM", "RDDRM_TRACE", "RDGPU_PRESENT_STATS", "RDNATIVE_SESSION",
     "RDX18_NOMT", "RDX18_NOTSD", "RDX18_NOPLAIN", "RDX18_MIXN", "RDX18_PARTIAL",
     "RDX18_BRPERSITE",
     "X11SRV_DEBUG", "X11SRV_DUMP", "WLSRV_DEBUG", "WLSRV_DUMP", "WLSRV_DUMP_MAX",
@@ -2397,16 +2397,20 @@ int main(int argc, char** argv) {
     snprintf(dir, sizeof dir, "%s/tmp", uxpfx);             mkdir(dir, 0700);
     snprintf(dir, sizeof dir, "%s/tmp/.X11-unix", uxpfx);   mkdir(dir, 0700);
     snprintf(sock, sizeof sock, "%s/tmp/.X11-unix/X0", uxpfx);
-    x11srv_start(sock);
-    // The Wayland compositor listens alongside the X server; the guest picks by connecting to one
-    // or the other. $XDG_RUNTIME_DIR is /tmp in the guest, so this is the guest's /tmp/wayland-0.
-    snprintf(sock, sizeof sock, "%s/tmp/wayland-0", uxpfx);
-    wlsrv_start(sock);
-    // Native-DRM input: drain the NSEvent queue into /dev/input/event* for libinput. Only
-    // consumes events once the DRM master is active, so it never races wlsrv's wl_seat.
-    gpuwin_start_evdev_pump();
+    if (!getenv("RDNATIVE_SESSION")) {
+      x11srv_start(sock);
+      // The nested Wayland server is for standalone app mode. A systemd desktop supplies
+      // its own compositor and display socket; starting one here gives it a false host
+      // display and repeats that work in every re-exec'd service process.
+      snprintf(sock, sizeof sock, "%s/tmp/wayland-0", uxpfx);
+      wlsrv_start(sock);
+      g_display_up = 1;             // fork() rebuilds only a server we actually started
+    }
+    // This in-process pump only reaches a DRM compositor in standalone mode. A compositor
+    // launched by systemd is a different host process and needs the planned seat input
+    // channel from the persistent GUI owner; per-service pumps would only wake pointlessly.
+    if (!getenv("RDNATIVE_SESSION")) gpuwin_start_evdev_pump();
   }
-  g_display_up = 1;                  // fork() must rebuild these in the child; see do_fork
 #endif
 #ifdef WL_HEADLESS
   // Diagnostic build: the Wayland compositor without Metal/Cocoa. Presentation and host input

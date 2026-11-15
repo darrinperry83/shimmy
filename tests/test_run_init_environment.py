@@ -28,7 +28,7 @@ with tempfile.TemporaryDirectory(prefix="shimmy-init-env-") as tmp:
         "import json, os, sys\n"
         "print(json.dumps({'argv': sys.argv[1:], 'env': "
         "{k: os.environ.get(k) for k in "
-        "['RDUID0', 'RDENV_WAYLAND_DISPLAY', 'RDENV_DISPLAY', "
+        "['RDUID0', 'RDNATIVE_SESSION', 'RDENV_WAYLAND_DISPLAY', 'RDENV_DISPLAY', "
         "'RDENV_XDG_RUNTIME_DIR', 'RDENV_LIBGL_ALWAYS_INDIRECT']}}))\n"
     )
     fake.chmod(0o755)
@@ -41,6 +41,7 @@ with tempfile.TemporaryDirectory(prefix="shimmy-init-env-") as tmp:
     assert result["argv"] == [str(root), "/sbin/init"], result
     assert result["env"] == {
         "RDUID0": "1",
+        "RDNATIVE_SESSION": "1",
         "RDENV_WAYLAND_DISPLAY": "",
         "RDENV_DISPLAY": "",
         "RDENV_XDG_RUNTIME_DIR": "",

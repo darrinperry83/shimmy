@@ -37,6 +37,13 @@ macOS login session or every other Mac app.
 | Display | host window renders VT; standalone desktop launch has a Metal presentation path | systemd-launched compositor presenting into that *same* host window |
 | Input | host NSEvents feed the VT and a per-process evdev pump | active compositor process receiving the boot window's input with seat ownership |
 
+The `--init` launcher now leaves display/session variables unset for the Linux display
+manager. `RDNATIVE_SESSION=1` skips Shimmy's older per-process nested X11/Wayland servers
+and their evdev pump during that boot; a tiny isolated guest process exited successfully
+with this mode. A full systemd-to-desktop cycle is still unverified. In particular, the
+systemd-launched compositor needs a cross-process input and GPU-surface bridge to the
+persistent GUI owner.
+
 Source checkpoints: `src/vt.c`, `src/window.m`, `src/drmasahi.c`, `src/rdgpu_mock_gate.c`,
 `src/shim.c`, `run.sh`; the external Mesa source currently used to build rdmetal is
 `integrated-mesa-next/mesa/src/gallium/drivers/rdmetal/rdmetal_screen.c` and
