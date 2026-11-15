@@ -462,7 +462,16 @@ static void child_reg_init(void) {
   g_child_reg_inited = 1;
   const char* boot = getenv("RDSHIM_BOOT");
   if (!boot || !*boot) boot = "0";
-  snprintf(g_child_reg_path, sizeof g_child_reg_path, "/tmp/rdshim-children-%s", boot);
+  // A confined Shimmy process may only write in its private socket namespace.
+  // All guest children inherit RDSOCKETGROUP, so keep the shared PID registry
+  // there when one is supplied. Preserve the historical /tmp path otherwise.
+  const char* group = getenv("RDSOCKETGROUP");
+  int n = group && group[0] == '/'
+        ? snprintf(g_child_reg_path, sizeof g_child_reg_path,
+                   "%s/rdshim-children-%s", group, boot)
+        : snprintf(g_child_reg_path, sizeof g_child_reg_path,
+                   "/tmp/rdshim-children-%s", boot);
+  if (n < 0 || (size_t)n >= sizeof g_child_reg_path) g_child_reg_path[0] = 0;
 }
 
 void guest_child_register(int pid) {

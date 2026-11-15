@@ -39,7 +39,7 @@ def make_profile(binary: Path, root: Path, group: Path,
     # This is a *test* profile. Package-manager completeness is unproven;
     # even a passing file probe must not be used as a pacman fallback.
     profile = (
-        '(version 1)(deny default)(allow process-exec)'
+        '(version 1)(deny default)(allow process-exec)(allow process-fork)'
         '(allow file-read-metadata (subpath "/"))'
         '(allow file-read* (literal "/"))'
         '(allow file-read* (subpath "/System"))'
@@ -64,7 +64,8 @@ def make_profile(binary: Path, root: Path, group: Path,
 
 
 def run_guest(binary: Path, root: Path, args: list[str], profile: str | None,
-              socket_group: Path) -> tuple[int, str]:
+              socket_group: Path,
+              pass_fds: tuple[int, ...] = ()) -> tuple[int, str]:
     command = [str(binary), str(root), *args]
     if profile is not None:
         command = ["/usr/bin/sandbox-exec", "-p", profile, *command]
@@ -73,7 +74,8 @@ def run_guest(binary: Path, root: Path, args: list[str], profile: str | None,
            "RDSOCKETGROUP": str(socket_group)}
     proc = subprocess.Popen(command, env=env, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True,
-                            start_new_session=True, preexec_fn=no_core)
+                            start_new_session=True, preexec_fn=no_core,
+                            close_fds=True, pass_fds=pass_fds)
     try:
         output, _ = proc.communicate(timeout=20)
     except subprocess.TimeoutExpired:
@@ -122,17 +124,47 @@ def main() -> int:
             if denied_rc == 0 or "SHIMMY_TEST_SECRET" in denied_output:
                 raise AssertionError("confined guest read the denied host file")
 
+            child_ok_rc, child_ok_output = run_guest(binary, root,
+                ["/bin/sh", "-c", "cat /etc/os-release"], profile, group)
+            if child_ok_rc != 0 or "ID=" not in child_ok_output:
+                raise AssertionError("guest child could not read an allowed Linux file")
+
             child_rc, child_output = run_guest(binary, root,
                 ["/bin/sh", "-c", "cat " + shlex.quote(str(secret))],
                 profile, group)
             if child_rc == 0 or "SHIMMY_TEST_SECRET" in child_output:
                 raise AssertionError("guest child read the denied host file")
 
+            grandchild_rc, grandchild_output = run_guest(binary, root,
+                ["/bin/sh", "-c", "sh -c " +
+                 shlex.quote("cat " + shlex.quote(str(secret)))], profile, group)
+            if grandchild_rc == 0 or "SHIMMY_TEST_SECRET" in grandchild_output:
+                raise AssertionError("guest grandchild read the denied host file")
+
             write_rc, _ = run_guest(binary, root,
                 ["/bin/sh", "-c", "printf attempted > " +
                  shlex.quote(str(write_target))], profile, group)
             if write_rc == 0 or write_target.read_text() != "unchanged\n":
                 raise AssertionError("confined guest wrote the denied host file")
+
+            # A path sandbox cannot revoke a descriptor opened before it was
+            # applied. Prove both that our normal launcher closes it and that
+            # deliberately passing it through would expose the contents.
+            inherited_fd = os.open(secret, os.O_RDONLY)
+            try:
+                if inherited_fd > 9:
+                    raise RuntimeError("test needs a single-digit inherited fd")
+                fd_command = ["/bin/sh", "-c", f"cat <&{inherited_fd}"]
+                _, closed_output = run_guest(binary, root, fd_command,
+                                             profile, group)
+                if "SHIMMY_TEST_SECRET" in closed_output:
+                    raise AssertionError("normal launcher leaked a host descriptor")
+                passed_rc, passed_output = run_guest(binary, root, fd_command,
+                    profile, group, pass_fds=(inherited_fd,))
+                if passed_rc != 0 or "SHIMMY_TEST_SECRET" not in passed_output:
+                    raise AssertionError("pre-opened descriptor risk probe changed")
+            finally:
+                os.close(inherited_fd)
 
             if args.network_url:
                 curl_rc, curl_output = run_guest(binary, root,
@@ -142,7 +174,9 @@ def main() -> int:
                 if curl_rc != 0:
                     raise AssertionError("confined guest curl failed: " + curl_output[-300:])
 
-            result = "PASS root-read host-read-denied child-read-denied host-write-denied"
+            result = ("PASS root-read host-read-denied child-read-denied "
+                      "grandchild-read-denied host-write-denied launcher-fd-closed "
+                      "KNOWN_LIMITATION preopened-fd-bypasses-path-policy")
             if args.network_url:
                 result += " guest-network"
             print(result)

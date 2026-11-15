@@ -79,15 +79,27 @@ showed `mach-lookup com.apple.system.opendirectoryd.libinfo` was blocked.
 Allowing only that named lookup made two further confined HEAD probes pass.
 This checks transport reachability, not a package download or install.
 
-The test denies host operations by default, then permits process execution,
-filesystem metadata reads globally, selected system data reads, and optionally
-outbound networking plus one OpenDirectory service lookup. Those allowances
-require a narrower review before
-production use. It is a whole-process policy prototype, not a complete
-package-worker profile or
-production launcher. It has not been tested with Arch pacman under the
-profile, package hooks, all host service calls, other devices or pre-opened
-descriptors. It does not implement Linux Landlock semantics.
+The test denies host operations by default, then permits process execution and
+forking, filesystem metadata reads globally, selected system data reads, and
+optionally outbound networking plus one OpenDirectory service lookup. A
+positive control verified that a guest child can read an allowed rootfs file;
+both child and grandchild failed to read the denied host file. The launcher
+closes inherited private file descriptors. Deliberately passing a descriptor
+opened before confinement exposed the denied file contents, a known path
+sandbox limitation that a production launcher must address. The profile also
+needs narrower review of global metadata reads and other service permissions.
+
+An isolated Arch clone was tested with the same host policy extended to allow
+writes only within that disposable root and its private socket namespace.
+Guest curl downloaded an official package and detached signature. With a
+populated keyring and mandatory package signatures, pacman's external curl
+downloader installed and removed `tree`, and its post-transaction hook ran.
+The internal downloader still stopped at Landlock. Repository sync with
+mandatory database signatures stopped because the selected official mirror
+returned 404 for its `.db.sig` files. The policy is a whole-process prototype,
+not Landlock emulation or a production package-worker boundary. See
+[PACMAN_INTEGRATION.md](PACMAN_INTEGRATION.md) for exact package results and
+remaining limits.
 
 ## Safe engineering path
 

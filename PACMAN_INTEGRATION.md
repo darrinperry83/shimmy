@@ -83,6 +83,54 @@ keyring or turn the live root's `SigLevel = Never` into a trusted configuration.
 Repository sync still stops at Landlock; see
 [LANDLOCK_COMPATIBILITY.md](LANDLOCK_COMPATIBILITY.md).
 
+## Whole-process confinement experiment
+
+On 2026-11-15 a separate disposable Arch clone ran under the default-deny
+host policy described in `LANDLOCK_COMPATIBILITY.md`. Only the clone's root and
+its private socket namespace were writable. The launched process received a
+small, credential-free environment and no inherited private file descriptors.
+The clone's package and local-file signatures were `Required TrustedOnly`; its
+Landlock and seccomp disable flags remained commented out. The original root
+and live Shimmy session were untouched.
+
+With pacman's documented external `XferCommand` set to guest curl **in the
+clone only**, `pacman -Udd --noconfirm` fetched the official `tree 2.1.0-1`
+URL and its detached `.sig` into the clone's package cache. Pacman reported
+`checking keyring` and `checking package integrity`, installed the package,
+and completed the `ConditionNeedsUpdate` hook. `pacman -Q tree` and
+`tree --version` then worked. Confined `pacman -R --noconfirm tree` removed its
+binary and local database record and completed the hook. `-dd` bypassed
+dependency resolution because this test root had no local pacman database; it
+did not bypass signature verification. A separate confined guest curl download
+matched the package SHA-256 above, and `pacman-key --verify` reported a good,
+fully trusted Arch Linux ARM Build System signature against the clone's
+populated keyring.
+
+Two host-path fixes made the confined install repeatable without broadening
+the host policy: virtual `/proc` temporary files now honor the existing
+`RDX_MEMFD_DIR`, and the shared child registry uses `RDSOCKETGROUP` when one
+is supplied. The confined run succeeded with those two host-private paths and
+without setting guest `TMPDIR`. A separate negative probe allowed a write
+inside the disposable root but denied a write to a throwaway file outside it.
+
+**Repository sync remains blocked.** With pacman's internal downloader,
+`pacman -U URL` failed at the honest Landlock check. The external downloader
+allowed URL installation, but `pacman -Sy` with `SigLevel = Required
+TrustedOnly` stopped because the official mirror returned HTTP 404 for
+`core.db.sig` and `extra.db.sig`. The databases themselves returned HTTP 200.
+An attempted isolated retry with `DatabaseOptional` was rejected by automatic
+approval review *before execution* because it changes the database signature
+policy. No equivalent retry or workaround was run, and the clone's policy was
+restored to `Required TrustedOnly`. This leaves normal signed repository sync
+and dependency resolution unproven.
+
+The host policy is experimental. A deliberately inherited host file descriptor
+can bypass pathname denial; the test launcher closes such descriptors, but a
+production launcher and its child lifecycle need review. The external curl
+path is not pacman's Landlock sandbox, and package hooks and host service
+permissions have only been exercised for this small package. No production
+fallback has been enabled.
+
 Landlock is a kernel-enforced, inherited restriction on the calling thread's
 filesystem access. Pacman creates rules, adds allowed paths, then restricts its
 download worker. Returning success for these syscalls without an equivalent

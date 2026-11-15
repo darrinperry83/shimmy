@@ -951,7 +951,11 @@ long syscalls_resolve(int lx_dirfd, const char* path, int nofollow_final,
 
 // An anonymous, seekable, stat-able fd backed by a file that is unlinked immediately.
 static int mem_fd(const char* content, size_t len) {
-  const char* td = getenv("TMPDIR");
+  // Keep virtual /proc files in the same host-private temporary directory as
+  // memfd_create when a confined launcher supplies one. TMPDIR remains the
+  // fallback for existing unconfined sessions.
+  const char* td = getenv("RDX_MEMFD_DIR");
+  if (!td || !*td) td = getenv("TMPDIR");
   char tmpl[PATH_MAX];
   if (td && *td) snprintf(tmpl, sizeof tmpl, "%s%srdshim-XXXXXX", td,
                           td[strlen(td)-1] == '/' ? "" : "/");
