@@ -125,8 +125,11 @@ restored to `Required TrustedOnly`. This leaves normal signed repository sync
 and dependency resolution unproven.
 
 The host policy is experimental. A deliberately inherited host file descriptor
-can bypass pathname denial; the test launcher closes such descriptors, but a
-production launcher and its child lifecycle need review. The external curl
+can bypass pathname denial. The test launcher closes such descriptors, and
+opt-in `RDHOST_FD_CLEAN=1` at Shimmy's first entry also closes a deliberately
+passed host descriptor without closing standard streams or guest-opened files
+on later exec. This opt-in and the test profile are not a production launcher;
+the caller and its child lifecycle still need review. The external curl
 path is not pacman's Landlock sandbox, and package hooks and host service
 permissions have only been exercised for this small package. No production
 fallback has been enabled.

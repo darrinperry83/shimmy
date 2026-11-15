@@ -2020,8 +2020,36 @@ static void exec_dbg(const char* msg, const char* a, const char* b) {
   }
 }
 
+// Optional defense for a fresh host launch under a whole-process filesystem
+// sandbox.  Guest exec replaces the shim image and must retain guest-owned fds
+// (systemd activation sockets, pipes, and open files), so this is deliberately
+// limited to the first entry, before the guest or shim has opened any fds.
+static int close_initial_host_fds(void) {
+  struct dirent** entries = NULL;
+  int count = scandir("/dev/fd", &entries, NULL, NULL);
+  if (count < 0) return -1;  // Never claim a sanitized launch after a partial scan.
+  for (int i = 0; i < count; i++) {
+    char* end = NULL;
+    long fd = strtol(entries[i]->d_name, &end, 10);
+    if (end != entries[i]->d_name && !*end && fd >= 3 && fd <= INT_MAX)
+      close((int)fd);
+    free(entries[i]);
+  }
+  free(entries);
+  return 0;
+}
+
 int main(int argc, char** argv) {
   if (argc < 3) { fprintf(stderr, "usage: %s <rootfs> <guest-path> [args...]\n", argv[0]); return 2; }
+  if (getenv("RDHOST_FD_CLEAN")) {
+    if (close_initial_host_fds() != 0) {
+      fprintf(stderr, "[shim] cannot sanitize inherited host descriptors: %s\n", strerror(errno));
+      return 1;
+    }
+    // This launch-only setting is absent from kCarry: ordinary guest execs
+    // preserve their own descriptors and do not repeat the host cleanup.
+    unsetenv("RDHOST_FD_CLEAN");
+  }
   g_verbose = getenv("RDVERBOSE") != 0;
   g_sctrace_fx = getenv("RDFUTEX_SC") != 0;
 

@@ -65,19 +65,24 @@ def make_profile(binary: Path, root: Path, group: Path,
 
 def run_guest(binary: Path, root: Path, args: list[str], profile: str | None,
               socket_group: Path,
-              pass_fds: tuple[int, ...] = ()) -> tuple[int, str]:
+              pass_fds: tuple[int, ...] = (),
+              clean_initial: bool = False,
+              stdin_data: str | None = None) -> tuple[int, str]:
     command = [str(binary), str(root), *args]
     if profile is not None:
         command = ["/usr/bin/sandbox-exec", "-p", profile, *command]
     # Keep host credentials and unrelated session settings out of the guest.
     env = {"PATH": "/usr/bin:/bin", "HOME": "/root",
            "RDSOCKETGROUP": str(socket_group)}
+    if clean_initial:
+        env["RDHOST_FD_CLEAN"] = "1"
     proc = subprocess.Popen(command, env=env, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True,
+                            stdin=subprocess.PIPE if stdin_data is not None else None,
                             start_new_session=True, preexec_fn=no_core,
                             close_fds=True, pass_fds=pass_fds)
     try:
-        output, _ = proc.communicate(timeout=20)
+        output, _ = proc.communicate(input=stdin_data, timeout=20)
     except subprocess.TimeoutExpired:
         os.killpg(proc.pid, signal.SIGKILL)
         output, _ = proc.communicate()
@@ -163,8 +168,24 @@ def main() -> int:
                     profile, group, pass_fds=(inherited_fd,))
                 if passed_rc != 0 or "SHIMMY_TEST_SECRET" not in passed_output:
                     raise AssertionError("pre-opened descriptor risk probe changed")
+                cleaned_rc, cleaned_output = run_guest(binary, root, fd_command,
+                    profile, group, pass_fds=(inherited_fd,), clean_initial=True)
+                if cleaned_rc == 0 or "SHIMMY_TEST_SECRET" in cleaned_output:
+                    raise AssertionError("initial Shimmy descriptor sanitizer leaked host fd")
             finally:
                 os.close(inherited_fd)
+
+            # Sanitization is first-entry only: a descriptor that the guest
+            # opens itself must survive its ordinary fork/exec path.
+            guest_fd_rc, guest_fd_output = run_guest(binary, root,
+                ["/bin/sh", "-c", "exec 9</etc/os-release; sh -c 'cat <&9'"],
+                profile, group, clean_initial=True)
+            if guest_fd_rc != 0 or "ID=" not in guest_fd_output:
+                raise AssertionError("sanitizer broke legitimate guest fd inheritance")
+            stdin_rc, stdin_output = run_guest(binary, root, ["/bin/cat"],
+                profile, group, clean_initial=True, stdin_data="GUEST_STDIN_OK\n")
+            if stdin_rc != 0 or "GUEST_STDIN_OK" not in stdin_output:
+                raise AssertionError("sanitizer broke standard input or output")
 
             if args.network_url:
                 curl_rc, curl_output = run_guest(binary, root,
@@ -176,7 +197,8 @@ def main() -> int:
 
             result = ("PASS root-read host-read-denied child-read-denied "
                       "grandchild-read-denied host-write-denied launcher-fd-closed "
-                      "KNOWN_LIMITATION preopened-fd-bypasses-path-policy")
+                      "shim-initial-fd-closed guest-fd-exec-preserved stdio-preserved "
+                      "KNOWN_LIMITATION unsanitized-preopened-fd-bypasses-path-policy")
             if args.network_url:
                 result += " guest-network"
             print(result)

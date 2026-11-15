@@ -83,11 +83,16 @@ The test denies host operations by default, then permits process execution and
 forking, filesystem metadata reads globally, selected system data reads, and
 optionally outbound networking plus one OpenDirectory service lookup. A
 positive control verified that a guest child can read an allowed rootfs file;
-both child and grandchild failed to read the denied host file. The launcher
-closes inherited private file descriptors. Deliberately passing a descriptor
-opened before confinement exposed the denied file contents, a known path
-sandbox limitation that a production launcher must address. The profile also
-needs narrower review of global metadata reads and other service permissions.
+both child and grandchild failed to read the denied host file. The Python test
+launcher closes inherited private file descriptors. Deliberately passing a
+descriptor opened before confinement exposed the denied file contents. An
+opt-in `RDHOST_FD_CLEAN=1` first-entry cleanup in Shimmy then closed that
+same deliberately passed descriptor while preserving standard streams and a
+guest-opened descriptor across a later guest exec. It enumerates `/dev/fd`,
+fails closed if enumeration fails, and is not carried into guest execs. This
+does not make the test policy a production boundary: a caller can omit the
+opt-in, inherited descriptors can exist before a different launcher applies
+its sandbox, and metadata and host-service allowances remain broad.
 
 An isolated Arch clone was tested with the same host policy extended to allow
 writes only within that disposable root and its private socket namespace.
@@ -100,6 +105,12 @@ returned 404 for its `.db.sig` files. The policy is a whole-process prototype,
 not Landlock emulation or a production package-worker boundary. See
 [PACMAN_INTEGRATION.md](PACMAN_INTEGRATION.md) for exact package results and
 remaining limits.
+
+A subsequent read-only check of the configured Arch Linux ARM mirror returned
+HTTP 200 for `core.db` and `extra.db`, and HTTP 404 for both detached `.db.sig`
+files. The source test root currently has `SigLevel = Never` and
+`LocalFileSigLevel = Optional`, so its existing configuration cannot be used
+as evidence of a trustworthy sync. No source or live pacman policy changed.
 
 ## Safe engineering path
 
