@@ -46,6 +46,15 @@ void rdgpu_guest_set_draw_transport(RDGPUGuestState *s,
     s->drawTransport=transport;s->drawPollTransport=poll;s->drawContext=context;
     pthread_mutex_unlock(&s->lock);
 }
+void rdgpu_guest_set_texture_transport(RDGPUGuestState *s,
+                                       RDGPUTextureUpload upload,
+                                       RDGPUTextureRelease release,
+                                       void *context){
+    if(!s||!s->ready)return;
+    pthread_mutex_lock(&s->lock);
+    s->textureUpload=upload;s->textureRelease=release;s->textureContext=context;
+    pthread_mutex_unlock(&s->lock);
+}
 void rdgpu_guest_set_fd_export_transport(RDGPUGuestState *s,
                                         RDGPUFDExportIssue issue,void *context){
     if(!s||!s->ready)return;
@@ -112,7 +121,7 @@ long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
         }
         long stride=s->imageStrideQuery(s->imageStrideContext,s->ownerPid,
             entry->lease,entry->generation,entry->width,entry->height);
-        if(stride<(long)entry->width*4||stride>2048L*4||stride%4){
+        if(stride<(long)entry->width*4||stride>4096L*4||stride%4){
             pthread_mutex_unlock(&s->lock);return -EIO;
         }
         pthread_mutex_unlock(&s->lock);return stride;
@@ -128,7 +137,7 @@ long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
            !s->imageStrideQuery){pthread_mutex_unlock(&s->lock);return -EPERM;}
         long stride=s->imageStrideQuery(s->imageStrideContext,s->ownerPid,
             entry->lease,entry->generation,entry->width,entry->height);
-        if(stride<(long)entry->width*4||stride>2048L*4||stride%4){
+        if(stride<(long)entry->width*4||stride>4096L*4||stride%4){
             pthread_mutex_unlock(&s->lock);return -EIO;
         }
         long fd=s->fdExportIssue(s->fdExportContext,s->ownerPid,
@@ -191,7 +200,10 @@ long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
         }
         struct rdmetal_draw_header draw;
         memcpy(&draw,snapshot,sizeof draw);
-        if(draw.magic!=RDMETAL_DRAW_MAGIC||draw.version!=RDMETAL_DRAW_VERSION||
+        if(draw.magic!=RDMETAL_DRAW_MAGIC||
+           (draw.version!=RDMETAL_DRAW_VERSION&&
+            draw.version!=RDMETAL_DRAW_VERSION_TEXTURE&&
+            draw.version!=RDMETAL_DRAW_VERSION_V3)||
            draw.total_bytes!=a3||draw.target_handle!=a1){
             free(snapshot);pthread_mutex_unlock(&s->lock);return -EINVAL;
         }
@@ -208,6 +220,46 @@ long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
         else entry->producerComplete=0;
         pthread_mutex_unlock(&s->lock);
         return result;
+    }
+    if(op==RDGPU_GUEST_TEXTURE_UPLOAD){
+        /* a1=width, a2=height, a3=pixel pointer (guest), a4=bytes, a5 unused.
+         * No raw guest pointer crosses to the host; pixels are snapshotted with
+         * a checked Mach VM read. The opaque texture handle is the syscall
+         * return value; the broker texture generation is fixed at 1 for the
+         * bounded single-upload fixture (a re-upload increments it, which is
+         * part of the next multi-texture/re-upload slice). */
+        if(!a1||!a2||!a3||!a4||a5)return -EINVAL;
+        if(a1>256||a2>256||a4!=(uint64_t)a1*(uint64_t)a2*4)return -EINVAL;
+        pthread_mutex_lock(&s->lock);
+        if(!s->textureUpload){
+            pthread_mutex_unlock(&s->lock);return -EPERM;
+        }
+        void *snapshot=malloc((size_t)a4);
+        if(!snapshot){pthread_mutex_unlock(&s->lock);return -ENOMEM;}
+        mach_vm_size_t copied=0;
+        kern_return_t status=mach_vm_read_overwrite(mach_task_self(),
+            (mach_vm_address_t)a3,(mach_vm_size_t)a4,
+            (mach_vm_address_t)snapshot,&copied);
+        if(status!=KERN_SUCCESS||copied!=a4){
+            free(snapshot);pthread_mutex_unlock(&s->lock);return -EFAULT;
+        }
+        uint64_t generation=0;
+        long handle=s->textureUpload(s->textureContext,(uint32_t)a1,(uint32_t)a2,
+                                     snapshot,(size_t)a4,&generation);
+        free(snapshot);
+        if(handle<=0||!generation){pthread_mutex_unlock(&s->lock);return handle<=0?handle:-EIO;}
+        pthread_mutex_unlock(&s->lock);
+        return handle;
+    }
+    if(op==RDGPU_GUEST_TEXTURE_RELEASE){
+        if(!a1||!a2||a3||a4||a5)return -EINVAL;
+        pthread_mutex_lock(&s->lock);
+        if(!s->textureRelease){
+            pthread_mutex_unlock(&s->lock);return -EPERM;
+        }
+        int rc=s->textureRelease(s->textureContext,a1,a2);
+        pthread_mutex_unlock(&s->lock);
+        return rc;
     }
     if(a4||a5||op<RDGPU_CREATE_BGRA8||op>RDGPU_PREPARE_EXPORT)return -EINVAL;
     if(op==RDGPU_PREPARE_EXPORT){

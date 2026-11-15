@@ -905,9 +905,19 @@ int rd_secondary_present_iosurface_name(const char* name, void* source,
     // above) to the scanout service as the SECONDARY display (role 1), mirroring the
     // primary handoff in window.m's present_source. The region CAMetalLayer present
     // above stays as the WindowServer path for non-scanout runs; in scanout mode the
-    // builtin SLCADisplay trampoline substitutes this surface at present_iosurface time.
-    if (rdgpu_scanout_enabled()) {
+    // builtin SLCADisplay direct-present (server19) flips this surface at
+    // present_iosurface time.
+    //
+    // `surface` IS the real BGRA IOSurface the guest compositor rendered WAYLAND-2
+    // into (validated at function entry), NOT drawable.texture.iosurface — the
+    // drawable's own IOSurface reads back black on the direct-scanout path.
+    if (gpuwin_takeover_active()) {
       int sr = rdgpu_scanout_present(surface, RDGPU_SCANOUT_ROLE_SECONDARY);
+      static unsigned scanoutFrames;
+      if (++scanoutFrames <= 3 || scanoutFrames % 100 == 0)
+        fprintf(stderr, "[rdgpu-scanout] secondary handoff frame=%u id=%u %zux%zu rc=%d\n",
+                scanoutFrames, (unsigned)IOSurfaceGetID(surface),
+                IOSurfaceGetWidth(surface), IOSurfaceGetHeight(surface), sr);
       if (sr != 0) {
         static unsigned ssaid;
         if (ssaid++ < 4)

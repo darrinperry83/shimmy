@@ -1,4 +1,5 @@
 #include "signalfd_shim.h"
+#include "syscalls.h"             // shim_fd_reserve / shim_fd_unreserve
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <stdatomic.h>
@@ -8,6 +9,17 @@
 #include <errno.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdio.h>
+#include <stdarg.h>
+#include <stdlib.h>
+
+static void sfdbg(const char* fmt, ...) {
+  if (!getenv("RDSIGFDDBG")) return;
+  FILE* f = fopen("/tmp/rd_signalfd_dbg.txt", "a");
+  if (!f) return;
+  va_list ap; va_start(ap, fmt); vfprintf(f, fmt, ap); va_end(ap);
+  fclose(f);
+}
 
 // Linux signalfd_siginfo is exactly 128 bytes. Weston consumes ssi_signo;
 // the PID, UID, and child status are filled where Darwin supplies them.
@@ -45,6 +57,7 @@ static int linux_signal(int host) {
 static void delivered(int host, siginfo_t* info, void* context) {
   (void)context;
   int lx = linux_signal(host);
+  sfdbg("delivered host=%d lx=%d pid=%d\n", host, lx, info ? info->si_pid : -1);
   if (lx < 0) return;
   uint64_t bit = 1ULL << (lx - 1);
   int n = atomic_load_explicit(&count, memory_order_acquire);
@@ -66,20 +79,23 @@ static void delivered(int host, siginfo_t* info, void* context) {
   }
 }
 static int supported(uint64_t mask) {
-  for (int lx = 1; lx <= 64; lx++)
-    if ((mask & (1ULL << (lx - 1))) && host_signal(lx) < 0) return 0;
-  return 1;
+  (void)mask;
+  return 1;   // accept any mask; signals we cannot map are simply never delivered
 }
 static int install_for(uint64_t mask) {
   for (int lx = 1; lx <= 64; lx++) {
     if (!(mask & (1ULL << (lx - 1)))) continue;
     int sig = host_signal(lx);
-    if (sig < 0) return -22;
+    if (sig < 0) continue;   // SIGPWR/SIGRTMIN/...: no host equivalent -> skip, not an error
     if (installed[sig]) continue;
     struct sigaction old, action = {0};
     if (sigaction(sig, NULL, &old) < 0) return -errno;
     // Do not hijack any signal already owned by the host shim or another library.
-    if (old.sa_handler != SIG_DFL && old.sa_handler != SIG_IGN) return -22;
+    if (old.sa_handler != SIG_DFL && old.sa_handler != SIG_IGN) {
+      sfdbg("install_for mask=%#llx FAIL lx=%d host_sig=%d handler=%p (not DFL/IGN)\n",
+            (unsigned long long)mask, lx, sig, old.sa_handler);
+      return -22;
+    }
     action.sa_sigaction = delivered;
     action.sa_flags = SA_SIGINFO | SA_RESTART;
     sigemptyset(&action.sa_mask);
@@ -102,6 +118,8 @@ static void restore_unused(void) {
   }
 }
 long signalfd4_shim(int fd, const uint64_t* mask, size_t size, int flags) {
+  sfdbg("signalfd4 fd=%d mask=%#llx size=%zu flags=%#x\n",
+        fd, mask ? (unsigned long long)*mask : 0ULL, size, flags);
   if (!mask) return -14;
   if (size != 8 || (flags & ~(L_NONBLOCK | L_CLOEXEC)) || !supported(*mask)) return -22;
   pthread_mutex_lock(&lock);
@@ -129,6 +147,15 @@ long signalfd4_shim(int fd, const uint64_t* mask, size_t size, int flags) {
     fcntl(pair[0], F_SETFD, FD_CLOEXEC);
     fcntl(pair[1], F_SETFD, FD_CLOEXEC);
   }
+  // The write end is shim-internal, not a guest descriptor. A forked child inherits it and its
+  // close_all_fds()/close_range(3,~0U) would close it, which makes the parent's signalfd read end
+  // report EOF (EPOLLRDHUP) forever -> systemd logs "Got unexpected events from signal file
+  // descriptor" in a tight loop. Reserve it so close_range skips it, exactly like the pty masters.
+  // The READ end must be reserved too: the shim's vfork child shares the fd table (unlike Linux,
+  // where vfork copies it), so its close_range(3,~0U) would also close the parent executor's
+  // signalfd read end, and signalfd_shim_closed() would then close the write end -> EOF loop.
+  pair[0] = shim_fd_reserve(pair[0]);
+  pair[1] = shim_fd_reserve(pair[1]);
   int rc = install_for(*mask);
   if (rc) { close(pair[0]); close(pair[1]); pthread_mutex_unlock(&lock); return rc; }
   atomic_store(&slots[index].read_fd, pair[0]);
@@ -139,13 +166,14 @@ long signalfd4_shim(int fd, const uint64_t* mask, size_t size, int flags) {
   return pair[0];
 }
 void signalfd_shim_closed(int fd) {
+  sfdbg("signalfd_shim_closed fd=%d pid=%d\n", fd, (int)getpid());
   pthread_mutex_lock(&lock);
   int n = atomic_load(&count);
   for (int i = 0; i < n; i++) if (atomic_load(&slots[i].read_fd) == fd) {
     atomic_store(&slots[i].mask, 0);
     atomic_store(&slots[i].read_fd, -1);
     int writer = atomic_exchange(&slots[i].write_fd, -1);
-    if (writer >= 0) close(writer);
+    if (writer >= 0) { sfdbg("  -> closing writer=%d\n", writer); shim_fd_unreserve(writer); close(writer); }
     restore_unused();
     break;
   }

@@ -34,8 +34,8 @@ void rd_metal_core_destroy(RDMetalCore *core) {
 }
 
 RDMetalImage *rd_metal_image_create(RDMetalCore *core, uint32_t width, uint32_t height) {
-    if (!core || !width || !height || width > 2048 || height > 2048 ||
-        (uint64_t)width * height * 4 > 16u * 1024u * 1024u) return NULL;
+    if (!core || !width || !height || width > 4096 || height > 4096 ||
+        (uint64_t)width * height * 4 > 64u * 1024u * 1024u) return NULL;
     NSDictionary *properties = @{
         (__bridge NSString *)kIOSurfaceWidth: @(width),
         (__bridge NSString *)kIOSurfaceHeight: @(height),

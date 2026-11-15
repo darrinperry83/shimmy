@@ -73,8 +73,8 @@ bool checked_header(const rdmetal_draw_header &h,size_t bytes,size_t prefix){
         h.version!=RDMETAL_DRAW_VERSION_V3)||
        h.flags||!h.target_handle||h.total_bytes!=bytes||
        !h.target_width||!h.target_height||
-       h.target_width>2048||h.target_height>2048||
-       uint64_t(h.target_width)*h.target_height*4>16u*1024u*1024u||
+       h.target_width>4096||h.target_height>4096||
+       uint64_t(h.target_width)*h.target_height*4>64u*1024u*1024u||
        h.vertex_shader_words<5||h.fragment_shader_words<5||
        h.vertex_shader_words>RDMETAL_DRAW_MAX_SHADER_WORDS||
        h.fragment_shader_words>RDMETAL_DRAW_MAX_SHADER_WORDS||
@@ -226,9 +226,17 @@ int rdgpu_draw_execute(const void *packet,size_t bytes,
         return RDGPU_DRAW_DENIED;
     }
     void *tex=textured?tex_resolve(texture_handle,texture_generation,tex_context):NULL;
+    IOSurfaceRef texSurface=NULL;
     if(textured&&!tex){
-        CFRelease(surface);
-        return RDGPU_DRAW_DENIED;
+        /* The texture handle may be a direct render-target lease (a previous
+         * frame's IOSurface sampled by a blur pass) instead of a promoted
+         * sample texture. Resolve it exactly like the target and wrap the
+         * IOSurface as a shader-read texture below. */
+        texSurface=resolve(texture_handle,context);
+        if(!texSurface){
+            CFRelease(surface);
+            return RDGPU_DRAW_DENIED;
+        }
     }
     int result=RDGPU_DRAW_GPU_FAILED;
     @autoreleasepool {
@@ -262,6 +270,17 @@ int rdgpu_draw_execute(const void *packet,size_t bytes,
                 desc.usage=MTLTextureUsageRenderTarget|MTLTextureUsageShaderRead;
                 id<MTLTexture> target=[device newTextureWithDescriptor:desc
                     iosurface:surface plane:0];
+                id<MTLTexture> texAsMetal=tex?(__bridge id<MTLTexture>)tex:nil;
+                if(textured&&!texAsMetal&&texSurface){
+                    MTLTextureDescriptor *texDesc=[MTLTextureDescriptor
+                        texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                        width:(NSUInteger)IOSurfaceGetWidth(texSurface)
+                        height:(NSUInteger)IOSurfaceGetHeight(texSurface)
+                        mipmapped:NO];
+                    texDesc.usage=MTLTextureUsageShaderRead;
+                    texAsMetal=[device newTextureWithDescriptor:texDesc
+                        iosurface:texSurface plane:0];
+                }
                 MTLRenderPipelineDescriptor *pipeline=[MTLRenderPipelineDescriptor new];
                 pipeline.vertexFunction=vFunction;pipeline.fragmentFunction=fFunction;
                 pipeline.colorAttachments[0].pixelFormat=MTLPixelFormatBGRA8Unorm;
@@ -305,7 +324,7 @@ int rdgpu_draw_execute(const void *packet,size_t bytes,
                         samplerDesc.tAddressMode=MTLSamplerAddressModeClampToEdge;
                         id<MTLSamplerState> sampler=[device
                             newSamplerStateWithDescriptor:samplerDesc];
-                        [encoder setFragmentTexture:(__bridge id<MTLTexture>)tex
+                        [encoder setFragmentTexture:texAsMetal
                             atIndex:0];
                         [encoder setFragmentSamplerState:sampler atIndex:0];
                     }
@@ -337,6 +356,7 @@ int rdgpu_draw_execute(const void *packet,size_t bytes,
         }
     }
     if(textured&&tex_complete)tex_complete(texture_handle,texture_generation,tex_context);
+    if(texSurface)CFRelease(texSurface);
     CFRelease(surface);
     return result;
 }

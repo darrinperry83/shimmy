@@ -38,8 +38,9 @@
 #include <limits.h>
 
 #include "rdgpu_scanout_client.h"
-// The canonical shared wire protocol is vendored in src/ so a clean checkout compiles the
-// SAME struct layout as rdgpu-scanout-osax/payload.m without an out-of-repo sibling tree.
+// The canonical shared wire protocol lives in the OSAX tree (sibling of shim-metal-clear) so
+// this client and rdgpu-scanout-osax/payload.m compile the SAME struct layout; a relative
+// include keeps a single source of truth rather than a drifting copy.
 #include "rdgpu_protocol.h"
 
 // ---------------------------------------------------------------------------------------------
@@ -222,4 +223,30 @@ int rdgpu_scanout_present(IOSurfaceRef surface, CGDirectDisplayID display) {
     if (reply.header.msgh_remote_port != MACH_PORT_NULL)
         mach_port_deallocate(mach_task_self(), reply.header.msgh_remote_port);
     return (int)result;                           // the Dock's CoreDisplay present return code
+}
+
+// ---------------------------------------------------------------------------------------------
+// The "flick" control sender. One-way RDGPU_MSG_ID_TOGGLE carrying the desired `online` state for
+// ALL displays; the shim never waits on a reply because the toggle must complete in under a frame
+// and the payload's own re-set/clear is near-instant anyway.
+
+int rdgpu_scanout_set_online(int online) {
+    mach_port_t service = MACH_PORT_NULL;
+    kern_return_t kr = rdgpu_scanout_lookup(&service);
+    if (kr != KERN_SUCCESS || service == MACH_PORT_NULL) return -3;
+
+    rdgpu_toggle_msg_t msg;
+    memset(&msg, 0, sizeof msg);
+    msg.header.msgh_size        = sizeof msg;
+    msg.header.msgh_bits        = MACH_MSGH_BITS(MACH_MSG_TYPE_COPY_SEND, 0);  // one-way, simple
+    msg.header.msgh_remote_port = service;
+    msg.header.msgh_local_port  = MACH_PORT_NULL;
+    msg.header.msgh_id          = RDGPU_MSG_ID_TOGGLE;
+    msg.online                  = (uint32_t)(online ? 1 : 0);
+    msg.display_index           = RDGPU_SCANOUT_TOGGLE_ALL;
+
+    kr = mach_msg(&msg.header, MACH_SEND_MSG, sizeof msg, 0,
+                  MACH_PORT_NULL, MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL);
+    mach_port_deallocate(mach_task_self(), service);
+    return (kr == KERN_SUCCESS) ? 0 : -4;
 }

@@ -46,6 +46,7 @@
 #include "present_feedback.h"
 #include "drmasahi.h"                     // drm_ioctl — PRIME_FD_TO_HANDLE for dma-buf import
 #include "rdgpu_surface_handoff.h"        // rdgpu_handoff_import_init — cross-process mach-port registry
+#include "rdgpu_native_output.h"          // rdgpu_native_output — auto-detected wl_output mode/scale
 
 #ifndef WL_HEADLESS
 extern int rd_secondary_open(uint32_t, uint32_t, uint32_t, const char*, uint32_t);
@@ -113,6 +114,31 @@ static int multiwindow_enabled(void) {
   }
   return 1;
 #endif
+}
+
+// ---------------------------------------------------------------------------
+// Nested-Wayland retirement (the "no wayland-1 on the other screen" gate).
+//
+// The guest compositor presents through exactly ONE backend. When that backend is the native DRM
+// master, the in-process nested wayland-0 server is redundant — serving it is what leaves a stray
+// "wayland-1" mac window on the host — so wlsrv retires the nested presentation:
+//   * native DRM-master — the guest issued a KMS-master ioctl (drm_master_active()); its frame
+//                          reaches the host through drmasahi.c's per-CRTC present, not wlsrv.
+//   * scanout takeover   — RDGPU_SCANOUT=1 now runs that SAME native DRM-master compositor: stock
+//                          Hyprland/KDE opens the rdmetal node as the DRM master and flips its GBM
+//                          framebuffer, and drm_present_fb stages the flip into an IOSurface that
+//                          window.m hands straight to the Dock's direct-scanout service. The nested
+//                          wayland-0 server is NOT part of that path, so it is retired here too —
+//                          no nested wl_output, and a nested client connection is refused.
+// ---------------------------------------------------------------------------
+static int scanout_takeover(void) {
+  static int v = -1;
+  if (v < 0) { const char* e = getenv("RDGPU_SCANOUT"); v = (e && *e && *e != '0'); }
+  return v;
+}
+
+static int nested_wayland_retired(void) {
+  return drm_master_active() || scanout_takeover();
 }
 
 // ---------------------------------------------------------------------------
@@ -2343,8 +2369,27 @@ secondary_cpu_fallback: ;
       if (fit && sscanf(fit, "%ux%u%c", &parsed_w, &parsed_h, &tail) == 2 &&
           parsed_w >= 640 && parsed_h >= 480 && parsed_w <= 8192 && parsed_h <= 8192) {
         fit_w = parsed_w; fit_h = parsed_h;
+      } else if (fit_name) {
+        // No (valid) RDNATIVE_FIT_OUTPUT_* override: default this nested-compositor toplevel to
+        // the display's native pixel size, so Hyprland/KDE come up full-screen with no env needed.
+        // (aquamarine's Wayland backend derives its swapchain size from this configure; a 0x0 here
+        // would fall back to its hardcoded 1280x720.)
+#ifndef WL_HEADLESS
+        // Scanout-role sizing (server19): WAYLAND-1 is the PRIMARY output -> external
+        // (3440x1440, scanout slot 0 / role 0), WAYLAND-2 is the SECONDARY output ->
+        // builtin (3600x2338, scanout slot 1 / role 1). rdgpu_native_output() detects
+        // index 0 = the primary window's screen (builtin) and index 1 = the first
+        // non-primary screen (external), so WAYLAND-1 -> index 1 and WAYLAND-2 -> index 0.
+        size_t nfit_index = !strcmp(s->title, "aquamarine - WAYLAND-2") ? 0 : 1;
+        uint32_t nfit_w = 0, nfit_h = 0; double nfit_scale = 0;
+        if (rdgpu_native_output(nfit_index, &nfit_w, &nfit_h, &nfit_scale) == 0 &&
+            nfit_w >= 640 && nfit_h >= 480 && nfit_w <= 8192 && nfit_h <= 8192) {
+          fit_w = nfit_w; fit_h = nfit_h;
+        }
+#endif
       }
       ev_u32(&e, fit_w); ev_u32(&e, fit_h);  // 0x0 remains default for ordinary apps
+      if (fit_name) wlog("xdg_toplevel.configure '%s' %ux%u", s->title, fit_w, fit_h);
       // ACTIVATED (xdg_toplevel.state 4). With no states at all GTK paints itself as a BACKGROUND
       // window and declines keyboard focus, which is indistinguishable from dead input.
       uint32_t states[1] = { 4 };
@@ -2516,14 +2561,25 @@ static void handle(uint32_t id, uint16_t op, const uint8_t* a, size_t len) {
     if (op == 1) {                                          // get_registry(new_id)
       uint32_t r = len >= 4 ? rd32(a) : 0;
       obj_set(r, IF_REGISTRY, 1, 0);
+      // Nested-Wayland retirement (native DRM-master and scanout takeover): when the guest's
+      // compositor is presenting through its DRM backend — or is in RDGPU_SCANOUT=1 takeover,
+      // which runs that same DRM-master backend — do NOT advertise wl_output. The nested
+      // Wayland backend then creates no output — no "wayland-1 on the other screen" — while the
+      // wl_seat (input / cursor) and every other global stay served.
+      int native = nested_wayland_retired();
       for (int i = 0; i < NGLOBALS; i++) {
+        if (native && g_globals[i].kind == IF_OUTPUT) continue;
         struct ev e; ev_begin(&e, r, 0);                     // wl_registry.global
         ev_u32(&e, g_globals[i].name);
         ev_str(&e, g_globals[i].iface);
         ev_u32(&e, g_globals[i].version);
         ev_send(&e);
       }
-      wlog("get_registry %u -> %d globals", r, NGLOBALS);
+      if (native)
+        wlog("get_registry %u -> %d globals (nested Wayland retired: wl_output suppressed)",
+             r, NGLOBALS - 1);
+      else
+        wlog("get_registry %u -> %d globals", r, NGLOBALS);
       return;
     }
     return;
@@ -2563,10 +2619,27 @@ static void handle(uint32_t id, uint16_t op, const uint8_t* a, size_t len) {
           ev_send(&g);
           struct ev m; ev_begin(&m, nid, 1);                 // wl_output.mode
           ev_u32(&m, 1 | 2);                                 // current | preferred
-          ev_u32(&m, 1280); ev_u32(&m, 800); ev_u32(&m, 60000);
+          // Advertise the display the guest output actually lands on at its NATIVE pixel size
+          // and backing scale, so Hyprland/KDE render full-screen at the real resolution. This
+          // replaces the old hardcoded 3440x1440@60 / scale 1 (which assumed the external panel).
+          uint32_t nout_w = 0, nout_h = 0; double nout_scale = 1.0;
+#ifndef WL_HEADLESS
+          // The single advertised wl_output is the PRIMARY output (WAYLAND-1 -> external,
+          // scanout role 0), so query the EXTERNAL display (index 1), not the primary
+          // window's screen (index 0 = builtin). Mirrors the xdg_toplevel.configure mapping.
+          if (rdgpu_native_output(1, &nout_w, &nout_h, &nout_scale) != 0 || !nout_w || !nout_h) {
+            nout_w = 3440; nout_h = 1440; nout_scale = 1.0;   // no display: last-resort fallback
+          }
+#else
+          nout_w = 3440; nout_h = 1440; nout_scale = 1.0;     // headless diagnostic: no display
+#endif
+          ev_u32(&m, nout_w); ev_u32(&m, nout_h); ev_u32(&m, 60000);
           ev_send(&m);
           if (use >= 2) {
-            struct ev s; ev_begin(&s, nid, 3); ev_u32(&s, 1); ev_send(&s);     // scale
+            uint32_t nout_scale_i = (uint32_t)(nout_scale + 0.5);
+            if (nout_scale_i < 1) nout_scale_i = 1;
+            wlog("wl_output.mode %ux%u@60000 scale %u", nout_w, nout_h, nout_scale_i);
+            struct ev s; ev_begin(&s, nid, 3); ev_u32(&s, nout_scale_i); ev_send(&s); // scale
             struct ev d; ev_begin(&d, nid, 2); ev_send(&d);                    // done
           }
         } else if (g_globals[i].kind == IF_DMABUF) {
@@ -3577,7 +3650,21 @@ static void* wl_thread(void* arg) {
     if (p[0].revents & POLLIN) {
       int c = accept(g_lfd, NULL, NULL);
       if (c >= 0) {
-        if (g_cfd >= 0) { close(c); }                        // one client is enough
+        if (nested_wayland_retired()) {
+          // Nested-Wayland retirement: in native DRM-master mode (and in RDGPU_SCANOUT=1
+          // takeover, which runs that same DRM-master backend) the guest compositor presents
+          // through its DRM backend, so the nested-Wayland fallback backend must NOT be served.
+          // Refusing the connection here retires the nested presentation (no "wayland-1 on the
+          // other screen") while the DRM backend stays the only present path. (Input in native
+          // mode is the DRM backend's libinput/evdev concern, not this outer wl_seat.)
+          close(c);
+          static int said_refuse;
+          if (!said_refuse) { said_refuse = 1;
+            fprintf(stderr, "[wl] %s: refusing nested-Wayland client connection "
+                            "(wayland-0 not served)\n",
+                    scanout_takeover() ? "RDGPU_SCANOUT=1 takeover" : "native DRM master active");
+          }
+        } else if (g_cfd >= 0) { close(c); }                 // one client is enough
         else {
           g_cfd = c;
           memset(g_obj, 0, sizeof g_obj);
@@ -3603,8 +3690,15 @@ static void mac_surface_start(void);   // host-side Wayland client (Hyprland-own
 
 // Host-side (macOS) mac-app helpers, in mac_surface_host.m. The ObjC/NSWorkspace
 // launcher + best-effort window capture live there so wlsrv.c stays C.
+// The headless (WL_HEADLESS) build links neither mac_surface_host.m nor
+// rdgpu_macsurface_client.m, so these externs — and every call site below — are
+// compiled out headlessly.
+#ifndef WL_HEADLESS
 extern int  rd_mac_launch_bundle(const char* spec, char* out_name, size_t onsz);
 extern void* rd_mac_capture_window(pid_t pid, int* out_w, int* out_h, int* out_stride);
+extern uint32_t rd_mac_find_window_id(pid_t pid);                    // mac_surface_host.m
+extern IOSurfaceRef rdgpu_macsurface_resolve_window(uint32_t window_id); // rdgpu_macsurface_client.m
+#endif
 
 int wlsrv_start(const char* socket_path) {
   if (getenv("RDNATIVE_PRESENT_FEEDBACK") && rd_feedback_init()) return -1;
@@ -3763,7 +3857,9 @@ static int       mac_buf_busy[2]    = {0, 0};
 // bundle path (e.g. Calculator). NULL when capture is unavailable (no TCC).
 static uint8_t*  mac_capture_buf = NULL;
 static int       mac_capture_w = 0, mac_capture_h = 0, mac_capture_stride = 0;
-static uint64_t  mac_capture_attempts = 0;
+#ifndef WL_HEADLESS
+static uint64_t  mac_capture_attempts = 0;   // capture throttle; capture is GUI-only
+#endif
 
 // Send a buffered message (built with the shared ev_* helpers) to Hyprland.
 static int mac_send(struct ev* e) {
@@ -4172,6 +4268,30 @@ static int mac_surface_resolve_iosurface(void) {
   return 0;
 }
 
+// Resolve a real (bundle-launched) app's window IOSurface through the
+// WindowServer-injected resolver (com.rdgpu.macsurface) — the app's actual
+// CALayer/CAMetalLayer backing, NOT a CGWindowListCreateImage screenshot.
+// Returns 0 on success (mac_iosurface adopted), -1 if not yet available.
+// Headless build: no mac_surface_host.m / rdgpu_macsurface_client.m, so this
+// whole path (and its callers) is compiled out.
+#ifndef WL_HEADLESS
+static int mac_surface_resolve_injected(void) {
+  if (mac_iosurface) return 0;
+  if (mac_app_pid <= 0) return -1;
+  uint32_t wid = rd_mac_find_window_id(mac_app_pid);
+  if (!wid) return -1;
+  IOSurfaceRef s = rdgpu_macsurface_resolve_window(wid);
+  if (!s) return -1;
+  mac_iosurface = s;
+  int w = (int)IOSurfaceGetWidth(s), h = (int)IOSurfaceGetHeight(s);
+  if (w > 0) mac_w = w;
+  if (h > 0) mac_h = h;
+  fprintf(stderr, "[mac-surface] resolved window %u IOSurface via injection id=%u %dx%d stride=%zu\n",
+          wid, IOSurfaceGetID(s), mac_w, mac_h, IOSurfaceGetBytesPerRow(s));
+  return 0;
+}
+#endif
+
 static void* mac_surface_thread(void* arg) {
   (void)arg;
   if (mac_surface_wait_socket() < 0) return NULL;
@@ -4188,6 +4308,18 @@ static void* mac_surface_thread(void* arg) {
     if (!mac_iosurface)
       fprintf(stderr, "[mac-surface] IOSurface not resolved; using solid placeholder\n");
   }
+  // A bundle-launched real app: try to resolve its window IOSurface via the
+  // WindowServer injection BEFORE the pool is sized, so mac_w/mac_h match the
+  // app's real surface (same as the test-app path). Bounded retry; a slow app
+  // start falls through to the in-loop retry below. (Not in the headless build.)
+#ifndef WL_HEADLESS
+  if (mac_app_pid > 0 && !mac_iosurface) {
+    for (int i = 0; i < 12 && !mac_iosurface && !g_stop; i++) {
+      if (mac_surface_resolve_injected() == 0) break;
+      usleep(250000);
+    }
+  }
+#endif
   if (mac_surface_handshake() < 0) { close(mac_fd); mac_fd = -1; return NULL; }
 
   int mapped = 0;
@@ -4200,14 +4332,20 @@ static void* mac_surface_thread(void* arg) {
     if (pfd.revents & (POLLHUP | POLLERR)) { fprintf(stderr, "[mac-surface] Hyprland closed the connection\n"); break; }
     if (r == 0) {
       if (mapped) {
-        // No IOSurface but a launched bundle app: try to capture its window
-        // (throttled ~1/2s; needs Screen Recording TCC for foreign apps).
+        // No IOSurface but a launched bundle app: resolve its window IOSurface
+        // through the WindowServer injection first (real pixels, no capture),
+        // and only fall back to CGWindowListCreateImage capture when that is
+        // unavailable (throttled ~1/2s). (Not in the headless build.)
+#ifndef WL_HEADLESS
         if (!mac_iosurface && mac_app_pid > 0 &&
             (mac_capture_attempts++ & 3) == 0) {
-          int cw = 0, ch = 0, cs = 0;
-          uint8_t* cbuf = rd_mac_capture_window(mac_app_pid, &cw, &ch, &cs);
-          if (cbuf) { free(mac_capture_buf); mac_capture_buf = cbuf; mac_capture_w = cw; mac_capture_h = ch; mac_capture_stride = cs; }
+          if (mac_surface_resolve_injected() != 0) {
+            int cw = 0, ch = 0, cs = 0;
+            uint8_t* cbuf = rd_mac_capture_window(mac_app_pid, &cw, &ch, &cs);
+            if (cbuf) { free(mac_capture_buf); mac_capture_buf = cbuf; mac_capture_w = cw; mac_capture_h = ch; mac_capture_stride = cs; }
+          }
         }
+#endif
         if (mac_iosurface || mac_capture_buf) mac_surface_commit_frame();
       }
       continue;
@@ -4239,6 +4377,9 @@ static void mac_surface_start(void) {
 
   // Task 2 launcher: RDNATIVE_MAC_APP_BUNDLE=<bundle-id|name|path> launches a real
   // mac app via NSWorkspace and titles the Hyprland-owned surface after it.
+  // (Not in the headless build: rd_mac_launch_bundle lives in mac_surface_host.m,
+  // which shim_wlh does not link.)
+#ifndef WL_HEADLESS
   const char* bundle = getenv("RDNATIVE_MAC_APP_BUNDLE");
   if (bundle && *bundle) {
     char name[256] = {0};
@@ -4249,6 +4390,7 @@ static void mac_surface_start(void) {
       mac_title = mac_app_name;
     }
   }
+#endif
 
   // Task 1 content path: RDNATIVE_MAC_APP_TEST=<test-app-binary> launches the tiny
   // Metal/CAMetalLayer app (rd_mac_app) and wires its shared IOSurface into the
@@ -4261,7 +4403,11 @@ static void mac_surface_start(void) {
       if (p > 0) {
         mac_app_pid = p;
         if (!mac_app_name[0]) snprintf(mac_app_name, sizeof mac_app_name, "rd-mac-app");
-        if (!bundle || !*bundle) mac_title = mac_app_name;   // bundle name wins when present
+#ifdef WL_HEADLESS
+        mac_title = mac_app_name;                             // no bundle launcher headlessly
+#else
+        if (!bundle || !*bundle) mac_title = mac_app_name;    // bundle name wins when present
+#endif
       } else {
         close(mac_carrier_fd); mac_carrier_fd = -1;
       }
@@ -4271,6 +4417,45 @@ static void mac_surface_start(void) {
   fprintf(stderr, "[mac-surface] host trigger: creating Hyprland-owned surface %dx%d title='%s' color=#%02X%02X%02X%s\n",
           mac_w, mac_h, mac_title, mac_r, mac_g, mac_b,
           mac_carrier_fd >= 0 ? " content=IOSurface" : " content=placeholder");
+  if (pthread_create(&mac_thread, NULL, mac_surface_thread, NULL) != 0)
+    fprintf(stderr, "[mac-surface] pthread_create failed\n");
+  else
+    pthread_detach(mac_thread);
+}
+
+// ===========================================================================
+// SLSBindSurface -> surfacing handoff (windowserver.c calls this)
+// ===========================================================================
+// When the shim-as-WindowServer stand-in accepts SLSBindSurface(windowID, surfaceID) for a
+// mac app's window, it calls ws_mac_surface_present. This is the STRONG symbol: the weak
+// default in windowserver.c is overridden when the two are linked into one image (the way the
+// objective eventually retires wlsrv), and the call lands here. It drives the SAME Hyprland-
+// owned mac_surface_* path above — it adopts the bound IOSurface as the content source, sizes
+// the surface from it, and starts the wl_surface + xdg_toplevel presentation thread if it is
+// not already running, so the window surfaces as a native Wayland window in Hyprland.
+//
+// surface_id is the IOSurface id (IOSurfaceGetID); IOSurfaceLookup recovers the CFRetained
+// IOSurfaceRef. A synthetic id (the headless wiring proof) fails the lookup and still proves
+// the bind reached here — the surfacing thread is started with the placeholder content.
+void ws_mac_surface_present(uint32_t window_id, uint32_t surface_id) {
+  if (mac_started) return;                  // one mac window per shim for now
+  IOSurfaceRef s = IOSurfaceLookup(surface_id);
+  if (s) {
+    mac_iosurface = s;                      // adopt the +1 reference (matches the resolver paths)
+    int w = (int)IOSurfaceGetWidth(s), h = (int)IOSurfaceGetHeight(s);
+    if (w > 0) mac_w = w;
+    if (h > 0) mac_h = h;
+    fprintf(stderr, "[mac-surface] SLSBindSurface window=%u iosurface=%u %dx%d -> "
+                    "adopted; creating Hyprland wl_surface + xdg_toplevel\n",
+            window_id, surface_id, mac_w, mac_h);
+  } else {
+    fprintf(stderr, "[mac-surface] SLSBindSurface window=%u iosurface=%u -> "
+                    "IOSurfaceLookup failed (synthetic id?); still creating placeholder "
+                    "Hyprland wl_surface + xdg_toplevel\n", window_id, surface_id);
+  }
+  snprintf(mac_app_name, sizeof mac_app_name, "mac-window-%u", window_id);
+  mac_title = mac_app_name;
+  mac_started = 1;
   if (pthread_create(&mac_thread, NULL, mac_surface_thread, NULL) != 0)
     fprintf(stderr, "[mac-surface] pthread_create failed\n");
   else

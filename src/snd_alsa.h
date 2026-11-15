@@ -13,6 +13,7 @@
 
 int  snd_enabled(void);                     // RDSND=1
 int  snd_is_node(const char* path);         // /dev/snd/controlC0, /dev/snd/pcmC0D0p, /dev/snd/pcmC0D0c
+int  snd_is_node_name(const char* name);    // basename twin for the /dev/snd getdents64 d_type fix
 void snd_register_fd(int fd);
 void snd_assign_fd(int fd, int stream_dir); // 0=playback, 1=capture (for pcm nodes)
 void snd_dup_fd(int oldfd, int newfd);
@@ -21,7 +22,11 @@ int  snd_owns_fd(int fd);
 long snd_ioctl(int fd, unsigned long req, unsigned long arg);
 void* snd_mmap(int fd, long off);           // ALSA mmap offset -> backing, NULL if none
 void snd_fake_stat(unsigned int* mode, unsigned long* rdev, const char* path);
-int  snd_sysfs_kind(const char* path);      // synthetic /sys/class/sound/... and /proc/asound handled elsewhere
+// Synthetic /sys/class/sound/* and /run/udev/data/c116:0 (see snd_alsa.c). kind: 0 none, 1 uevent,
+// 2 dev, 3 subsystem, 4 card0 dir, 5 sound dir, 6 udev db. /proc/asound is served via snd_proc_content.
+int  snd_sysfs_kind(const char* path);
+const char* snd_sysfs_content(const char* path); // body for uevent/dev/udev-db files (NULL if none)
+const char* snd_sysfs_link(void);           // readlink target for card0/subsystem
 const char* snd_proc_content(const char* path); // /proc/asound/cards, /proc/asound/pcm, /proc/asound/version
 int  snd_poll_revents(int fd, short events);// Linux revents for poll()/ppoll() on a PCM fd (non-blocking)
 

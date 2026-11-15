@@ -32,7 +32,15 @@ long gpuwin_present(const uint8_t* rgba, uint64_t w, uint64_t h);  // upload+bli
 // native MTLPixelFormatBGRA8Unorm and the sampler unpacks it for free. Stating the order per call
 // is deliberate: a single global format would silently swap red and blue on the other caller.
 long gpuwin_present_fmt(const uint8_t* px, uint64_t w, uint64_t h, int bgra);
+// Per-CRTC present (native DRM master). CRTC 1 -> primary Metal window, CRTC 2 -> secondary output.
+long gpuwin_present_crtc(const uint8_t* px, uint64_t w, uint64_t h, int bgra, uint32_t crtc_id);
+// Runtime takeover state (the "flick", RDNATIVE_FLICK_KEY): 1 = Linux owns the display(s) and the
+// present path does the direct scanout handoff; 0 = macOS re-composites through the CAMetalLayer.
+// Safe to read from any thread (presenter threads read it every frame).
+int  gpuwin_takeover_active(void);
 int  gpuwin_poll(void);                                            // pump events; !=0 if closed
+// Start the native-DRM evdev input pump (drains gpuwin_next_event -> /dev/input/event*).
+void gpuwin_start_evdev_pump(void);
 // Live cursor in window-local X11 coords (top-left origin), clamped to the content rect.
 // MUST NOT depend on gpuwin_poll() being called: under [NSApp run] it never is.
 void gpuwin_cursor(int* x, int* y);

@@ -1,3 +1,4 @@
+#include "guest_ownership.h"
 // syscalls.c — core Linux aarch64 -> macOS/BSD syscall translation.
 //
 // ABI (see ARCHITECTURE.md "Syscall ABI"): every return value is the RAW LINUX value.
@@ -44,6 +45,9 @@
 #include "drmasahi.h"
 #include "v4l2cam.h"
 #include "snd_alsa.h"
+#include "evdev.h"
+#include "vt.h"
+#include "rdva_host.h"
 int g_idle_after_address;
 static int g_idle_saw_address;
 #include <sys/resource.h>
@@ -55,6 +59,10 @@ static int g_idle_saw_address;
 #include "syscalls_ext.h"
 #include "signalfd_shim.h"
 #include "timerfd_shim.h"
+#include "pidfd_shim.h"
+// net.c owns the kqueue-backed epoll; on close(2) it must drop the fd from every epoll set
+// (Linux drops a watched fd from epoll automatically on close; kqueue does not).
+extern void net_fd_closed(int fd);
 #include "gmem.h"
 #ifdef RDGPU_CLIENT
 #include "rdgpu_mock_gate.h"
@@ -271,17 +279,34 @@ static long herrno(void)  { return -(long)linux_errno_from_host(errno); }
 // Shim-owned descriptors (see the comment on shim_fd_reserve in syscalls.h)
 // ===========================================================================================
 
-#define SHIM_FD_MAX 16
+#define SHIM_FD_MAX 512
 static int             g_shim_fds[SHIM_FD_MAX];
 static int             g_shim_nfd;
 static pthread_mutex_t g_shim_fd_mu = PTHREAD_MUTEX_INITIALIZER;
 
-void shim_fd_reserve(int fd) {
-  if (fd < 0) return;
+int shim_fd_reserve(int fd) {
+  if (fd < 0) return fd;
+  // Relocate to a high fd number. systemd's pack_fds() (fd-util.c) consolidates the service's
+  // listen fds onto 3,4,5,... via fcntl(F_DUPFD, i+3) + close in a restart loop; if any shim-owned
+  // descriptor (pty master, signalfd/timerfd/inotify end, pidfd) sits at a low number, F_DUPFD(3)
+  // can never return 3 and pack_fds spins forever. Keep shim fds >= 256 so 3..255 stay free.
+  if (fd < 256) {
+    int hi = fcntl(fd, F_DUPFD_CLOEXEC, 256);
+    if (hi >= 0) { close(fd); fd = hi; }
+  }
   pthread_mutex_lock(&g_shim_fd_mu);
-  for (int i = 0; i < g_shim_nfd; i++) if (g_shim_fds[i] == fd) { pthread_mutex_unlock(&g_shim_fd_mu); return; }
+  for (int i = 0; i < g_shim_nfd; i++) if (g_shim_fds[i] == fd) { pthread_mutex_unlock(&g_shim_fd_mu); return fd; }
   if (g_shim_nfd < SHIM_FD_MAX) g_shim_fds[g_shim_nfd++] = fd;
   pthread_mutex_unlock(&g_shim_fd_mu);
+  // Shim-owned descriptors must never leak into a spawned guest (exec): set FD_CLOEXEC so a
+  // posix_spawn/execve child closes them. Otherwise the executor inherits PID 1's pty masters and
+  // timerfd/signalfd socketpair ends, fdset_new_fill() sees them, and the service exec loops.
+  int rc = fcntl(fd, F_SETFD, FD_CLOEXEC);
+  if (getenv("RDEXECDBG") && fd < 64) {
+    FILE* f = fopen("/tmp/rd_exec_dbg.txt", "a");
+    if (f) { fprintf(f, "pid=%d RESERVE fd=%d cloexec_rc=%d\n", (int)getpid(), fd, rc); fclose(f); }
+  }
+  return fd;
 }
 
 void shim_fd_unreserve(int fd) {
@@ -312,6 +337,17 @@ static char g_cwd[GPATH_MAX] = "/";     // guest-absolute cwd
 static char g_exe[GPATH_MAX] = "/proc/self/exe";  // guest path of the running program
 static int  g_trace;
 int g_uid0;                        // RDUID0=1: report uid/gid 0 to the guest. See case 174.
+static int  g_is_init;             // THIS shim process is the guest PID 1 (argv[0] = /sbin/init)
+static long g_guest_ppid;          // guest ppid of THIS process (0 for init, else the parent's guest pid)
+
+// The guest pid of THIS process: 1 for init, the host pid otherwise (host pids ARE guest pids for
+// non-init processes; the shim is the guest's kernel and issues them).
+long syscalls_guest_pid(void) { return g_is_init ? 1 : (long)getpid(); }
+void syscalls_set_guest_ppid(long ppid) { g_guest_ppid = ppid; }
+long syscalls_get_guest_ppid(void) { return g_guest_ppid; }
+
+static void synth_materialize_all(void);   // defined with the /proc,/sys,/dev synthesis below
+static int  cgroup_dir_path(int fd, char* out, size_t cap);  // defined with the cgroup synthesis below
 
 void syscalls_set_root(const char* root) {
   g_root[0] = 0; g_rootlen = 0;
@@ -323,9 +359,15 @@ void syscalls_set_root(const char* root) {
   while (n > 1 && g_root[n-1] == '/') g_root[--n] = 0;
   if (n == 1 && g_root[0] == '/') { g_root[0] = 0; n = 0; }   // root "/" == no prefix
   g_rootlen = n;
+  guest_ownership_set_root(g_root);
   g_trace = getenv("RDSCTRACE") != NULL;
   g_uid0  = getenv("RDUID0")   != NULL;
+  // Materialize the synthesized /proc,/sys,/dev directory tree as real (empty) dirs so every
+  // path-taking syscall finds them; do_getdents64() serves their entries instead of readdir.
+  if (g_rootlen) synth_materialize_all();
 }
+
+const char* syscalls_get_root(void) { return g_root; }
 
 // CWD ACROSS execve. The shim services execve by re-exec'ing ITSELF (shim.c guest_execve), so the
 // new shim is a brand new host process and every static here starts over -- including g_cwd, which
@@ -349,9 +391,33 @@ void syscalls_set_cwd(const char* gcwd) {
   snprintf(g_cwd, sizeof g_cwd, "%s", gcwd);
 }
 
+// Is `guest_path` the guest PID 1? systemd decides "system manager" by getpid()==1, so the shim
+// must report 1 for the process the kernel would have launched as init (argv[0] = /sbin/init, the
+// systemd-sysvcompat symlink). /usr/lib/systemd/systemd is the real target and is included so a
+// systemd daemon-reexec (which re-exec's the shim with the real binary as argv[0]) stays PID 1.
+static int guest_path_is_init(const char* p) {
+  if (!p) return 0;
+  static const char* const inits[] = {
+    "/sbin/init", "/usr/sbin/init", "/usr/bin/init", "/bin/init", "/etc/init", "/init",
+    "/usr/lib/systemd/systemd",
+  };
+  for (size_t i = 0; i < sizeof inits / sizeof inits[0]; i++)
+    if (strcmp(p, inits[i]) == 0) return 1;
+  return 0;
+}
+
 void syscalls_set_exe(const char* guest_path) {
   if (guest_path && *guest_path) snprintf(g_exe, sizeof g_exe, "%s", guest_path);
+  g_is_init = guest_path_is_init(guest_path);
 }
+
+// Scoped PID-1 identity. syscalls_set_exe() sets it for the init process; the fork() child clears
+// it (a forked child is a NEW guest process with its own pid, not PID 1). clone(CLONE_THREAD) and
+// vfork share the address space, so they must NOT touch it here -- a cloned thread is still part of
+// PID 1's thread group, and a vfork child re-exec's (re-running main -> syscalls_set_exe) before it
+// can be observed. exec() also re-runs main(), so a forked+exec'd getty/dbus lands here with its
+// own argv[0] and g_is_init=0.
+void syscalls_set_init(int v) { g_is_init = v; }
 
 // ===========================================================================================
 // Path resolution
@@ -383,6 +449,10 @@ static void path_finish(char* dst, size_t* pn) {
 
 // Host path of an open fd, mapped back into the guest namespace.
 static long guest_path_of_fd(int fd, char* out, size_t cap) {
+  // A cgroup child-dir fd is backed by the host's /sys/fs/cgroup dirfd (see cgroup_dir_open), so
+  // its F_GETPATH is wrong; the fd->guest-path table is authoritative first. This also makes
+  // dirfd-relative mkdirat/openat (systemd's cg_create uses a cgroup dirfd) resolve correctly.
+  if (cgroup_dir_path(fd, out, cap) == 0) return 0;
   char hp[PATH_MAX];
   if (fcntl(fd, F_GETPATH, hp) < 0) return herrno();
   if (g_rootlen && strncmp(hp, g_root, g_rootlen) == 0 &&
@@ -390,7 +460,16 @@ static long guest_path_of_fd(int fd, char* out, size_t cap) {
     const char* g = hp + g_rootlen;
     snprintf(out, cap, "%s", *g ? g : "/");
   } else {
-    snprintf(out, cap, "%s", hp);                               // outside the root (e.g. /dev/*)
+    // macOS keeps /tmp, /var and /etc as symlinks into /private, and F_GETPATH reports the
+    // CANONICAL "/private/..." form. Map that back, so a host fd to /tmp resolves as guest
+    // /tmp rather than the nonexistent guest /private/tmp. This is exactly what broke
+    // systemd's CREDENTIALS step: fsmount() hands back a /tmp dir fd, fd_reopen(mfd,
+    // O_DIRECTORY) does openat(mfd, "."), and the leaked /private/tmp path made every
+    // service fail with "Failed to set up credentials: No such file or directory".
+    if (strncmp(hp, "/private/", 9) == 0)
+      snprintf(out, cap, "%s", hp + 8);                          // "/private/tmp" -> "/tmp"
+    else
+      snprintf(out, cap, "%s", hp);                              // outside the root (e.g. /dev/*)
   }
   return 0;
 }
@@ -484,6 +563,60 @@ static const char* passthru_dev(const char* g) {
   for (int i = 0; devs[i]; i++) if (strcmp(g, devs[i]) == 0) return devs[i];
   if (strncmp(g, "/dev/fd/", 8) == 0) return g;
   return 0;
+}
+
+// /dev/kmsg — the kernel printk buffer. systemd logs here by default before journald is up, and
+// its executor is hardcoded to --log-target kmsg. There is no kernel, so writes are appended to a
+// per-boot file (so the guest's real error is visible instead of vanishing into a journal socket
+// that has no reader yet). journald reads it like a pollable char device: a plain file is ALWAYS
+// EOF-readable under kqueue, which made journald's read/epoll loop spin and it never reached
+// sd_notify/READY=1. So a READER gets a pipe fed by a tail thread that follows the file — the pipe
+// blocks (and only wakes via epoll) when a writer appends, exactly like a char device.
+struct kmsg_tail { int fd_w; char path[160]; };
+
+static void* kmsg_tail_thread(void* arg) {
+  struct kmsg_tail* t = (struct kmsg_tail*)arg;
+  int f = open(t->path, O_RDONLY | O_CLOEXEC);
+  if (f < 0) { close(t->fd_w); free(t); return NULL; }
+  off_t off = 0;
+  char buf[8192];
+  for (;;) {
+    struct stat st;
+    if (fstat(f, &st) == 0 && st.st_size > off) {
+      ssize_t n = pread(f, buf, sizeof buf, off);
+      if (n <= 0) break;
+      off += n;
+      if (write(t->fd_w, buf, (size_t)n) < 0) break;   // reader closed the pipe (EPIPE)
+    } else {
+      usleep(20000);                                    // 20ms poll
+    }
+  }
+  close(f); close(t->fd_w); free(t);
+  return NULL;
+}
+
+static int kmsg_open(unsigned long lflags) {
+  const char* boot = getenv("RDSHIM_BOOT");
+  char path[160];
+  snprintf(path, sizeof path, "/tmp/rdshim-kmsg-%s.log", boot && *boot ? boot : "0");
+  if ((lflags & 3) != 1 /* O_RDONLY or O_RDWR: journald opens O_RDWR and reads */) {
+    int p[2];
+    if (pipe(p) < 0) { int fd = open(path, O_RDONLY | O_CLOEXEC); return fd < 0 ? herrno() : fd; }
+    fcntl(p[1], F_SETFD, FD_CLOEXEC);
+    fcntl(p[0], F_SETFL, O_NONBLOCK);   // kmsg readers are always non-blocking (journald uses epoll)
+    struct kmsg_tail* t = (struct kmsg_tail*)malloc(sizeof *t);
+    if (t) {
+      t->fd_w = p[1];
+      snprintf(t->path, sizeof t->path, "%s", path);
+      pthread_t th;
+      if (pthread_create(&th, NULL, kmsg_tail_thread, t) == 0) pthread_detach(th);
+      else { close(p[1]); free(t); }
+    } else close(p[1]);
+    return p[0];
+  }
+  int fd = open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
+  if (fd < 0) fd = open("/dev/null", O_WRONLY | O_CLOEXEC);
+  return fd < 0 ? herrno() : fd;
 }
 
 // HOST DIRECTORIES THE GUEST SEES AT THEIR REAL PATHS.
@@ -683,20 +816,78 @@ static long group_lockfile_path(const char* guest, char* host, size_t cap) {
   return 1;
 }
 
+// /proc/<pid>/root — the pid's mount-namespace root. Every shim guest shares the one rootfs, so
+// it is always the guest root "/". PipeWire's flatpak check opens this with O_DIRECTORY and then
+// probes ".flatpak-info" inside it; with no mapping the open fails ENOENT, pw_check_flatpak()
+// returns that error, and module-access.c treats ANY non-zero as "client is from flatpak" and
+// parks the client in "wait for 'flatpak' permissions" forever — which is exactly the pw-cli /
+// wireplumber handshake stall. Rewrite /proc/<digits>/root[/...] to /[/...].
+// Returns 1 (rewrote) / 0 (not this path) / negative (too long).
+static int proc_pid_root(const char* g, char* out, size_t cap) {
+  if (strncmp(g, "/proc/", 6) != 0) return 0;
+  const char* p = g + 6;
+  if (*p < '0' || *p > '9') return 0;
+  while (*p >= '0' && *p <= '9') p++;
+  if (strncmp(p, "/root", 5) != 0) return 0;
+  p += 5;                                      // p is "" or "/..."
+  int n = snprintf(out, cap, "%s", *p ? p : "/");
+  if (n < 0 || (size_t)n >= cap) return -1;
+  return 1;
+}
+
+// /proc/self/fd/<N> and /proc/<pid>/fd/<N> — the fd-reopen magic file. systemd's fd_reopen()
+// opens this to turn an O_PATH fd into a readable/writable one (e.g. reading a sysfs "uevent"
+// file after chasing it). Return the referenced fd number, or -1 if `g` is not such a path.
+static int proc_fd_number(const char* g) {
+  if (strncmp(g, "/proc/", 6) != 0) return -1;
+  const char* p = g + 6;
+  if (strncmp(p, "self/fd/", 8) == 0) {
+    p += 8;
+  } else {
+    if (*p < '0' || *p > '9') return -1;
+    while (*p >= '0' && *p <= '9') p++;
+    if (strncmp(p, "/fd/", 4) != 0) return -1;
+    p += 4;
+  }
+  if (*p < '0' || *p > '9') return -1;
+  int n = 0;
+  while (*p >= '0' && *p <= '9') { n = n * 10 + (*p - '0'); p++; }
+  return *p ? -1 : n;
+}
+
 static long resolve_f(int dirfd, const char* path, int flags, char* host, size_t hcap,
                       char* gabs, size_t gcap) {
   char tmp[GPATH_MAX];
   char* g = gabs ? gabs : tmp;
   size_t gc = gabs ? gcap : sizeof tmp;
   long r = guest_abs(dirfd, path, g, gc);
-  if (r < 0) return r;
+  if (r < 0) {
+    if (getenv("RDEXECDBG")) {
+      FILE* f = fopen("/tmp/rd_exec_dbg.txt", "a");
+      if (f) { fprintf(f, "pid=%d RESOLVE-FAIL dirfd=%d path=%s r=%ld\n", (int)getpid(), dirfd, path?path:"-", r); fclose(f); }
+    }
+    return r;
+  }
   // The /dev passthrough list is matched on the path the guest ASKED for, before resolution, so
   // that /dev/null and friends keep going to the host's real device nodes (the rootfs has none).
   if (g_rootlen && !passthru_dev(g)) {
     char lr[GPATH_MAX];
     r = guest_resolve_links(g, !(flags & RSV_NOFOLLOW), lr, sizeof lr);
-    if (r < 0) return r;
+    if (r < 0) {
+      if (getenv("RDEXECDBG")) {
+        FILE* f = fopen("/tmp/rd_exec_dbg.txt", "a");
+        if (f) { fprintf(f, "pid=%d RESOLVE-LINKS-FAIL dirfd=%d path=%s g=%s r=%ld\n", (int)getpid(), dirfd, path?path:"-", g, r); fclose(f); }
+      }
+      return r;
+    }
     snprintf(g, gc, "%s", lr);
+  }
+  // /proc/<pid>/root must resolve to the guest root BEFORE guest_to_host() pastes the rootfs on.
+  {
+    char proot[GPATH_MAX];
+    int pr = proc_pid_root(g, proot, sizeof proot);
+    if (pr < 0) return -LX_ENAMETOOLONG;
+    if (pr > 0) snprintf(g, gc, "%s", proot);
   }
   // Keep the shim's special host devices and virtual proc paths authoritative.
   long sr = (passthru_dev(g) || !strncmp(g, "/proc/", 6)) ? 0 :
@@ -817,15 +1008,39 @@ static void proc_maps(char* buf, size_t cap) {
 //
 // Emitted with all 52 fields a modern kernel emits, not 39. A parser that indexes to `exit_code`
 // on a 39-field line reads past the end, which is a different bug with the same symptom class.
-static void proc_stat(char* buf, size_t cap) {
+// Resolve the guest pid/ppid a /proc/<pid>/stat or /proc/<pid>/status record must report.
+//
+// `self` means the reader is asking about its own process (its real guest identity). Otherwise
+// `pid` names ANOTHER guest process, and the answer comes from how the shim issued that pid:
+//   * pid 1 is init -> ppid 0.
+//   * a pid THIS process forked (guest_child_known) -> ppid is our guest pid.
+//   * anything else is a descendant an executor/daemon forked on our behalf -> the best honest
+//     answer is "descends from init", ppid 1. systemd only compares this field against its own
+//     getpid() to answer pid_is_my_child(), so a valid non-zero ppid is what matters.
+static void proc_pid_identity(long pid, int is_self, long* out_pid, long* out_ppid) {
+  if (is_self) {
+    *out_pid  = syscalls_guest_pid();
+    *out_ppid = syscalls_get_guest_ppid();
+    return;
+  }
+  *out_pid = pid;
+  if (pid == 1)                    *out_ppid = 0;
+  else if (guest_child_known((int)pid)) *out_ppid = syscalls_guest_pid();
+  else                             *out_ppid = 1;
+}
+
+static void proc_stat_for(char* buf, size_t cap, long pid, long ppid, const char* name) {
   unsigned long startstack = g_mstack_hi;                  // top of the main guest stack
   unsigned long start_brk  = g_brk_base;
   snprintf(buf, cap,
-    "%d (%s) R %d %d %d 0 -1 4194304 0 0 0 0 0 0 0 0 20 0 1 0 0 0 0 "
+    "%ld (%s) R %ld %ld %ld 0 -1 4194304 0 0 0 0 0 0 0 0 20 0 1 0 0 0 0 "
     "18446744073709551615 0 0 %lu 0 0 0 0 0 0 0 0 0 0 0 "   /* 26..39, 28 = startstack */
     "0 0 0 0 0 0 0 %lu 0 0 0 0 0\n",                        /* 40..52, 47 = start_brk  */
-    (int)getpid(), "guest", (int)getppid(), (int)getpid(), (int)getpid(),
-    startstack, start_brk);
+    pid, name, ppid, pid, pid, startstack, start_brk);
+}
+
+static void proc_stat(char* buf, size_t cap) {
+  proc_stat_for(buf, cap, syscalls_guest_pid(), syscalls_get_guest_ppid(), "guest");
 }
 
 
@@ -881,9 +1096,264 @@ static void proc_meminfo(char* b, size_t cap) {
            kb, kb / 2, kb / 2);
 }
 
-// Returns 1 if the path is a virtual /proc file we serve; *fd is then the result (or -errno).
+// /proc/uptime — uptime(1), systemd CPU accounting, and any tool measuring elapsed host time.
+// Matches the sysinfo(2) handler below: CLOCK_MONOTONIC counts since boot on macOS.
+static void proc_uptime(char* b, size_t cap) {
+  struct timespec up;
+  if (clock_gettime(CLOCK_MONOTONIC, &up) != 0) { up.tv_sec = 0; up.tv_nsec = 0; }
+  double total = (double)up.tv_sec + (double)up.tv_nsec / 1e9;
+  if (total <= 0.0) {
+    struct timeval bt; size_t len = sizeof bt;
+    if (sysctlbyname("kern.boottime", &bt, &len, NULL, 0) == 0) {
+      struct timeval now; gettimeofday(&now, NULL);
+      total = (double)(now.tv_sec - bt.tv_sec) + (double)(now.tv_usec - bt.tv_usec) / 1e6;
+    }
+  }
+  if (total < 0.0) total = 0.0;
+  double idle = total * 0.85;                    // plausible idle split (mostly-idle desktop)
+  snprintf(b, cap, "%.2f %.2f\n", total, idle);
+}
+
+// /proc/loadavg — the host's real 1/5/15-minute load average (same source as sysinfo(2)).
+static void proc_loadavg(char* b, size_t cap) {
+  double la[3] = {0.08, 0.12, 0.09};
+  if (getloadavg(la, 3) != 3) { la[0] = 0.08; la[1] = 0.12; la[2] = 0.09; }
+  snprintf(b, cap, "%.2f %.2f %.2f 1/1 %d\n", la[0], la[1], la[2], (int)getpid());
+}
+
+// /proc/stat — a minimal but parseable system-wide CPU accounting line plus the standard
+// trailers top(1)/vmstat(8)/node_exporter read. `cpu` carries the aggregate jiffies.
+static void proc_stat_system(char* b, size_t cap) {
+  struct timespec up;
+  if (clock_gettime(CLOCK_MONOTONIC, &up) != 0) { up.tv_sec = 0; up.tv_nsec = 0; }
+  unsigned long jiffies = (unsigned long)up.tv_sec * 100 + (unsigned long)(up.tv_nsec / 10000000);
+  unsigned long idle = jiffies * 85 / 100;
+  unsigned long busy = jiffies - idle;
+  unsigned long user = busy / 3, system = busy / 3, nice = busy - user - system;
+  long btime = (long)time(NULL) - (long)up.tv_sec;
+  snprintf(b, cap,
+    "cpu  %lu %lu %lu %lu 0 0 0 0 0 0\n"
+    "intr 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n"
+    "ctxt 0\n"
+    "btime %ld\n"
+    "processes 0\n"
+    "procs_running 1\n"
+    "procs_blocked 0\n",
+    user, nice, system, idle, btime);
+}
+
+// /proc/version — what uname(1) prints as its "Linux version" line; glibc's own uname() goes
+// through the uname(2) syscall, but `cat /proc/version` and several shells parse this file.
+static void proc_version(char* b, size_t cap) {
+  snprintf(b, cap,
+    "Linux version 6.10.10-rdshim (builder@rdshim) (aarch64) #1 SMP PREEMPT_DYNAMIC "
+    "Mon Jan  1 00:00:00 UTC 2026\n");
+}
+
+// /proc/self/status — ps(1)/pgrep(1)/systemd read the identity fields here. The pid/ppid/uid/gid
+// are the real process numbers (g_uid0 fakes uid/gid 0 exactly like the getuid(2) syscall does).
+static void proc_status_for(char* b, size_t cap, long pid, long ppid, const char* name) {
+  struct rusage ru; memset(&ru, 0, sizeof ru);
+  getrusage(RUSAGE_SELF, &ru);
+  unsigned long rss = (unsigned long)(ru.ru_maxrss / 1024);   // macOS ru_maxrss is in bytes
+  int uid = g_uid0 ? 0 : (int)getuid(), gid = g_uid0 ? 0 : (int)getgid();
+  long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+  if (ncpu < 1)  ncpu = 1;
+  if (ncpu > 32) ncpu = 32;
+  unsigned long mask = (ncpu >= 64) ? ~0UL : ((1UL << ncpu) - 1);
+  snprintf(b, cap,
+    "Name:\t%s\n"
+    "Umask:\t0022\n"
+    "State:\tR (running)\n"
+    "Tgid:\t%d\n"
+    "Pid:\t%d\n"
+    "PPid:\t%d\n"
+    "TracerPid:\t0\n"
+    "Uid:\t%d\t%d\t%d\t%d\n"
+    "Gid:\t%d\t%d\t%d\t%d\n"
+    "FDSize:\t256\n"
+    "Groups:\t%d \n"
+    "VmPeak:\t%10lu kB\n"
+    "VmSize:\t%10lu kB\n"
+    "VmLck:\t         0 kB\n"
+    "VmHWM:\t%10lu kB\n"
+    "VmRSS:\t%10lu kB\n"
+    "RssAnon:\t%10lu kB\n"
+    "RssFile:\t         0 kB\n"
+    "RssShmem:\t         0 kB\n"
+    "Threads:\t1\n"
+    "SigQ:\t0/0\n"
+    "SigPnd:\t0000000000000000\n"
+    "ShdPnd:\t0000000000000000\n"
+    "SigBlk:\t0000000000000000\n"
+    "SigIgn:\t0000000000000000\n"
+    "SigCgt:\t0000000000000000\n"
+    "CapInh:\t0000000000000000\n"
+    "CapPrm:\t0000000000000000\n"
+    "CapEff:\t0000000000000000\n"
+    "CapBnd:\t0000000000000000\n"
+    "CapAmb:\t0000000000000000\n"
+    "Seccomp:\t0\n"
+    "Cpus_allowed:\t%lx\n"
+    "Cpus_allowed_list:\t0-%ld\n"
+    "Mems_allowed:\t1\n"
+    "Mems_allowed_list:\t0\n"
+    "voluntary_ctxt_switches:\t1\n"
+    "nonvoluntary_ctxt_switches:\t0\n",
+    name,
+    (int)pid, (int)pid, (int)ppid,
+    uid, uid, uid, uid,
+    gid, gid, gid, gid,
+    gid,
+    rss, rss * 8, rss, rss, rss,
+    mask, ncpu - 1);
+}
+
+static void proc_self_status(char* b, size_t cap) {
+  const char* name = strrchr(g_exe, '/');
+  name = name ? name + 1 : g_exe;
+  if (!*name) name = "guest";
+  proc_status_for(b, cap, syscalls_guest_pid(), syscalls_get_guest_ppid(), name);
+}
+
+// /proc/self/environ — NUL-separated K=V block, exactly the shape the kernel exposes. Returns the
+// byte length (mem_fd must be handed the length, not strlen, because the body embeds NULs).
+static size_t proc_self_environ(char* b, size_t cap) {
+  extern char** environ;
+  size_t o = 0;
+  if (environ) {
+    for (char** e = environ; *e; e++) {
+      size_t n = strlen(*e) + 1;
+      if (o + n > cap) break;
+      memcpy(b + o, *e, n);
+      o += n;
+    }
+  }
+  return o;
+}
+
+// /proc/self/auxv — a plausible aarch64 Elf64_auxv_t stream (u64 type/value pairs, AT_NULL ended).
+// The identity values (pagesz/hwcap/clk_tck/uid/gid) match what bootstrap.c puts on the guest's
+// real initial stack, so getauxval()-based probing sees a consistent picture.
+static size_t proc_self_auxv(char* b, size_t cap) {
+  static const uint64_t av[][2] = {
+    {  3, 0x100000040ULL },   // AT_PHDR
+    {  4, 56ULL },            // AT_PHENT
+    {  5, 11ULL },            // AT_PHNUM
+    {  6, 16384ULL },         // AT_PAGESZ (GUEST_PAGESZ)
+    {  7, 0ULL },             // AT_BASE (static)
+    {  8, 0ULL },             // AT_FLAGS
+    {  9, 0x100000580ULL },   // AT_ENTRY
+    { 11, 501ULL },           // AT_UID
+    { 12, 501ULL },           // AT_EUID
+    { 13, 20ULL },            // AT_GID
+    { 14, 20ULL },            // AT_EGID
+    { 16, 0x103ULL },         // AT_HWCAP (FP | ASIMD | ATOMICS)
+    { 17, 100ULL },           // AT_CLKTCK
+    { 23, 0ULL },             // AT_SECURE
+    { 25, 0x7ffffff000ULL },  // AT_RANDOM
+    { 26, 0ULL },             // AT_HWCAP2
+    { 31, 0x7ffffff010ULL },  // AT_EXECFN
+    { 33, 0ULL },             // AT_SYSINFO_EHDR
+    {  0, 0ULL },             // AT_NULL (terminator)
+  };
+  size_t n = sizeof av / sizeof av[0];
+  size_t bytes = n * 16;
+  size_t w = bytes < cap ? bytes : cap - (cap % 16);
+  for (size_t i = 0; i + 16 <= w; i += 16) {
+    memcpy(b + i,     &av[i / 16][0], 8);
+    memcpy(b + i + 8, &av[i / 16][1], 8);
+  }
+  return w;
+}
+
+// /sys/devices/system/cpu/{possible,online,present,offline} — the CPU-set leaves lscpu and every
+// topology walker read first. The count is the SAME clamp sys_cpu_entries() uses so the sets agree
+// with the cpu0..cpuN directories. A contiguous 0..N-1 set is the range "0-(N-1)".
+static void sys_cpu_list(char* b, size_t cap, int offline) {
+  long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+  if (ncpu < 1)  ncpu = 1;
+  if (ncpu > 32) ncpu = 32;
+  if (offline) { snprintf(b, cap, "\n"); return; }     // everything online -> empty set
+  if (ncpu == 1) snprintf(b, cap, "0\n");
+  else           snprintf(b, cap, "0-%ld\n", ncpu - 1);
+}
+
+// Returns 1 if the path is a virtual /proc (or synthetic /sys leaf) file we serve; *fd is then the
+// result (or -errno).
 static int proc_open(const char* g, long* out) {
   char buf[4096];
+  if (getenv("RDEXECDBG") && strncmp(g, "/proc/", 6) == 0)
+    fprintf(stderr, "[proc-open] '%s'\n", g);
+
+  // Parse /proc/<digits>/<leaf>. The identity leaves stat/status (and fdinfo) depend on WHICH pid
+  // is named: a child pid must produce a CHILD record, not the reader's own. Everything else keeps
+  // the historical "one guest process per host process -> /proc/<pid>/* == /proc/self/*" rule
+  // (systemd reads its own identity through /proc/1/* during early boot).
+  long pidnum = -1;                 // parsed pid, or -1 if not /proc/<digits>/<leaf>
+  const char* leaf = NULL;          // the "/leaf..." suffix when pidnum >= 0
+  if (strncmp(g, "/proc/", 6) == 0) {
+    const char* p = g + 6;
+    if (*p >= '0' && *p <= '9') {
+      const char* q = p;
+      long v = 0;
+      while (*q >= '0' && *q <= '9') { v = v * 10 + (*q - '0'); if (v > 0x7fffffff) v = 0x7fffffff; q++; }
+      if (*q == '/' && q[1]) { pidnum = v; leaf = q; }
+    }
+  }
+
+  // /proc/<pid>/stat and /proc/<pid>/status — the record is for THAT pid (systemd's
+  // pid_get_ppid/pid_is_my_child read these for arbitrary child pids).
+  if (pidnum >= 0 && leaf && (strcmp(leaf, "/stat") == 0 || strcmp(leaf, "/status") == 0)) {
+    long rp, rpp;
+    int is_self = (pidnum == syscalls_guest_pid() || pidnum == (long)getpid());
+    proc_pid_identity(pidnum, is_self, &rp, &rpp);
+    if (strcmp(leaf, "/stat") == 0) proc_stat_for(buf, sizeof buf, rp, rpp, "guest");
+    else                            proc_status_for(buf, sizeof buf, rp, rpp, "guest");
+    int fd = mem_fd(buf, strlen(buf));
+    *out = fd < 0 ? herrno() : fd;
+    return 1;
+  }
+
+  // /proc/self/fdinfo/<N> and /proc/<pid>/fdinfo/<N> — the pidfd metadata surface. systemd's
+  // pidfd_get_pid() falls back here after PIDFD_GET_INFO and maps a missing file to -EBADF, so the
+  // "Pid:" line must exist for pidfds (and only pidfds) or every pidref_verify() fails.
+  {
+    int fdn = -1;
+    if (strncmp(g, "/proc/self/fdinfo/", 18) == 0) fdn = atoi(g + 18);
+    else if (pidnum >= 0 && leaf && strncmp(leaf, "/fdinfo/", 8) == 0) fdn = atoi(leaf + 8);
+    if (fdn >= 0) {
+      pid_t pfd = pidfd_shim_pid(fdn);
+      if (pfd > 0) {
+        long rp, rpp;
+        proc_pid_identity((long)pfd, 0, &rp, &rpp);
+        snprintf(buf, sizeof buf,
+                 "pos:\t0\n"
+                 "flags:\t02000000\n"
+                 "mnt_id:\t0\n"
+                 "ino:\t0\n"
+                 "Pid:\t%ld\n"
+                 "NSpid:\t%ld\n", rp, rp);
+      } else {
+        snprintf(buf, sizeof buf, "pos:\t0\nflags:\t02000000\nmnt_id:\t0\nino:\t0\n");
+      }
+      int fd = mem_fd(buf, strlen(buf));
+      *out = fd < 0 ? herrno() : fd;
+      return 1;
+    }
+  }
+
+  // Normalize the remaining /proc/<digits>/<leaf> forms to /proc/self/<leaf>.
+  char norm[GPATH_MAX];
+  if (pidnum >= 0 && leaf) { snprintf(norm, sizeof norm, "/proc/self%s", leaf); g = norm; }
+  if (strcmp(g, "/proc/cmdline") == 0) {
+    // The kernel command line systemd parses for `systemd.*`/`init.*` options. "ro" is enough for a
+    // clean boot; systemd's own log level/target arrive via argv (or its compiled-in defaults).
+    snprintf(buf, sizeof buf, "ro\n");
+    int fd = mem_fd(buf, strlen(buf));
+    *out = fd < 0 ? herrno() : fd;
+    return 1;
+  }
   if (strcmp(g, "/proc/self/exe") == 0) {
     char host[PATH_MAX]; guest_to_host(g_exe, host, sizeof host);
     int fd = open(host, O_RDONLY | O_CLOEXEC);
@@ -922,6 +1392,126 @@ static int proc_open(const char* g, long* out) {
     *out = fd < 0 ? herrno() : fd;
     return 1;
   }
+  if (strcmp(g, "/proc/uptime") == 0) {
+    proc_uptime(buf, sizeof buf);
+    int fd = mem_fd(buf, strlen(buf));
+    *out = fd < 0 ? herrno() : fd;
+    return 1;
+  }
+  if (strcmp(g, "/proc/loadavg") == 0) {
+    proc_loadavg(buf, sizeof buf);
+    int fd = mem_fd(buf, strlen(buf));
+    *out = fd < 0 ? herrno() : fd;
+    return 1;
+  }
+  if (strcmp(g, "/proc/stat") == 0) {
+    proc_stat_system(buf, sizeof buf);
+    int fd = mem_fd(buf, strlen(buf));
+    *out = fd < 0 ? herrno() : fd;
+    return 1;
+  }
+  if (strcmp(g, "/proc/version") == 0) {
+    proc_version(buf, sizeof buf);
+    int fd = mem_fd(buf, strlen(buf));
+    *out = fd < 0 ? herrno() : fd;
+    return 1;
+  }
+  // /proc/consoles + /sys/class/tty/console/active — systemd's getty generator calls
+  // get_kernel_consoles() to learn which virtual consoles to spawn getty on. Without these it logs
+  // "Failed to get active kernel consoles" and never starts getty@tty1, so no login prompt.
+  if (strcmp(g, "/proc/consoles") == 0) {
+    snprintf(buf, sizeof buf, "tty1                 -W- (EC p    )    4:1\n");
+    int fd = mem_fd(buf, strlen(buf));
+    *out = fd < 0 ? herrno() : fd;
+    return 1;
+  }
+  if (strcmp(g, "/sys/class/tty/console/active") == 0) {
+    snprintf(buf, sizeof buf, "tty1\n");
+    int fd = mem_fd(buf, strlen(buf));
+    *out = fd < 0 ? herrno() : fd;
+    return 1;
+  }
+  // /proc/sys/kernel/* — systemd/journald read these at startup; the OPEN-FAIL log showed
+  // osrelease/hostname/boot_id all ENOENT, and journald treats the missing hostname as fatal.
+  if (strcmp(g, "/proc/sys/kernel/hostname") == 0) {
+    snprintf(buf, sizeof buf, "localhost\n");
+    int fd = mem_fd(buf, strlen(buf));
+    *out = fd < 0 ? herrno() : fd;
+    return 1;
+  }
+  if (strcmp(g, "/proc/sys/kernel/osrelease") == 0) {
+    snprintf(buf, sizeof buf, "6.1.0-shim\n");
+    int fd = mem_fd(buf, strlen(buf));
+    *out = fd < 0 ? herrno() : fd;
+    return 1;
+  }
+  if (strcmp(g, "/proc/sys/kernel/random/boot_id") == 0) {
+    snprintf(buf, sizeof buf, "%08x-%04x-%04x-%04x-%012x\n",
+             (unsigned)getpid(), 0x4d4d, 0x5d5d, 0x6d6d, (unsigned)(getpid() * 2654435761u));
+    int fd = mem_fd(buf, strlen(buf));
+    *out = fd < 0 ? herrno() : fd;
+    return 1;
+  }
+  if (strcmp(g, "/proc/self/status") == 0) {
+    proc_self_status(buf, sizeof buf);
+    int fd = mem_fd(buf, strlen(buf));
+    *out = fd < 0 ? herrno() : fd;
+    return 1;
+  }
+  if (strcmp(g, "/proc/self/cgroup") == 0) {
+    // cgroup v2 unified hierarchy, root membership. systemd reads /proc/1/cgroup to learn its own
+    // cgroup; "0::/" = hierarchy 0, no bound controllers, path "/" — the honest no-cgroup answer.
+    snprintf(buf, sizeof buf, "0::/\n");
+    int fd = mem_fd(buf, strlen(buf));
+    *out = fd < 0 ? herrno() : fd;
+    return 1;
+  }
+  // /proc/self/oom_score_adj (+ oom_score/oom_adj/coredump_filter): systemd's exec_context_apply()
+  // writes the unit's OOMScoreAdjust/CoredumpFilter here. The shim has no OOM killer and no
+  // coredump filtering, so accept the write (mem_fd is a read/write temp file) and report "0".
+  // MEASURED: systemd-executor exits EXIT_OOM_ADJUST (206) when /proc/self/oom_score_adj can't be
+  // opened, which aborted journald (OOMScoreAdjust=-900) before it could start.
+  if (strcmp(g, "/proc/self/oom_score_adj") == 0 ||
+      strcmp(g, "/proc/self/oom_score")     == 0 ||
+      strcmp(g, "/proc/self/oom_adj")       == 0 ||
+      strcmp(g, "/proc/self/coredump_filter") == 0) {
+    snprintf(buf, sizeof buf, "0\n");
+    int fd = mem_fd(buf, strlen(buf));
+    *out = fd < 0 ? herrno() : fd;
+    return 1;
+  }
+  if (strcmp(g, "/proc/cgroups") == 0) {
+    // No cgroup v1 controllers are bound (the shim is v2-only / no-cgroup). systemd reads this to
+    // decide between the legacy and unified hierarchy; an empty table means "use cgroup v2".
+    snprintf(buf, sizeof buf, "#subsys_name\thierarchy\tnum_cgroups\tenabled\n");
+    int fd = mem_fd(buf, strlen(buf));
+    *out = fd < 0 ? herrno() : fd;
+    return 1;
+  }
+  if (strcmp(g, "/proc/self/environ") == 0) {
+    static char envb[65536];
+    size_t n = proc_self_environ(envb, sizeof envb);
+    int fd = mem_fd(envb, n);
+    *out = fd < 0 ? herrno() : fd;
+    return 1;
+  }
+  if (strcmp(g, "/proc/self/auxv") == 0) {
+    static char auxb[1024];
+    size_t n = proc_self_auxv(auxb, sizeof auxb);
+    int fd = mem_fd(auxb, n);
+    *out = fd < 0 ? herrno() : fd;
+    return 1;
+  }
+  // /sys/devices/system/cpu/{possible,online,present,offline}
+  if (strcmp(g, "/sys/devices/system/cpu/possible") == 0 ||
+      strcmp(g, "/sys/devices/system/cpu/online")   == 0 ||
+      strcmp(g, "/sys/devices/system/cpu/present")  == 0 ||
+      strcmp(g, "/sys/devices/system/cpu/offline")  == 0) {
+    sys_cpu_list(buf, sizeof buf, strcmp(g, "/sys/devices/system/cpu/offline") == 0);
+    int fd = mem_fd(buf, strlen(buf));
+    *out = fd < 0 ? herrno() : fd;
+    return 1;
+  }
   // /proc/asound/* — alsa-lib's snd_card_next() reads these to enumerate the synthetic card.
   if (strncmp(g, "/proc/asound", 12) == 0) {
     const char* c = snd_proc_content(g);
@@ -948,7 +1538,14 @@ static int open_flags_l2m(int lf) {
   if (lf & LO_DSYNC)     mf |= O_DSYNC;
   if (lf & LO_ASYNC)     mf |= O_ASYNC;
   if (lf & LO_DIRECTORY) mf |= O_DIRECTORY;
-  if (lf & LO_NOFOLLOW)  mf |= O_NOFOLLOW;
+  if (lf & LO_NOFOLLOW) {
+    // Linux open(symlink, O_PATH|O_NOFOLLOW) returns an O_PATH fd to the symlink INODE,
+    // and systemd's chase() relies on exactly that (open the component, statx it, S_ISLNK ->
+    // readlinkat). macOS O_NOFOLLOW instead fails with ELOOP on a symlink, so for the O_PATH
+    // combination open the link itself with O_SYMLINK, whose fstat() reports S_IFLNK.
+    if (lf & LO_PATH) mf |= O_SYMLINK;
+    else              mf |= O_NOFOLLOW;   // plain O_NOFOLLOW: ELOOP on a symlink, as on Linux
+  }
   if (lf & LO_CLOEXEC)   mf |= O_CLOEXEC;
   if ((lf & LO_SYNC) == LO_SYNC) mf |= O_SYNC;
   // O_DIRECT / O_LARGEFILE / O_NOATIME have no macOS equivalent and must NOT leak through
@@ -1113,18 +1710,17 @@ struct linux_winsize { uint16_t ws_row, ws_col, ws_xpixel, ws_ypixel; };
 // ===========================================================================================
 
 // S_IF* mode bits are identical between Linux and macOS, so st_mode copies straight across.
-static void stat_m2l(const struct stat* s, struct linux_stat* l) {
+static int stat_m2l(const struct stat* s, struct linux_stat* l) {
   memset(l, 0, sizeof *l);
   l->st_dev        = (uint64_t)s->st_dev;
   l->st_ino        = (uint64_t)s->st_ino;
   l->st_mode       = (uint32_t)s->st_mode;
   l->st_nlink      = (uint32_t)s->st_nlink;
-  // Under RDUID0 the guest is uid/gid 0; report every file as owned by root so stat() agrees with
-  // getuid(). Without this, dbus-daemon refuses to set up its transient service directory
-  // ("XDG_RUNTIME_DIR /tmp is owned by uid 501, not our uid 0"), which breaks D-Bus service
-  // activation (org.kde.KWin / org.kde.kglobalaccel "not provided by any .service files").
+  // RDUID0 defaults untracked files to root; virtual chown metadata overrides
+  // that default without changing Darwin ownership. Metadata errors propagate.
   l->st_uid        = g_uid0 ? 0 : (uint32_t)s->st_uid;
   l->st_gid        = g_uid0 ? 0 : (uint32_t)s->st_gid;
+  if (g_uid0 && guest_ownership_get(s, &l->st_uid, &l->st_gid)<0) return -1;
   l->st_rdev       = (uint64_t)s->st_rdev;
   l->st_size       = (int64_t)s->st_size;
   l->st_blksize    = (int32_t)s->st_blksize;
@@ -1132,11 +1728,23 @@ static void stat_m2l(const struct stat* s, struct linux_stat* l) {
   l->st_atime_sec  = s->st_atimespec.tv_sec;  l->st_atime_nsec = s->st_atimespec.tv_nsec;
   l->st_mtime_sec  = s->st_mtimespec.tv_sec;  l->st_mtime_nsec = s->st_mtimespec.tv_nsec;
   l->st_ctime_sec  = s->st_ctimespec.tv_sec;  l->st_ctime_nsec = s->st_ctimespec.tv_nsec;
+  return 0;
 }
 
-static void statfs_m2l(const struct statfs* s, struct linux_statfs* l) {
+// Linux filesystem magic by mount point. libudev's sd_device refuses a syspath whose
+// fstatfs() is not SYSFS_MAGIC ("outside of sysfs"), so /sys must report sysfs, not ext4.
+static int64_t fs_magic_for(const char* g) {
+  // cgroup2 MUST report CGROUP2_SUPER_MAGIC or systemd's cg_unified() decides it is running
+  // without a unified hierarchy and skips cgroup setup (no controllers, no init.scope, no units).
+  if (g && strncmp(g, "/sys/fs/cgroup", 14) == 0 && (g[14] == '/' || g[14] == 0))
+    return 0x63677270;                          // CGROUP2_SUPER_MAGIC
+  if (g && strncmp(g, "/sys", 4) == 0 && (g[4] == '/' || g[4] == 0)) return 0x62656572;  // SYSFS_MAGIC
+  if (g && strncmp(g, "/proc", 5) == 0 && (g[5] == '/' || g[5] == 0)) return 0x9fa0;     // PROC_SUPER_MAGIC
+  return 0xEF53;                               // claim ext2/3/4; nothing sane keys off this
+}
+static void statfs_m2l(const struct statfs* s, struct linux_statfs* l, const char* gpath) {
   memset(l, 0, sizeof *l);
-  l->f_type    = 0xEF53;                      // claim ext2/3/4; nothing sane keys off this
+  l->f_type    = fs_magic_for(gpath);
   l->f_bsize   = (int64_t)s->f_bsize;
   l->f_blocks  = s->f_blocks;
   l->f_bfree   = s->f_bfree;
@@ -1298,6 +1906,7 @@ static void fx_death(int sig) {
 }
 static void fx_death_hook(void) {
   g_fx_deathfd = fileno(g_fx_f);
+  if (getenv("RDFX_NODEATH")) return;   // DIAG: keep SIGTERM/SIGQUIT/etc at DFL so signalfd can claim them
   // ONLY where the disposition is still SIG_DFL. Replacing an existing handler (the shim ignores
   // SIGPIPE, for one) would turn a survivable signal into a kill and manufacture the very death
   // this is here to observe.
@@ -1438,6 +2047,11 @@ static int fu_wake(unsigned long uaddr, unsigned int n, uint32_t bits) {
   pthread_mutex_unlock(&b->mu);
   FX("%.3f WAKE uaddr=%#lx bkt=%d n=%u bits=%#x -> woke=%d (waiters_here=%d other_addrs=%d)\n",
      fx_now(), uaddr, (int)(b - g_fu), n, bits, woke, here, mates);
+  if (getenv("RDEXECDBG")) {
+    FILE* f = fopen("/tmp/rd_exec_dbg.txt", "a");
+    if (f) { fprintf(f, "pid=%d FUTEX-WAKE uaddr=%#lx n=%u bits=%#x -> woke=%d here=%d mates=%d\n",
+                     (int)getpid(), uaddr, n, bits, woke, here, mates); fclose(f); }
+  }
   return woke;
 }
 
@@ -1552,6 +2166,11 @@ static long do_futex(unsigned long uaddr, int op, unsigned int val,
         pthread_mutex_unlock(&b->mu);
         FX("%.3f WAIT uaddr=%#lx bkt=%d tid=%d op=%#x val=%u word=%u bits=%#x to=%d -> EAGAIN\n",
            fx_now(), uaddr, (int)(b - g_fu), guest_tid(), op, val, seen, bits, have_to);
+        if (getenv("RDEXECDBG")) {
+          FILE* f = fopen("/tmp/rd_exec_dbg.txt", "a");
+          if (f) { fprintf(f, "pid=%d FUTEX-EAGAIN uaddr=%#lx val=%u word=%u op=%#x\n",
+                           (int)getpid(), uaddr, val, seen, op); fclose(f); }
+        }
         return -LX_EAGAIN;
       }
 
@@ -1559,6 +2178,11 @@ static long do_futex(unsigned long uaddr, int op, unsigned int val,
       b->head = &w;
       FX("%.3f WAIT uaddr=%#lx bkt=%d tid=%d op=%#x val=%u bits=%#x to=%d -> PARK\n",
          w.fx_t0, uaddr, (int)(b - g_fu), w.fx_tid, op, val, bits, have_to);
+      if (getenv("RDEXECDBG")) {
+        FILE* f = fopen("/tmp/rd_exec_dbg.txt", "a");
+        if (f) { fprintf(f, "pid=%d FUTEX-WAIT uaddr=%#lx tid=%d val=%u word=%u op=%#x bits=%#x -> PARK\n",
+                         (int)getpid(), uaddr, guest_tid(), val, *p, op, bits); fclose(f); }
+      }
 
       int timedout = 0;
       while (!w.woken) {                        // loop: a bucket-mate's wake is not ours
@@ -1584,6 +2208,12 @@ static long do_futex(unsigned long uaddr, int op, unsigned int val,
          fx_now(), uaddr, (int)(b - g_fu), w.fx_tid,
          woken ? "WOKEN" : (timedout ? "TIMEDOUT" : "SPURIOUS"),
          fx_now() - w.fx_t0, *p);
+      if (getenv("RDEXECDBG")) {
+        FILE* f = fopen("/tmp/rd_exec_dbg.txt", "a");
+        if (f) { fprintf(f, "pid=%d FUTEX-WAIT-DONE uaddr=%#lx tid=%d -> %s word_now=%u\n",
+                         (int)getpid(), uaddr, w.fx_tid,
+                         woken ? "WOKEN" : (timedout ? "TIMEDOUT" : "SPURIOUS"), *p); fclose(f); }
+      }
 
       if (timedout && !woken) return -LX_ETIMEDOUT;
       return 0;
@@ -1997,10 +2627,59 @@ static long do_ioctl(int fd, unsigned long req, unsigned long arg) {
     case L_TIOCNOTTY: return herr(ioctl(fd, TIOCNOTTY));
     case L_TIOCOUTQ:  { int n = 0; if (ioctl(fd, TIOCOUTQ, &n) < 0) return herrno();
                         *(int*)arg = n; return 0; }
+    // Current Linux PIDFD_GET_INFO uses _IOWR(0xFF, 11, struct pidfd_info) with an
+    // 88-byte layout. Older builds used the 124-byte command below. Both must answer
+    // from the same pidfd registry; forwarding either to Darwin returns ENOTTY.
+    case 0xC058FF0B: {
+      if (!arg) return -LX_EFAULT;
+      pid_t pfd = pidfd_shim_pid(fd);
+      if (pfd <= 0) return -LX_EBADF;
+      long rp, rpp;
+      proc_pid_identity((long)pfd, 0, &rp, &rpp);
+      struct rd_pidfd_info_v2 {
+        uint64_t mask, cgroupid;
+        uint32_t pid, tgid, ppid;
+        uint32_t ruid, rgid, euid, egid, suid, sgid, fsuid, fsgid;
+        int32_t exit_code;
+        uint32_t coredump_mask, coredump_signal, coredump_code, coredump_pad;
+        uint64_t supported_mask;
+      } *inf = (struct rd_pidfd_info_v2*)arg;
+      inf->mask = RD_PIDFD_INFO_PID | RD_PIDFD_INFO_CREDS | RD_PIDFD_INFO_CGROUPID;
+      inf->cgroupid = 0;
+      inf->pid = inf->tgid = (uint32_t)rp;
+      inf->ppid = (uint32_t)rpp;
+      inf->ruid = inf->rgid = inf->euid = inf->egid = 0;
+      inf->suid = inf->sgid = inf->fsuid = inf->fsgid = 0;
+      inf->exit_code = 0;
+      inf->coredump_mask = inf->coredump_signal = inf->coredump_code = inf->coredump_pad = 0;
+      inf->supported_mask = 0;
+      return 0;
+    }
+    // PIDFD_GET_INFO (Linux 6.13+, _IOWR(0xFF, 9, struct pidfd_info) == 0xC07CFF09). systemd 261's
+    // pidfd_get_ppid()/pidfd_get_pid() issue this on a pidfd and read .pid/.ppid back; without it
+    // they fall back to /proc/self/fdinfo/<fd>. Emulate it so pidref_verify() has a direct answer.
+    case 0xC07CFF09: {
+      if (!arg) return -LX_EFAULT;
+      pid_t pfd = pidfd_shim_pid(fd);
+      if (pfd <= 0) return -LX_EBADF;              // not a pidfd we issued (or stale sentinel)
+      long rp, rpp;
+      proc_pid_identity((long)pfd, 0, &rp, &rpp);
+      struct rd_pidfd_info* inf = (struct rd_pidfd_info*)arg;
+      uint64_t want = inf->mask;
+      inf->mask = want | RD_PIDFD_INFO_PID | RD_PIDFD_INFO_CREDS;
+      inf->pid  = (uint32_t)rp;
+      inf->ppid = (uint32_t)rpp;
+      inf->ruid = inf->rgid = inf->euid = inf->egid = 0;
+      inf->suid = inf->sgid = inf->fsuid = inf->fsgid = 0;
+      inf->cgroupid = 0;
+      return 0;
+    }
     default:
       if (snd_owns_fd(fd)) return snd_ioctl(fd, req, arg);
       if (drm_owns_fd(fd)) return drm_ioctl(fd, req, arg);
       if (cam_owns_fd(fd)) return cam_ioctl(fd, req, arg);
+      if (evdev_owns_fd(fd)) return evdev_ioctl(fd, req, arg);
+      if (vt_owns_fd(fd)) return vt_ioctl(fd, req, arg);   // KDGKBMODE/KDGKBTYPE/VT_*
       return -LX_ENOTTY;
   }
 }
@@ -2054,8 +2733,10 @@ static long do_fcntl(int fd, int cmd, unsigned long arg) {
   switch (cmd) {
     case LF_DUPFD: case LF_DUPFD_CLOEXEC: {
       int nf = fcntl(fd, cmd == LF_DUPFD ? F_DUPFD : F_DUPFD_CLOEXEC, (int)arg);
+      if (nf >= 0 && pidfd_shim_pid(fd) > 0) pidfd_shim_register(nf, pidfd_shim_pid(fd));
       if (nf >= 0 && drm_owns_fd(fd)) drm_register_fd(nf);   // a dup is still the render node
       if (nf >= 0 && snd_owns_fd(fd)) snd_dup_fd(fd, nf);    // a dup of a snd node keeps its role
+      if (nf >= 0 && evdev_owns_fd(fd)) evdev_register_fd(nf, evdev_device_of_fd(fd));
       return herr(nf);
     }
     case LF_GETFD:         return herr(fcntl(fd, F_GETFD));
@@ -2135,13 +2816,612 @@ static int lseek_whence_l2m(int w) {
 }
 
 // ===========================================================================================
+// Synthesized /proc + /sys + /dev directory enumeration
+// ===========================================================================================
+//
+// getdents64 on /proc, /sys, /dev (and their synthetic subdirs) must NOT fall through to the host
+// readdir: the rootfs dirs ship empty (or hold placeholder regular files), so `ls /proc`, lscpu,
+// libudev's udev_enumerate_scan_devices, and systemd all enumerate nothing. The leaf files these
+// tools then read are already served one path at a time (proc_open, drmasahi.c, snd_alsa.c,
+// evdev.c, vt.c); what is missing is the DIRECTORY STRUCTURE that lets the tools find them. These
+// tables are that structure, and do_getdents64() serves them instead of the host readdir.
+
+struct synth_ent { const char* name; uint8_t type; };
+
+// Static listings. DT_* numbering is identical on Linux and Darwin, so the dirent.h constants are
+// used verbatim. DT_LNK marks /proc magic links; DT_CHR/DT_BLK the synthetic device nodes; DT_DIR
+// the class/subdir entries (which stat as S_IFDIR via the *_fake_stat handlers).
+
+static const struct synth_ent PROC_PID_ENTS[] = {       // /proc/self and /proc/<pid>
+  { "auxv",    DT_REG },
+  { "cmdline", DT_REG },
+  { "cwd",     DT_LNK },
+  { "environ", DT_REG },
+  { "exe",     DT_LNK },
+  { "fd",      DT_DIR },
+  { "maps",    DT_REG },
+  { "root",    DT_LNK },
+  { "stat",    DT_REG },
+  { "status",  DT_REG },
+};
+
+static const struct synth_ent PROC_SYS_ENTS[] = {       // /proc/sys
+  { "kernel", DT_DIR },
+  { "net",    DT_DIR },
+  { "vm",     DT_DIR },
+};
+
+static const struct synth_ent SYS_CLASS_ENTS[] = {      // /sys/class
+  { "block", DT_DIR },
+  { "drm",   DT_DIR },
+  { "input", DT_DIR },
+  { "sound", DT_DIR },
+};
+
+static const struct synth_ent SYS_CLASS_DRM_ENTS[] = {  // /sys/class/drm
+  { "card0",      DT_DIR },
+  { "renderD128", DT_DIR },
+};
+
+static const struct synth_ent SYS_CLASS_SOUND_ENTS[] = { // /sys/class/sound
+  { "card0", DT_DIR },
+};
+
+static const struct synth_ent SYS_CLASS_INPUT_ENTS[] = { // /sys/class/input
+  { "event0", DT_DIR },
+  { "event1", DT_DIR },
+};
+
+static const struct synth_ent SYS_CLASS_BLOCK_ENTS[] = { // /sys/class/block
+  { "sda", DT_DIR },
+};
+
+static const struct synth_ent SYS_DEVICES_ENTS[] = {    // /sys/devices
+  { "system", DT_DIR },
+};
+
+static const struct synth_ent SYS_DEVICES_SYSTEM_ENTS[] = { // /sys/devices/system
+  { "cpu", DT_DIR },
+};
+
+static const struct synth_ent DEV_ENTS[] = {            // /dev
+  { "console", DT_CHR },
+  { "dri",     DT_DIR },
+  { "fd",      DT_LNK },
+  { "full",    DT_CHR },
+  { "input",   DT_DIR },
+  { "null",    DT_CHR },
+  { "ptmx",    DT_CHR },
+  { "pts",     DT_DIR },
+  { "random",  DT_CHR },
+  { "sda",     DT_BLK },
+  { "shm",     DT_DIR },
+  { "snd",     DT_DIR },
+  { "stdin",   DT_LNK },
+  { "stdout",  DT_LNK },
+  { "stderr",  DT_LNK },
+  { "tty",     DT_CHR },
+  { "tty0",    DT_CHR },
+  { "tty1",    DT_CHR },
+  { "tty2",    DT_CHR },
+  { "tty3",    DT_CHR },
+  { "tty4",    DT_CHR },
+  { "tty5",    DT_CHR },
+  { "tty6",    DT_CHR },
+  { "urandom", DT_CHR },
+  { "zero",    DT_CHR },
+};
+
+static const struct synth_ent DEV_DRI_ENTS[] = {        // /dev/dri
+  { "card0",      DT_CHR },
+  { "renderD128", DT_CHR },
+};
+
+static const struct synth_ent DEV_INPUT_ENTS[] = {      // /dev/input
+  { "event0", DT_CHR },
+  { "event1", DT_CHR },
+};
+
+static const struct synth_ent DEV_SND_ENTS[] = {        // /dev/snd
+  { "controlC0", DT_CHR },
+  { "pcmC0D0c",  DT_CHR },
+  { "pcmC0D0p",  DT_CHR },
+  { "pcmC0D1c",  DT_CHR },
+  { "pcmC0D1p",  DT_CHR },
+};
+
+// Dynamic listings (rebuilt on each lookup into static buffers).
+
+static struct synth_ent g_proc_ents[64];
+static char           g_proc_names[64][32];
+
+static int proc_top_entries(struct synth_ent* out) {
+  int n = 0;
+  #define ADD(nm, ty) do { snprintf(g_proc_names[n], sizeof g_proc_names[n], "%s", nm); \
+                           out[n].name = g_proc_names[n]; out[n].type = (ty); n++; } while (0)
+  ADD("self", DT_LNK);
+  ADD("1", DT_DIR);
+  int self = (int)getpid(), parent = (int)getppid();
+  if (self != 1)    { char b[32]; snprintf(b, sizeof b, "%d", self);    ADD(b, DT_DIR); }
+  if (parent > 1 && parent != self) { char b[32]; snprintf(b, sizeof b, "%d", parent); ADD(b, DT_DIR); }
+  ADD("cpuinfo", DT_REG);
+  ADD("loadavg", DT_REG);
+  ADD("meminfo", DT_REG);
+  ADD("stat",    DT_REG);
+  ADD("sys",     DT_DIR);
+  ADD("uptime",  DT_REG);
+  ADD("version", DT_REG);
+  #undef ADD
+  return n;
+}
+
+static struct synth_ent g_cpu_ents[64];
+static char           g_cpu_names[64][16];
+
+static int sys_cpu_entries(struct synth_ent* out) {
+  long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+  if (ncpu < 1)  ncpu = 1;
+  if (ncpu > 32) ncpu = 32;
+  int n = 0;
+  // The CPU-set leaves come first; lscpu reads these before it ever descends into cpu0..cpuN.
+  static const char* const leaves[] = { "possible", "online", "present", "offline" };
+  for (size_t i = 0; i < sizeof leaves / sizeof leaves[0]; i++) {
+    snprintf(g_cpu_names[n], sizeof g_cpu_names[n], "%s", leaves[i]);
+    out[n].name = g_cpu_names[n];
+    out[n].type = DT_REG;
+    n++;
+  }
+  for (long i = 0; i < ncpu; i++) {
+    snprintf(g_cpu_names[n], sizeof g_cpu_names[n], "cpu%ld", i);
+    out[n].name = g_cpu_names[n];
+    out[n].type = DT_DIR;
+    n++;
+  }
+  return n;
+}
+
+// /proc/self/fd (and /proc/<pid>/fd) — the open-fd table. systemd's fdset_new_fill() enumerates
+// this directory to build its fd set at boot; with no listing it fails ("Failed to allocate fd
+// set") and the boot freezes. The guest shares the host fd table, so the honest listing is the set
+// of host fds currently open (F_GETFD < 0 == closed).
+static struct synth_ent g_fd_ents[512];
+static char           g_fd_names[512][16];
+
+static int proc_self_fd_entries(struct synth_ent* out) {
+  int n = 0;
+  int maxfd = (int)getdtablesize();
+  if (maxfd > 512) maxfd = 512;
+  for (int fd = 0; fd < maxfd && n < 512; fd++) {
+    // Internal descriptors are not guest fds: do not expose them to systemd
+    // CLOEXEC sweeps or activation-fd serialization.
+    if (shim_fd_reserved(fd) || fcntl(fd, F_GETFD) < 0) continue;
+    snprintf(g_fd_names[n], sizeof g_fd_names[n], "%d", fd);
+    out[n].name = g_fd_names[n];
+    out[n].type = DT_LNK;                              // /proc/self/fd/<N> is a magic symlink
+    n++;
+  }
+  return n;
+}
+
+// ===========================================================================================
+// cgroup v2 (/sys/fs/cgroup) synthesis — an in-memory tree, never the rootfs
+// ===========================================================================================
+//
+// systemd-as-PID-1 mounts cgroup2 (the mount() is a no-op success) and then reads the root
+// cgroup's cgroup.controllers / cgroup.procs and creates child cgroups (init.scope, system.slice,
+// user.slice, getty@tty1.service, ...) as it starts units. The rootfs's /sys/fs/cgroup ships
+// EMPTY, so the whole tree is synthesized here:
+//
+//   * the DIRECTORY STRUCTURE is a small in-memory registry — mkdir/rmdir/renameat under
+//     /sys/fs/cgroup mutate it and never touch the rootfs;
+//   * the LEAF FILES (cgroup.controllers, cgroup.procs, memory.max, ...) are served as mem_fd
+//     content one path at a time, exactly like /proc's proc_open().
+
+#define CGROUP_PREFIX "/sys/fs/cgroup"
+#define CGROUP_PREFIX_LEN 14          // strlen("/sys/fs/cgroup")
+
+// Leaf-file basenames a cgroup directory can hold: the generic v2 control files first, then the
+// per-controller interface files systemd touches during boot (cpu, cpuset, memory, pids, io).
+static const char* const CGROUP_FILES[] = {
+  "cgroup.controllers", "cgroup.subtree_control", "cgroup.procs", "cgroup.events",
+  "cgroup.max.depth", "cgroup.max.descendants", "cgroup.stat", "cgroup.freeze",
+  "cgroup.type", "cgroup.threads", "cgroup.kill",
+  "cpu.max", "cpu.weight", "cpu.stat", "cpu.pressure",
+  "cpuset.cpus", "cpuset.mems", "cpuset.cpus.effective", "cpuset.mems.effective",
+  "io.max", "io.stat", "io.pressure",
+  "memory.current", "memory.max", "memory.min", "memory.low", "memory.high",
+  "memory.swap.max", "memory.events", "memory.stat", "memory.pressure",
+  "pids.current", "pids.max", "pids.events",
+};
+#define CGROUP_NFILES ((int)(sizeof(CGROUP_FILES)/sizeof(CGROUP_FILES[0])))
+
+// In-memory registry of child cgroup directories (full guest paths). The root ("/sys/fs/cgroup")
+// always exists and is not stored here.
+#define CGROUP_MAX 128
+static char g_cgroup_dirs[CGROUP_MAX][GPATH_MAX];
+static int  g_cgroup_ndirs;
+
+static int cgroup_is_root(const char* g) { return strcmp(g, CGROUP_PREFIX) == 0; }
+static int cgroup_under(const char* g) {
+  if (!g) return 0;
+  return strncmp(g, CGROUP_PREFIX, CGROUP_PREFIX_LEN) == 0 &&
+         (g[CGROUP_PREFIX_LEN] == '/' || g[CGROUP_PREFIX_LEN] == 0);
+}
+
+// basename of a cgroup leaf file, or NULL if `g` is not one of the synthesized files.
+static const char* cgroup_file_name(const char* g) {
+  if (!cgroup_under(g)) return 0;
+  const char* base = strrchr(g, '/');
+  if (!base) return 0;
+  base++;
+  for (int i = 0; i < CGROUP_NFILES; i++)
+    if (strcmp(base, CGROUP_FILES[i]) == 0) return base;
+  return 0;
+}
+
+// True if `g` names an existing cgroup directory (root or a registered child / descendant).
+static int cgroup_is_dir(const char* g) {
+  if (cgroup_is_root(g)) return 1;
+  for (int i = 0; i < g_cgroup_ndirs; i++) {
+    size_t dl = strlen(g_cgroup_dirs[i]);
+    if (strncmp(g, g_cgroup_dirs[i], dl) == 0 && (g[dl] == '/' || g[dl] == 0)) return 1;
+  }
+  return 0;
+}
+
+// The parent directory of `g`, as a guest path ("" for none). Always returns root for the root.
+static const char* cgroup_parent(const char* g, char* out, size_t cap) {
+  size_t gl = strlen(g);
+  while (gl > 1 && g[gl - 1] == '/') gl--;
+  const char* s = g + gl - 1;
+  while (s > g && *s != '/') s--;
+  if (s == g) { snprintf(out, cap, "/"); return out; }     // "/sys/fs/cgroup/x" -> parent below
+  size_t pl = (size_t)(s - g);
+  if (pl + 1 > cap) return 0;
+  memcpy(out, g, pl); out[pl] = 0;
+  return out;
+}
+
+static int cgroup_register(const char* g) {
+  if (cgroup_is_root(g)) return 0;
+  for (int i = 0; i < g_cgroup_ndirs; i++)
+    if (strcmp(g_cgroup_dirs[i], g) == 0) return 0;         // already there (EEXIST is the caller's)
+  if (g_cgroup_ndirs >= CGROUP_MAX) return -1;
+  snprintf(g_cgroup_dirs[g_cgroup_ndirs], GPATH_MAX, "%s", g);
+  g_cgroup_ndirs++;
+  return 0;
+}
+
+// Remove `g` and every descendant. Returns 1 if anything was removed.
+static int cgroup_unregister(const char* g) {
+  int removed = 0;
+  size_t gl = strlen(g);
+  for (int i = 0; i < g_cgroup_ndirs; ) {
+    if (strncmp(g_cgroup_dirs[i], g, gl) == 0 &&
+        (g_cgroup_dirs[i][gl] == '/' || g_cgroup_dirs[i][gl] == 0)) {
+      for (int j = i; j < g_cgroup_ndirs - 1; j++)
+        snprintf(g_cgroup_dirs[j], GPATH_MAX, "%s", g_cgroup_dirs[j + 1]);
+      g_cgroup_ndirs--;
+      removed = 1;
+    } else {
+      i++;
+    }
+  }
+  return removed;
+}
+
+// content of a cgroup leaf file, or NULL. Written into the caller's `buf` (a static is NOT used
+// because the value is handed straight to mem_fd and must survive across cgroup_open calls).
+const char* cgroup_file_content(const char* g, char* buf, size_t cap) {
+  const char* base = cgroup_file_name(g);
+  if (!base) return 0;
+  if (strcmp(base, "cgroup.controllers") == 0)
+    snprintf(buf, cap, "cpuset cpu io memory hugetlb pids\n");
+  else if (strcmp(base, "cgroup.subtree_control") == 0)
+    snprintf(buf, cap, "%s", "");                          // controllers enabled in children: none yet
+  else if (strcmp(base, "cgroup.procs") == 0)
+    snprintf(buf, cap, "%s", cgroup_is_root(g) ? "1\n" : "");
+  else if (strcmp(base, "cgroup.events") == 0)
+    snprintf(buf, cap, "populated 0\nfrozen 0\n");
+  else if (strcmp(base, "cgroup.max.depth") == 0)
+    snprintf(buf, cap, "max\n");
+  else if (strcmp(base, "cgroup.max.descendants") == 0)
+    snprintf(buf, cap, "max\n");
+  else if (strcmp(base, "cgroup.stat") == 0)
+    snprintf(buf, cap, "nr_descendants 0\nnr_dying_descendants 0\n");
+  else if (strcmp(base, "cgroup.freeze") == 0)
+    snprintf(buf, cap, "0\n");
+  else if (strcmp(base, "cgroup.type") == 0)
+    snprintf(buf, cap, "domain\n");
+  else if (strcmp(base, "cgroup.threads") == 0 || strcmp(base, "cgroup.kill") == 0)
+    snprintf(buf, cap, "%s", "");
+  else if (strcmp(base, "memory.current") == 0 || strcmp(base, "memory.min") == 0 ||
+           strcmp(base, "memory.low") == 0 || strcmp(base, "memory.swap.current") == 0)
+    snprintf(buf, cap, "0\n");
+  else if (strcmp(base, "memory.max") == 0 || strcmp(base, "memory.high") == 0 ||
+           strcmp(base, "memory.swap.max") == 0)
+    snprintf(buf, cap, "max\n");
+  else if (strcmp(base, "memory.events") == 0)
+    snprintf(buf, cap, "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\n");
+  else if (strcmp(base, "memory.stat") == 0)
+    snprintf(buf, cap, "anon 0\nfile 0\nkernel 0\nslab 0\n");
+  else if (strcmp(base, "cpu.max") == 0)
+    snprintf(buf, cap, "max 100000\n");
+  else if (strcmp(base, "cpu.weight") == 0)
+    snprintf(buf, cap, "100\n");
+  else if (strcmp(base, "cpu.stat") == 0)
+    snprintf(buf, cap, "usage_usec 0\nuser_usec 0\nsystem_usec 0\n");
+  else if (strcmp(base, "pids.max") == 0)
+    snprintf(buf, cap, "max\n");
+  else if (strcmp(base, "pids.current") == 0)
+    snprintf(buf, cap, "0\n");
+  else if (strcmp(base, "pids.events") == 0)
+    snprintf(buf, cap, "max 0\n");
+  else if (strcmp(base, "cpuset.cpus") == 0 || strcmp(base, "cpuset.cpus.effective") == 0) {
+    long ncpu = sysconf(_SC_NPROCESSORS_ONLN); if (ncpu < 1) ncpu = 1; if (ncpu > 8) ncpu = 8;
+    snprintf(buf, cap, "0-%ld\n", ncpu - 1);
+  } else if (strcmp(base, "cpuset.mems") == 0 || strcmp(base, "cpuset.mems.effective") == 0)
+    snprintf(buf, cap, "0\n");
+  else if (strcmp(base, "io.max") == 0 || strcmp(base, "io.stat") == 0)
+    snprintf(buf, cap, "%s", "");
+  else if (strstr(base, "pressure") != 0)
+    snprintf(buf, cap, "some avg10=0.00 avg60=0.00 avg300=0.00 total=0\n"
+                       "full avg10=0.00 avg60=0.00 avg300=0.00 total=0\n");
+  else
+    snprintf(buf, cap, "%s", "");
+  return buf;
+}
+
+// 0 = not a cgroup path, 1 = cgroup directory, 2 = cgroup leaf file. Exported for syscalls_ext.c.
+int cgroup_path_kind(const char* g) {
+  if (!cgroup_under(g)) return 0;
+  if (cgroup_file_name(g)) return 2;
+  if (cgroup_is_dir(g)) return 1;
+  return 0;                       // under /sys/fs/cgroup but not (yet) an existing dir or known file
+}
+
+// Per-fd backing store for cgroup directory fds. A child cgroup is not materialized in the rootfs
+// (there is no host dir to open), so openat(O_DIRECTORY) returns a real fd opened on the host's
+// /sys/fs/cgroup (a dirfd that exists) and this table remembers WHICH guest cgroup dir it stands
+// for. do_getdents64 consults it before F_GETPATH.
+#define CGDIR_MAX 64
+static struct { int fd; char path[GPATH_MAX]; } g_cgdir_fd[CGDIR_MAX];
+
+static int cgroup_dir_open(const char* g) {
+  int slot = -1;
+  for (int i = 0; i < CGDIR_MAX; i++) if (g_cgdir_fd[i].fd <= 0) { slot = i; break; }
+  if (slot < 0) { errno = EMFILE; return -1; }
+  char host[PATH_MAX];
+  if (guest_to_host(CGROUP_PREFIX, host, sizeof host) != 0) { errno = ENOENT; return -1; }
+  int fd = open(host, O_RDONLY | O_DIRECTORY);
+  if (fd < 0) return -1;
+  g_cgdir_fd[slot].fd = fd;
+  snprintf(g_cgdir_fd[slot].path, GPATH_MAX, "%s", g);
+  return fd;
+}
+
+// 0 and fills `out` if `fd` is a cgroup dir fd, else nonzero.
+static int cgroup_dir_path(int fd, char* out, size_t cap) {
+  for (int i = 0; i < CGDIR_MAX; i++)
+    if (g_cgdir_fd[i].fd == fd && fd > 0) { snprintf(out, cap, "%s", g_cgdir_fd[i].path); return 0; }
+  return -1;
+}
+
+static void cgroup_dir_drop(int fd) {
+  for (int i = 0; i < CGDIR_MAX; i++)
+    if (g_cgdir_fd[i].fd == fd) { g_cgdir_fd[i].fd = 0; g_cgdir_fd[i].path[0] = 0; return; }
+}
+
+// Serve openat() of a cgroup leaf file (mem_fd content) or child directory (backing fd). Returns
+// 1 and sets *out when handled; 0 means "not a cgroup object, use the normal host open path".
+static int cgroup_open(const char* g, long* out) {
+  if (!cgroup_under(g)) return 0;
+  char buf[2048];
+  const char* c = cgroup_file_content(g, buf, sizeof buf);
+  if (c) {
+    int fd = mem_fd(c, strlen(c));
+    *out = fd < 0 ? herrno() : fd;
+    return 1;
+  }
+  if (cgroup_is_dir(g) && !cgroup_is_root(g)) {     // root opens the real host dir (F_GETPATH works)
+    int fd = cgroup_dir_open(g);
+    *out = fd < 0 ? herrno() : fd;
+    return 1;
+  }
+  return 0;
+}
+
+// getdents64 entry table for a cgroup directory: the static control files + the child cgroups
+// currently registered (direct children only, like a real cgroupfs readdir).
+static struct synth_ent g_cg_ents[160];
+static char           g_cg_names[160][48];
+
+static int cgroup_entries(const char* g, struct synth_ent* out) {
+  int n = 0;
+  #define CGADD(nm, ty) do { snprintf(g_cg_names[n], sizeof g_cg_names[n], "%s", nm); \
+                             out[n].name = g_cg_names[n]; out[n].type = (ty); n++; } while (0)
+  for (int i = 0; i < CGROUP_NFILES; i++) CGADD(CGROUP_FILES[i], DT_REG);
+  size_t gl = strlen(g);
+  for (int i = 0; i < g_cgroup_ndirs; i++) {
+    const char* d = g_cgroup_dirs[i];
+    if (strncmp(d, g, gl) != 0 || d[gl] != '/') continue;
+    const char* child = d + gl + 1;
+    if (strchr(child, '/')) continue;                  // only DIRECT children
+    CGADD(child, DT_DIR);
+  }
+  #undef CGADD
+  return n;
+}
+
+// Return the synthesized entry table for guest path `g`, or NULL if `g` is not a synthetic dir.
+// *count receives the entry count (0 for a synthetic empty dir such as /dev/shm). Dynamic tables
+// are rebuilt into static buffers on each call.
+static const struct synth_ent* synth_entries(const char* g, int* count) {
+  #define RET(tab) do { *count = (int)(sizeof(tab) / sizeof((tab)[0])); return (tab); } while (0)
+  if (!g) return 0;
+  if (strcmp(g, "/proc") == 0) { *count = proc_top_entries(g_proc_ents); return g_proc_ents; }
+  if (strcmp(g, "/proc/self") == 0) RET(PROC_PID_ENTS);
+  if (strncmp(g, "/proc/", 6) == 0) {                    // /proc/<digits>
+    const char* p = g + 6;
+    if (*p >= '0' && *p <= '9') {
+      while (*p >= '0' && *p <= '9') p++;
+      if (*p == 0) RET(PROC_PID_ENTS);
+      if (strcmp(p, "/fd") == 0) { *count = proc_self_fd_entries(g_fd_ents); return g_fd_ents; }
+    }
+  }
+  if (strcmp(g, "/proc/self/fd") == 0) { *count = proc_self_fd_entries(g_fd_ents); return g_fd_ents; }
+  if (strcmp(g, "/proc/sys") == 0) RET(PROC_SYS_ENTS);
+  if (strcmp(g, "/sys/class") == 0) RET(SYS_CLASS_ENTS);
+  if (strcmp(g, "/sys/class/drm") == 0) RET(SYS_CLASS_DRM_ENTS);
+  if (strcmp(g, "/sys/class/sound") == 0) RET(SYS_CLASS_SOUND_ENTS);
+  if (strcmp(g, "/sys/class/input") == 0) RET(SYS_CLASS_INPUT_ENTS);
+  if (strcmp(g, "/sys/class/block") == 0) RET(SYS_CLASS_BLOCK_ENTS);
+  if (strcmp(g, "/sys/devices") == 0) RET(SYS_DEVICES_ENTS);
+  if (strcmp(g, "/sys/devices/system") == 0) RET(SYS_DEVICES_SYSTEM_ENTS);
+  if (strcmp(g, "/sys/devices/system/cpu") == 0) { *count = sys_cpu_entries(g_cpu_ents); return g_cpu_ents; }
+  if (cgroup_is_dir(g)) { *count = cgroup_entries(g, g_cg_ents); return g_cg_ents; }
+  if (strcmp(g, "/dev") == 0) RET(DEV_ENTS);
+  if (strcmp(g, "/dev/dri") == 0) RET(DEV_DRI_ENTS);
+  if (strcmp(g, "/dev/input") == 0) RET(DEV_INPUT_ENTS);
+  if (strcmp(g, "/dev/snd") == 0) RET(DEV_SND_ENTS);
+  if (strcmp(g, "/dev/shm") == 0) { *count = 0; return (const struct synth_ent*)(uintptr_t)1; }
+  return 0;
+  #undef RET
+}
+
+// Per-fd getdents64 cursor for synthetic dirs. The guest is effectively single-threaded, so a
+// small fixed table keyed by fd is enough; close() drops the entry so an fd-number reuse restarts.
+#define SYNCUR_MAX 64
+static struct { int fd; int pos; } g_syncur[SYNCUR_MAX];
+
+static int syncur_slot(int fd) {
+  for (int i = 0; i < SYNCUR_MAX; i++) if (g_syncur[i].fd == fd) return i;
+  for (int i = 0; i < SYNCUR_MAX; i++) if (g_syncur[i].fd <= 0) { g_syncur[i].fd = fd; g_syncur[i].pos = 0; return i; }
+  return -1;
+}
+static void syncur_drop(int fd) {
+  for (int i = 0; i < SYNCUR_MAX; i++) if (g_syncur[i].fd == fd) { g_syncur[i].fd = 0; g_syncur[i].pos = 0; return; }
+}
+
+// Idempotently create a host directory and any missing parents (absolute path). EEXIST counts as
+// success, so it is safe to call for /proc, /sys/class, /dev that install.sh already placed.
+static int mkdir_p(const char* path) {
+  char tmp[PATH_MAX];
+  size_t n = strlen(path);
+  if (n == 0 || n >= sizeof tmp) { errno = ENAMETOOLONG; return -1; }
+  memcpy(tmp, path, n + 1);
+  while (n > 1 && tmp[n - 1] == '/') tmp[--n] = 0;
+  for (char* p = tmp + 1; *p; p++) {
+    if (*p == '/') {
+      *p = 0;
+      if (mkdir(tmp, 0755) && errno != EEXIST) return -1;
+      *p = '/';
+    }
+  }
+  if (mkdir(tmp, 0755) && errno != EEXIST) return -1;
+  return 0;
+}
+
+// Materialize every synthesized directory in the rootfs, once, at startup. Eager (not lazy in each
+// syscall) so statx/newfstatat/openat/faccessat all find the dirs and F_GETPATH maps their fds back
+// to the guest path for do_getdents64. The set is static plus the live pid/cpu counts, all known
+// here. mkdir_p is idempotent; the dirs that install.sh already placed are left untouched.
+static void synth_materialize_all(void) {
+  // /proc ships mode 0555 (a real procfs mount), which would block mkdir of its synthetic subdirs.
+  // Relax the three mountpoints to 0755 first so the tree can be built; the guest only reads these
+  // dirs, so the mode difference is cosmetic.
+  static const char* const mnts[] = { "/proc", "/sys", "/dev" };
+  char host[PATH_MAX], p[GPATH_MAX];
+  for (size_t i = 0; i < sizeof mnts / sizeof mnts[0]; i++)
+    if (guest_to_host(mnts[i], host, sizeof host) == 0) chmod(host, 0755);
+
+  static const char* const dirs[] = {
+    "/proc", "/proc/self", "/proc/1", "/proc/sys", "/proc/self/fd", "/proc/1/fd",
+    "/sys/class", "/sys/class/drm", "/sys/class/sound", "/sys/class/input", "/sys/class/block",
+    "/sys/devices", "/sys/devices/system", "/sys/devices/system/cpu",
+    "/dev", "/dev/dri", "/dev/input", "/dev/snd", "/dev/shm", "/dev/pts",
+  };
+  for (size_t i = 0; i < sizeof dirs / sizeof dirs[0]; i++)
+    if (guest_to_host(dirs[i], host, sizeof host) == 0) mkdir_p(host);
+
+  snprintf(p, sizeof p, "/proc/%d", (int)getpid());
+  if (guest_to_host(p, host, sizeof host) == 0) mkdir_p(host);
+  int pp = (int)getppid();
+  if (pp > 1) {
+    snprintf(p, sizeof p, "/proc/%d", pp);
+    if (guest_to_host(p, host, sizeof host) == 0) mkdir_p(host);
+  }
+
+  long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+  if (ncpu < 1)  ncpu = 1;
+  if (ncpu > 32) ncpu = 32;
+  for (long i = 0; i < ncpu; i++) {
+    snprintf(p, sizeof p, "/sys/devices/system/cpu/cpu%ld", i);
+    if (guest_to_host(p, host, sizeof host) == 0) mkdir_p(host);
+  }
+}
+
+// ===========================================================================================
 // getdents64
 // ===========================================================================================
 
 static long do_getdents64(int fd, unsigned char* buf, size_t cap) {
   if (!buf) return -LX_EFAULT;
+
+  // Synthetic /proc, /sys, /dev directory: serve the entry table, not the (empty) host rootfs dir.
+  // The fd was opened against a real rootfs dir (materialized by synth_materialize_all at startup),
+  // so F_GETPATH maps it back to the guest path; g_syncur tracks how far a repeated getdents64()
+  // has advanced.
+  char dpath[GPATH_MAX];
+  dpath[0] = 0;
+  // A cgroup dir fd is backed by the host's /sys/fs/cgroup dirfd (see cgroup_dir_open), so its
+  // F_GETPATH is wrong; the fd->guest-path table is authoritative first.
+  if (cgroup_dir_path(fd, dpath, sizeof dpath) != 0)
+    (void)guest_path_of_fd(fd, dpath, sizeof dpath);
+  if (dpath[0]) {
+    int count = 0;
+    const struct synth_ent* ents = synth_entries(dpath, &count);
+    if (ents) {
+      int slot = syncur_slot(fd);
+      if (slot < 0) return -LX_EMFILE;
+      size_t used = 0;
+      int pos = g_syncur[slot].pos;
+      while (pos < count) {
+        const char* name = ents[pos].name;
+        size_t nl = strlen(name);
+        size_t rec = (19 + nl + 1 + 7) & ~(size_t)7;   // 8-align, room for the NUL
+        if (used + rec > cap) {
+          if (used == 0) return -LX_EINVAL;            // buffer too small for even one entry
+          break;
+        }
+        unsigned char* p = buf + used;
+        memset(p, 0, rec);
+        uint64_t ino = (uint64_t)(pos + 1);            // synthetic, stable within this dir
+        int64_t  off = (int64_t)(pos + 2);             // cookie of the NEXT entry
+        uint16_t rl  = (uint16_t)rec;
+        uint8_t  ty  = ents[pos].type;
+        memcpy(p + 0, &ino, 8);
+        memcpy(p + 8, &off, 8);
+        memcpy(p + 16, &rl, 2);
+        memcpy(p + 18, &ty, 1);
+        memcpy(p + 19, name, nl + 1);
+        used += rec;
+        pos++;
+      }
+      g_syncur[slot].pos = pos;
+      return (long)used;
+    }
+  }
+
   DIR* d = dirmap_open(fd);
   if (!d) return herrno();
+  // /dev/snd's placeholder files are regular files in the rootfs, but the guest must see them as
+  // char devices: pipewire's ALSA monitor (spa/plugins/alsa/alsa-udev.c get_num_pcm_devices)
+  // filters readdir() on d_type == DT_CHR. Without this the monitor reports "no PCM devices"
+  // and never auto-creates the sink node.
+  char dpath2[PATH_MAX];
+  int is_snddir = (guest_path_of_fd(fd, dpath2, sizeof dpath2) == 0 &&
+                   strcmp(dpath2, "/dev/snd") == 0);
   size_t used = 0;
   for (;;) {
     long pos = telldir(d);
@@ -2164,6 +3444,7 @@ static long do_getdents64(int fd, unsigned char* buf, size_t cap) {
     int64_t  off = (int64_t)telldir(d);        // offset of the NEXT entry, like Linux
     uint16_t rl  = (uint16_t)rec;
     uint8_t  ty  = (uint8_t)e->d_type;         // DT_* values are identical on both systems
+    if (is_snddir && snd_is_node_name(e->d_name)) ty = DT_CHR;
     memcpy(p +  0, &ino, 8);
     memcpy(p +  8, &off, 8);
     memcpy(p + 16, &rl,  2);
@@ -2209,19 +3490,48 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   case 0x2002: return rdgpu_mock_gate(a0, a1, a2, a3, a4, a5);
 #endif
 
+  // ---------- 0x2003 rdmetal VAAPI/VideoToolbox media-engine bridge ----------
+  case RDVA_GUEST_SYSCALL: return rdva_bridge(a0, a1, a2, a3, a4, a5);
+
   // ---------- 32 flock ----------  (LOCK_SH/EX/NB/UN values match)
   case 32: return herr(flock((int)a0, (int)a1));
 
   // ---------- 34 mkdirat ----------
   case 34:
-    if ((r = resolve_f((int)a0, (const char*)a1, RSV_NOFOLLOW, host, sizeof host, 0, 0)) < 0)
+    if ((r = resolve_f((int)a0, (const char*)a1, RSV_NOFOLLOW, host, sizeof host, gabs, sizeof gabs)) < 0)
       return r;
-    return herr(mkdir(host, (mode_t)a2));
+    // cgroup v2 child cgroups live in the in-memory registry, not the rootfs.
+    if (cgroup_under(gabs)) {
+      if (cgroup_file_name(gabs)) return -LX_EEXIST;         // mkdir of a control file
+      if (cgroup_is_dir(gabs)) return -LX_EEXIST;
+      char pbuf[GPATH_MAX];
+      const char* par = cgroup_parent(gabs, pbuf, sizeof pbuf);
+      if (par && !cgroup_is_dir(par)) return -LX_ENOENT;     // no parent cgroup yet
+      if (cgroup_register(gabs) < 0) return -LX_ENOMEM;
+      return 0;
+    }
+    {
+      long mr = herr(mkdir(host, (mode_t)a2));
+      if (getenv("RDEXECDBG") && mr < 0) {
+        FILE* f = fopen("/tmp/rd_exec_dbg.txt", "a");
+        if (f) { fprintf(f, "pid=%d MKDIR-FAIL %s host=%s -> %ld\n", (int)getpid(), gabs, host, mr); fclose(f); }
+      }
+      return mr;
+    }
 
   // ---------- 35 unlinkat ----------
   case 35: {
-    if ((r = resolve_f((int)a0, (const char*)a1, RSV_NOFOLLOW, host, sizeof host, 0, 0)) < 0)
+    if ((r = resolve_f((int)a0, (const char*)a1, RSV_NOFOLLOW, host, sizeof host, gabs, sizeof gabs)) < 0)
       return r;
+    if (cgroup_under(gabs)) {
+      if (a2 & LX_AT_REMOVEDIR) {                            // rmdir of a child cgroup
+        if (cgroup_is_root(gabs)) return -LX_EBUSY;
+        if (!cgroup_is_dir(gabs)) return -LX_ENOENT;
+        cgroup_unregister(gabs);
+        return 0;
+      }
+      return -LX_ENOENT;                                      // control files are never unlinked
+    }
     if (a2 & LX_AT_REMOVEDIR) return herr(rmdir(host));
     if (unlink(host) == 0) return 0;
     // macOS reports EPERM for unlink(dir); Linux reports EISDIR.
@@ -2245,28 +3555,48 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
 
   // ---------- 38 renameat ----------
   case 38: {
-    char host2[PATH_MAX];
-    if ((r = resolve_f((int)a0, (const char*)a1, RSV_NOFOLLOW, host, sizeof host, 0, 0)) < 0)
+    char host2[PATH_MAX], g2[GPATH_MAX];
+    if ((r = resolve_f((int)a0, (const char*)a1, RSV_NOFOLLOW, host, sizeof host, gabs, sizeof gabs)) < 0)
       return r;
-    if ((r = resolve_f((int)a2, (const char*)a3, RSV_NOFOLLOW, host2, sizeof host2, 0, 0)) < 0)
+    if ((r = resolve_f((int)a2, (const char*)a3, RSV_NOFOLLOW, host2, sizeof host2, g2, sizeof g2)) < 0)
       return r;
+    if (cgroup_under(gabs) || cgroup_under(g2)) {
+      if (cgroup_is_root(gabs)) return -LX_EBUSY;             // never rename the root cgroup
+      if (!cgroup_is_dir(gabs)) return -LX_ENOENT;
+      if (cgroup_is_dir(g2)) return -LX_EEXIST;
+      char pbuf[GPATH_MAX];
+      const char* par = cgroup_parent(g2, pbuf, sizeof pbuf);
+      if (par && !cgroup_is_dir(par)) return -LX_ENOENT;
+      size_t gl = strlen(gabs);
+      for (int i = 0; i < g_cgroup_ndirs; i++) {
+        if (strncmp(g_cgroup_dirs[i], gabs, gl) == 0 &&
+            (g_cgroup_dirs[i][gl] == '/' || g_cgroup_dirs[i][gl] == 0)) {
+          char np[GPATH_MAX];
+          snprintf(np, sizeof np, "%s%s", g2, g_cgroup_dirs[i] + gl);
+          snprintf(g_cgroup_dirs[i], GPATH_MAX, "%s", np);
+        }
+      }
+      return 0;
+    }
     return herr(rename(host, host2));
   }
 
   // ---------- 43 statfs / 44 fstatfs ----------
   case 43: {
     struct statfs s;
-    if ((r = resolve(LX_AT_FDCWD, (const char*)a0, host, sizeof host, 0, 0)) < 0) return r;
+    if ((r = resolve(LX_AT_FDCWD, (const char*)a0, host, sizeof host, gabs, sizeof gabs)) < 0) return r;
     if (statfs(host, &s) < 0) return herrno();
     if (!a1) return -LX_EFAULT;
-    statfs_m2l(&s, (struct linux_statfs*)a1);
+    statfs_m2l(&s, (struct linux_statfs*)a1, gabs);
     return 0;
   }
   case 44: {
     struct statfs s;
     if (fstatfs((int)a0, &s) < 0) return herrno();
     if (!a1) return -LX_EFAULT;
-    statfs_m2l(&s, (struct linux_statfs*)a1);
+    char gpath[PATH_MAX]; gpath[0] = 0;
+    if (guest_path_of_fd((int)a0, gpath, sizeof gpath) < 0) gpath[0] = 0;
+    statfs_m2l(&s, (struct linux_statfs*)a1, gpath);
     return 0;
   }
 
@@ -2292,7 +3622,16 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
       return r;
     if (strcmp(gabs, "/proc/self/exe") == 0 || strcmp(gabs, "/proc/self/maps") == 0 ||
         strcmp(gabs, "/proc/self/cmdline") == 0 || strcmp(gabs, "/proc/self/stat") == 0 ||
-        strcmp(gabs, "/proc/cpuinfo") == 0 || strcmp(gabs, "/proc/meminfo") == 0)
+        strcmp(gabs, "/proc/self/status") == 0 || strcmp(gabs, "/proc/self/environ") == 0 ||
+        strcmp(gabs, "/proc/self/auxv") == 0 || strcmp(gabs, "/proc/cpuinfo") == 0 ||
+        strcmp(gabs, "/proc/meminfo") == 0 || strcmp(gabs, "/proc/uptime") == 0 ||
+        strcmp(gabs, "/proc/loadavg") == 0 || strcmp(gabs, "/proc/stat") == 0 ||
+        strcmp(gabs, "/proc/version") == 0 || strcmp(gabs, "/proc/consoles") == 0 ||
+        strcmp(gabs, "/sys/class/tty/console/active") == 0 ||
+        strcmp(gabs, "/sys/devices/system/cpu/possible") == 0 ||
+        strcmp(gabs, "/sys/devices/system/cpu/online") == 0 ||
+        strcmp(gabs, "/sys/devices/system/cpu/present") == 0 ||
+        strcmp(gabs, "/sys/devices/system/cpu/offline") == 0)
       return (a2 & 2) ? -LX_EACCES : 0;         // readable/executable, never writable
     // NB: syscall 48 takes only (dfd, path, mode) — the kernel ignores any 4th register, and
     // so must we: musl's 3-argument wrapper leaves x3 holding junk.  AT_EACCESS is faccessat2.
@@ -2346,6 +3685,10 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     { static int on = -1;
       if (on < 0) on = getenv("RDPATHS") != 0;
       if (on) fprintf(stderr, "[path] tid=%d openat %s\n", guest_tid(), gabs); }
+    if (getenv("RDEXECDBG")) {
+      FILE* pf = fopen("/tmp/rd_exec_dbg.txt", "a");
+      if (pf) { fprintf(pf, "pid=%d OPENAT %s\n", (int)getpid(), gabs); fclose(pf); }
+    }
     FX("%.3f OPENAT tid=%d %s\n", fx_now(), guest_tid(), gabs);
 
     // /dev/tty: hand back the SHIM's own stderr rather than the host's controlling terminal.
@@ -2373,8 +3716,20 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     // ioctl on it is answered by drmasahi.c. Off unless RDDRM=1 — presenting it changes which
     // driver Mesa picks, so it must be an explicit A/B arm.
     if (drm_is_node(gabs)) {
-      int dfd = open("/dev/null", O_RDWR);
+      // A DRM render/master node. The fd is a dup of the shim's event-pipe read end (so
+      // page-flip events arrive via read() and poll correctly), and every ioctl on it is
+      // answered by drmasahi.c.
+      int dfd = drm_open_fd();
       if (dfd >= 0) { drm_register_fd(dfd); return dfd; }
+      return herrno();
+    }
+    // /sys/firmware/qemu_fw_cfg/by_name/opt/io.systemd.credentials — the qemu VM credential store.
+    // systemd loads this absolute-path credential with missing_ok=false, so a real ENOENT aborts
+    // every service spawn at "step CREDENTIALS". Serve it (and any qemu_fw_cfg file) as an empty
+    // file: the shim is not a VM, so there are no VM credentials to offer.
+    if (strncmp(gabs, "/sys/firmware/qemu_fw_cfg/", 27) == 0) {
+      int ufd = mem_fd("", 0);
+      if (ufd >= 0) return ufd;
       return herrno();
     }
     // /sys/dev/char/226:*/uevent — libdrm's drmGetDeviceNameFromFd2() reads DEVNAME= here to
@@ -2393,6 +3748,47 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
       if (!c) return -LX_EIO;
       int ufd = mem_fd(c, strlen(c));
       if (ufd >= 0) return ufd;
+      return herrno();
+    }
+    // /sys/class/drm/{card0,renderD128}/{uevent,dev} — the libudev enumeration surface
+    // aquamarine's scanGPUs() walks to find the DRM card (see drmasahi.c kinds 9/10).
+    if (drm_sysfs_kind(gabs) == 9 || drm_sysfs_kind(gabs) == 10) {
+      const char* c = (drm_sysfs_kind(gabs) == 9) ? drm_sysfs_uevent_for(gabs)
+                                                  : drm_sysfs_dev_for(gabs);
+      int ufd = mem_fd(c, strlen(c));
+      if (ufd >= 0) return ufd;
+      return herrno();
+    }
+    // /sys/class/sound/card0/{uevent,dev} and /run/udev/data/c116:0 — the synthetic ALSA card's
+    // sysfs/udev surface for WirePlumber's ALSA monitor (see snd_alsa.c). Served in-process so no
+    // hand-placed rootfs files are needed.
+    {
+      int sk = snd_sysfs_kind(gabs);
+      if (sk == 1 || sk == 2 || sk == 6 || sk == 7) {
+        const char* c = snd_sysfs_content(gabs);
+        if (!c) return -LX_EIO;
+        int ufd = mem_fd(c, strlen(c));
+        if (ufd >= 0) return ufd;
+        return herrno();
+      }
+    }
+    // /sys/class/input/event0|1/{uevent,dev} and /run/udev/data/c13:64|65 — the synthetic evdev
+    // input surface for libinput's udev backend (see evdev.c). Served in-process.
+    {
+      int ek = evdev_sysfs_kind(gabs);
+      if (ek == 1 || ek == 2 || ek == 4 || ek == 5) {
+        const char* c = evdev_sysfs_content(gabs);
+        if (!c) return -LX_EIO;
+        int ufd = mem_fd(c, strlen(c));
+        if (ufd >= 0) return ufd;
+        return herrno();
+      }
+    }
+    // /dev/input/event0|1 — the synthetic evdev nodes. The fd is a dup of the device's
+    // event-pipe read end, so read()/poll() behave like a real evdev fd.
+    if (evdev_is_node(gabs)) {
+      int efd = evdev_open_node(gabs);
+      if (efd >= 0) return efd;
       return herrno();
     }
     if (cam_is_node(gabs)) {                       // /dev/video0, same shape as the DRM node
@@ -2416,17 +3812,72 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
       if (fd >= 0) return fd;
       // fall through to the normal path if even that fails
     }
+    // /dev/kmsg — systemd (and its executor, hardcoded --log-target kmsg) writes its log here.
+    // A missing node made the write fall back to the journal socket and block forever (no journald
+    // reader yet). A per-boot append file accepts the writes so the real error stays visible.
+    if (strcmp(gabs, "/dev/kmsg") == 0) return kmsg_open(a2);
+    // /dev/tty1..tty6, /dev/console, /dev/tty0 — the Linux virtual consoles. Each is the SLAVE
+    // of a shim-owned pty pair (vt.c); the shim renders the master side to the console surface.
+    if (vt_is_node(gabs)) {
+      int vfd = vt_open_node(gabs);
+      if (vfd >= 0) return vfd;
+      return vfd;                                   // negative Linux errno
+    }
     long vres;
     if (proc_open(gabs, &vres)) return vres;
+    if (cgroup_open(gabs, &vres)) return vres;
+    // /proc/self/fd/<N> — reopen the referenced fd with the guest's flags. systemd fd_reopen()
+    // relies on this to read sysfs files it just chased open as O_PATH. On Linux this is a
+    // symlink to the inode; here we reopen via the fd's own path (falling back to dup for
+    // sockets/pipes that have no path).
+    {
+      int pfd = proc_fd_number(gabs);
+      if (pfd >= 0) {
+        int mf2 = open_flags_l2m((int)a2);
+        char hp[PATH_MAX];
+        if (fcntl(pfd, F_GETPATH, hp) == 0) {
+          int fd2 = open(hp, mf2, (mode_t)a3);
+          if (fd2 >= 0) return fd2;
+          // F_GETPATH names the path the file was OPENED with, which is stale for an unlinked
+          // anon file (mem_fd's mkstemp+unlink). libudev's device_read_uevent_file() chases the
+          // synthetic sysfs uevent open as O_PATH and then fd_reopen()s it through this path;
+          // without the dup fallback that reopen returned ENOENT and the uevent body was never
+          // parsed (SUBSYSTEM survived only via the subsystem symlink, DEVTYPE/MAJOR/MINOR/DEVNAME
+          // were all lost, and the ALSA card was never enumerated). Fall through to dup.
+        }
+        int fd2 = fcntl(pfd, F_DUPFD_CLOEXEC, 0);
+        if (fd2 >= 0) return fd2;
+        return herrno();
+      }
+    }
     int mf = open_flags_l2m((int)a2);
     int fd = open(host, mf, (mode_t)a3);
-    if (fd < 0) return herrno();
+    if (fd < 0) {
+      if (getenv("RDEXECDBG")) {
+        FILE* f = fopen("/tmp/rd_exec_dbg.txt", "a");
+        if (f) { fprintf(f, "pid=%d OPEN-FAIL gabs=%s host=%s flags=%#x mf=%#x errno=%d\n",
+                         (int)getpid(), gabs, host, (unsigned)a2, mf, errno); fclose(f); }
+      }
+      return herrno();
+    }
     if (strcmp(gabs,"/dev/ptmx")==0) pty_register(fd);
     return fd;
   }
 
   // ---------- 57 close ----------
   case 57:
+    // Shim-owned descriptors (the six pty MASTERs, the private stderr dup) are not the guest's to
+    // close. systemd's fd cleanup closes 3..8 at boot (it sees them as leaked init fds); letting
+    // it close the pty masters leaves the console slave with no master, and the NEXT
+    // open(/dev/console) blocks forever waiting for a master that will never come back. Refuse
+    // vacuously (as close_range already does) so the guest believes the close succeeded.
+    if (shim_fd_reserved((int)a0)) return 0;
+    // A pidfd (kqueue) is never actually closed: systemd recycles the pidfd NUMBER across its
+    // pidref lifecycle (open -> close -> reopen the same number for a DIFFERENT pid), so closing it
+    // here would let the fd number be recycled and a later waitid(P_PIDFD, fd) would resolve the
+    // wrong pid. Leak it instead: the raw fd stays unique, so the registry's fd->pid mapping stays
+    // correct. The leak is bounded (~1 per pidfd_open, well under the 512-slot registry).
+    if (pidfd_shim_pid((int)a0) > 0) return 0;
     { int p=pty_index((int)a0); if(p>=0) g_guest_pty[p].master=0; }
     seals_set((int)a0, 0);
     if (getenv("IDLE_PIPE_TRACE") && (int)a0 == 11) {
@@ -2436,15 +3887,31 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
               getpid(), ok == 0, ok == 0 ? (unsigned long long)st.st_ino : 0ULL);
     }
     dirmap_close((int)a0);
+    syncur_drop((int)a0);
+    cgroup_dir_drop((int)a0);
     signalfd_shim_closed((int)a0);
     timerfd_shim_closed((int)a0);
+    pidfd_shim_closed((int)a0);
     snd_forget_fd((int)a0);
+    evdev_forget_fd((int)a0);
     // A synthetic DRM render-node fd MUST leave the registry when it is closed. Without this the
     // fd number stays "owned" forever, so the next regular file to reuse that number (glibc's
     // dlopen of libGLESv2 did exactly this) is misclassified: its mmap() is routed to drm_mmap_bo
     // instead of gmem_mmap and fails EINVAL -> "failed to map segment from shared object".
     drm_forget_fd((int)a0);
-    return herr(close((int)a0));
+    net_fd_closed((int)a0);            // drop from every epoll/kqueue (Linux does this on close)
+    {
+      long cr = herr(close((int)a0));
+      if (getenv("RDEXECDBG") && (int)a0 >= 10 && (int)a0 < 20) {
+        static int ncl;
+        if (ncl < 100) { ncl++;
+          int fl = fcntl((int)a0, F_GETFL);
+          FILE* f = fopen("/tmp/rd_exec_dbg.txt", "a");
+          if (f) { fprintf(f, "pid=%d CLOSE fd=%d ret=%ld recheck_fl=%d\n", (int)getpid(), (int)a0, cr, fl); fclose(f); }
+        }
+      }
+      return cr;
+    }
 
   // ---------- 61 getdents64 ----------
   case 61: return do_getdents64((int)a0, (unsigned char*)a1, (size_t)a2);
@@ -2459,7 +3926,34 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
 
   // ---------- 63 read / 64 write ----------
   case 63: {
+    if (getenv("RDREADDBG")) {
+      int fl = fcntl((int)a0, F_GETFL);
+      struct stat st; int t = fstat((int)a0, &st) == 0 ? st.st_mode : 0;
+      if (t != 0 || 1) {
+        static int nr; if (nr < 800) { nr++;
+          FILE* f = fopen("/tmp/rd_read_dbg.txt", "a");
+          if (f) { fprintf(f, "pid=%d READ fd=%ld n=%ld nonblock=%d type=%s\n",
+                           (int)getpid(), a0, (long)a2, fl>=0 ? (fl&O_NONBLOCK)!=0 : -1,
+                           S_ISFIFO(t)?"pipe":S_ISSOCK(t)?"sock":S_ISREG(t)?"file":"other"); fclose(f); }
+        }
+      }
+    }
     long r = herr((long)read((int)a0, (void*)a1, (size_t)a2));
+    if (getenv("RDREADDBG") && (int)a0 == 69) {
+      FILE* f = fopen("/tmp/rd_read_dbg.txt", "a");
+      if (f) { fprintf(f, "pid=%d READ69 ret=%ld\n", (int)getpid(), r); fclose(f); }
+    }
+    if (getenv("RDDESERDBG") && (int)a0 == 74 && r > 0) {
+      FILE* f = fopen("/tmp/rd_fd74.bin", "a");
+      if (f) { fwrite((void*)a1, 1, (size_t)r, f); fclose(f); }
+    }
+    if (getenv("RDEXECDBG") && (int)a0 >= 60) {
+      static int nread;
+      if (nread < 200) { nread++;
+        FILE* f = fopen("/tmp/rd_exec_dbg.txt", "a");
+        if (f) { fprintf(f, "pid=%d READ fd=%ld n=%ld ret=%ld\n", (int)getpid(), a0, (long)a2, r); fclose(f); }
+      }
+    }
     if (getenv("IDLE_PIPE_TRACE") && (int)a0 < 32) {
       struct stat st;
       if (fstat((int)a0, &st) == 0 && (S_ISFIFO(st.st_mode) || S_ISSOCK(st.st_mode))) {
@@ -2474,6 +3968,18 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   }
   case 64: {
     long r = herr((long)write((int)a0, (const void*)a1, (size_t)a2));
+    if (getenv("RDWRDUMP") && (int)a0 < 32 && r > 0) {
+      FILE* df = fopen("/tmp/rd_wrdump.txt", "a");
+      if (df) {
+        fprintf(df, "write fd=%ld n=%ld: \"", a0, r);
+        for (long j = 0; j < r; j++) {
+          unsigned char c = ((const unsigned char*)a1)[j];
+          fputc(c >= 0x20 && c < 0x7f ? c : '.', df);
+        }
+        fprintf(df, "\"\n");
+        fclose(df);
+      }
+    }
     if (getenv("IDLE_PIPE_TRACE") && (int)a0 < 32) {
       struct stat st;
       if (fstat((int)a0, &st) == 0 && (S_ISFIFO(st.st_mode) || S_ISSOCK(st.st_mode)))
@@ -2497,7 +4003,27 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
 
   // ---------- 65 readv / 66 writev ----------  (struct iovec layout matches)
   case 65: return herr((long)readv((int)a0, (const struct iovec*)a1, (int)a2));
-  case 66: return herr((long)writev((int)a0, (const struct iovec*)a1, (int)a2));
+  case 66: {
+    long r = herr((long)writev((int)a0, (const struct iovec*)a1, (int)a2));
+    if (getenv("RDWRDUMP") && (int)a0 < 32 && r > 0) {
+      FILE* df = fopen("/tmp/rd_wrdump.txt", "a");
+      if (df) {
+        fprintf(df, "writev fd=%ld n=%ld: \"", a0, r);
+        const struct iovec* iv = (const struct iovec*)a1;
+        for (long i = 0; i < (long)a2 && r > 0; i++) {
+          size_t n = iv[i].iov_len < (size_t)r ? iv[i].iov_len : (size_t)r;
+          for (size_t j = 0; j < n; j++) {
+            unsigned char c = ((const unsigned char*)iv[i].iov_base)[j];
+            fputc(c >= 0x20 && c < 0x7f ? c : '.', df);
+          }
+          r -= (long)n;
+        }
+        fprintf(df, "\"\n");
+        fclose(df);
+      }
+    }
+    return r;
+  }
 
   // ---------- 67 pread64 / 68 pwrite64 ----------
   case 67: return herr((long)pread((int)a0, (void*)a1, (size_t)a2, (off_t)a3));
@@ -2522,10 +4048,60 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
       memcpy(buf, g_cwd, n);
       return (long)n;
     }
+    // /proc/self/fd/<N> and /proc/<pid>/fd/<N> — readlink of the fd-reopen magic link returns the
+    // fd's target. systemd's fdset_new_fill() readlink()s every /proc/self/fd entry to learn where
+    // each fd points; returning the real path (or a synthetic anon_inode target for pathless fds)
+    // keeps that enumeration from stalling on ENOENT.
+    {
+      int pfd = proc_fd_number(gabs);
+      if (pfd >= 0) {
+        char hp[PATH_MAX];
+        if (fcntl(pfd, F_GETPATH, hp) == 0) {
+          const char* t = hp;
+          if (g_rootlen && strncmp(hp, g_root, g_rootlen) == 0 && hp[g_rootlen] == '/')
+            t = hp + g_rootlen;                    // report in guest coordinates
+          else if (strncmp(hp, "/private/", 9) == 0)
+            t = hp + 8;                            // macOS /tmp,/var,/etc symlink canonical form
+          size_t n = strlen(t);
+          if (n > sz) n = sz;
+          memcpy(buf, t, n);                       // readlink does NOT NUL-terminate
+          return (long)n;
+        }
+        const char* t = "anon_inode:[shim]";       // socket/pipe/memfd: no path
+        size_t n = strlen(t);
+        if (n > sz) n = sz;
+        memcpy(buf, t, n);
+        return (long)n;
+      }
+    }
     // /sys/dev/char/226:*/device/subsystem — libdrm's drmParseSubsystemType() readlink()s this to
     // learn the bus type; report "/pci" so the GPU is treated as a PCI device.
     if (drm_sysfs_kind(gabs) == 4) {
       const char* t = drm_sysfs_link();
+      size_t n = strlen(t);
+      if (n > sz) n = sz;
+      memcpy(buf, t, n);                          // readlink does NOT NUL-terminate
+      return (long)n;
+    }
+    // /sys/class/drm/<name>/subsystem — libudev's subsystem probe for the synthetic DRM card.
+    if (drm_sysfs_kind(gabs) == 11) {
+      const char* t = drm_sysfs_class_link();
+      size_t n = strlen(t);
+      if (n > sz) n = sz;
+      memcpy(buf, t, n);                          // readlink does NOT NUL-terminate
+      return (long)n;
+    }
+    // /sys/class/sound/card0/subsystem — libudev's subsystem probe for the synthetic sound card.
+    if (snd_sysfs_kind(gabs) == 3) {
+      const char* t = snd_sysfs_link();
+      size_t n = strlen(t);
+      if (n > sz) n = sz;
+      memcpy(buf, t, n);                          // readlink does NOT NUL-terminate
+      return (long)n;
+    }
+    // /sys/class/input/eventN/subsystem — libudev's subsystem probe for the synthetic input device.
+    if (evdev_sysfs_kind(gabs) == 3) {
+      const char* t = evdev_sysfs_link();
       size_t n = strlen(t);
       if (n > sz) n = sz;
       memcpy(buf, t, n);                          // readlink does NOT NUL-terminate
@@ -2550,7 +4126,7 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     const char* p = (const char*)a1;
     if ((a3 & LX_AT_EMPTY_PATH) && (!p || !*p)) {
       if (fstat((int)a0, &st) < 0) return herrno();
-      stat_m2l(&st, out);
+      if (stat_m2l(&st, out)<0) return herrno();
       if (drm_is_node(gabs)) drm_fake_stat(&out->st_mode, &out->st_rdev, gabs);
       if (cam_is_node(gabs)) cam_fake_stat(&out->st_mode, &out->st_rdev);
       return 0;
@@ -2564,6 +4140,18 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
       drm_fake_stat(&out->st_mode, &out->st_rdev, gabs);
       return 0;
     }
+    // Synthetic /sys/class/sound/* and /run/udev/data/c116:0 — the ALSA card's sysfs/udev surface.
+    if (snd_sysfs_kind(gabs)) {
+      memset(out, 0, sizeof *out);
+      snd_fake_stat(&out->st_mode, &out->st_rdev, gabs);
+      return 0;
+    }
+    // Synthetic /sys/class/input/* and /run/udev/data/c13:* — the evdev input surface.
+    if (evdev_sysfs_kind(gabs)) {
+      memset(out, 0, sizeof *out);
+      evdev_fake_stat(&out->st_mode, &out->st_rdev, gabs);
+      return 0;
+    }
     // /dev/dri/card0 and /dev/dri/renderD128 are synthetic char nodes; the host rootfs only has
     // empty placeholder files so libdrm's opendir("/dev/dri") has something to list. Fake their
     // stat() as the 226:0 / 226:128 char device drmGetDevices2() requires.
@@ -2572,22 +4160,69 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
       drm_fake_stat(&out->st_mode, &out->st_rdev, gabs);
       return 0;
     }
+    // /dev/input/eventN — synthetic evdev char nodes (major 13).
+    if (evdev_is_node(gabs)) {
+      memset(out, 0, sizeof *out);
+      evdev_fake_stat(&out->st_mode, &out->st_rdev, gabs);
+      return 0;
+    }
     // /dev/snd/* — synthetic ALSA char nodes (major 116).
     if (snd_is_node(gabs)) {
       memset(out, 0, sizeof *out);
       snd_fake_stat(&out->st_mode, &out->st_rdev, gabs);
       return 0;
     }
+    // /dev/ttyN / /dev/console / /dev/tty0 — virtual consoles (major 4).
+    if (vt_is_node(gabs)) {
+      memset(out, 0, sizeof *out);
+      vt_fake_stat(&out->st_mode, &out->st_rdev, gabs);
+      return 0;
+    }
+    // cgroup v2 files/dirs are synthesized; the host rootfs has none of them, so stat them from
+    // the in-memory tree (dirs as S_IFDIR, control files as S_IFREG with the served size).
+    if (cgroup_under(gabs)) {
+      if (cgroup_file_name(gabs)) {
+        char cbuf[2048];
+        const char* c = cgroup_file_content(gabs, cbuf, sizeof cbuf);
+        memset(out, 0, sizeof *out);
+        out->st_mode = S_IFREG | 0644;
+        out->st_size = c ? (int64_t)strlen(c) : 0;
+        out->st_nlink = 1; out->st_uid = 0; out->st_gid = 0; out->st_blksize = 4096; out->st_ino = 1;
+        return 0;
+      }
+      if (cgroup_is_dir(gabs)) {
+        memset(out, 0, sizeof *out);
+        out->st_mode = S_IFDIR | 0755;
+        out->st_nlink = 2; out->st_uid = 0; out->st_gid = 0; out->st_blksize = 4096; out->st_ino = 2;
+        return 0;
+      }
+      return -LX_ENOENT;
+    }
     int rc = (a3 & LX_AT_SYMLINK_NOFOLLOW) ? lstat(host, &st) : stat(host, &st);
-    if (rc < 0) return herrno();
-    stat_m2l(&st, out);
+    if (rc < 0) {
+      if (getenv("RDEXECDBG")) {
+        FILE* f = fopen("/tmp/rd_exec_dbg.txt", "a");
+        if (f) { fprintf(f, "pid=%d STAT-FAIL dirfd=%ld gabs=%s host=%s errno=%d\n",
+                         (int)getpid(), (long)a0, gabs, host, errno); fclose(f); }
+      }
+      return herrno();
+    }
+    // RDERRDBG=1: name the /dev|/run path that lstat() reports as a non-symlink, which is what
+    // makes udev-node's node_create_symlink() return SYNTHETIC_ERRNO(EEXIST).
+    if (getenv("RDERRDBG") && (S_ISREG(st.st_mode) || S_ISDIR(st.st_mode)) &&
+        ((a3 & LX_AT_SYMLINK_NOFOLLOW)) &&
+        (!strncmp(gabs, "/dev", 4) || !strncmp(gabs, "/run/udev", 9))) {
+      FILE* f = fopen("/tmp/rd_errno_dbg.txt", "a");
+      if (f) { fprintf(f, "pid=%d STAT-NONLNK path=%s mode=%#o\n", (int)getpid(), gabs, st.st_mode); fclose(f); }
+    }
+    if (stat_m2l(&st, out)<0) return herrno();
     return 0;
   }
   case 80: {
     struct stat st;
     if (!a1) return -LX_EFAULT;
     if (fstat((int)a0, &st) < 0) return herrno();
-    stat_m2l(&st, (struct linux_stat*)a1);
+    if (stat_m2l(&st, (struct linux_stat*)a1)<0) return herrno();
     if (drm_owns_fd((int)a0)) {
       struct linux_stat* o = (struct linux_stat*)a1;
       drm_fake_stat(&o->st_mode, &o->st_rdev, "renderD128");
@@ -2595,6 +4230,15 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     if (snd_owns_fd((int)a0)) {
       struct linux_stat* o = (struct linux_stat*)a1;
       snd_fake_stat(&o->st_mode, &o->st_rdev, "controlC0");
+    }
+    if (evdev_owns_fd((int)a0)) {
+      struct linux_stat* o = (struct linux_stat*)a1;
+      int dev = evdev_device_of_fd((int)a0);
+      evdev_fake_stat(&o->st_mode, &o->st_rdev, dev == EVDEV_DEV_PTR ? "event1" : "event0");
+    }
+    if (vt_owns_fd((int)a0)) {
+      struct linux_stat* o = (struct linux_stat*)a1;
+      vt_fake_stat(&o->st_mode, &o->st_rdev, "tty1");
     }
     return 0;
   }
@@ -2606,6 +4250,9 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   case 93:
     FX("%.3f EXIT(thread) tid=%d code=%d vfork=%d child=%d\n",
        fx_now(), guest_tid(), (int)a0, guest_is_vfork_child(), guest_is_child());
+    if (getenv("RDEXECDBG"))
+      fprintf(stderr, "[shim-exit] exit(thread) tid=%d code=%d vfork=%d child=%d pid=%d\n",
+              guest_tid(), (int)a0, guest_is_vfork_child(), guest_is_child(), (int)getpid());
     if (guest_is_vfork_child()) guest_vfork_finish(-1, (int)a0);   // never returns
     if (guest_is_child()) {
       guest_thread_exiting();          // CLONE_CHILD_CLEARTID + futex wake, so join() completes
@@ -2614,8 +4261,22 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     fflush(NULL);
     _exit((int)a0);
   case 94:
-    FX("%.3f EXIT_GROUP tid=%d code=%d\n", fx_now(), guest_tid(), (int)a0);
+    FX("%.3f EXIT_GROUP tid=%d code=%d vfork=%d child=%d\n",
+       fx_now(), guest_tid(), (int)a0, guest_is_vfork_child(), guest_is_child());
     if (fx_on()) fflush(g_fx_f);
+    if (getenv("RDEXECDBG")) {
+      fprintf(stderr, "[shim-exit] exit_group tid=%d code=%d vfork=%d child=%d pid=%d\n",
+              guest_tid(), (int)a0, guest_is_vfork_child(), guest_is_child(), (int)getpid());
+      FILE* xf = fopen("/tmp/rd_exec_dbg.txt", "a");
+      if (xf) { fprintf(xf, "pid=%d EXIT-GROUP code=%d vfork=%d child=%d\n",
+                        (int)getpid(), (int)a0, guest_is_vfork_child(), guest_is_child()); fclose(xf); }
+    }
+    // A CLONE_VM|CLONE_VFORK child (glibc posix_spawn) runs as a THREAD sharing this process.
+    // When its exec fails it calls _exit()/exit_group(127) — but that must end the CHILD's
+    // process (which the blocked vfork parent is waiting on), NOT tear down the whole shim
+    // (systemd PID 1) with it. Route it through guest_vfork_finish so the parent wakes with
+    // the child's status, exactly as the exit() case above already does.
+    if (guest_is_vfork_child()) guest_vfork_finish(-1, (int)a0);   // never returns
     fflush(NULL);
     _exit((int)a0);
 
@@ -2838,8 +4499,14 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   }
 
   // ---------- 172..178 creds ----------
-  case 172: return (long)getpid();
-  case 173: return (long)getppid();
+  // PID-1 emulation: the init process (/sbin/init) must see itself as pid 1 (ppid 0) so systemd
+  // takes the "system manager" path. Every other guest process keeps the real host pid. getppid()
+  // must return the GUEST parent pid (1 for a direct child of init), not the host's: systemd's
+  // safe_fork_full() checks getppid()==original_pid right after forking to detect "the parent died
+  // before PR_SET_PDEATHSIG took", and a host ppid (the shim's own parent) made that check fire,
+  // raise(SIGTERM) in the child and abort the generator sandbox with a bogus -ENOSYS.
+  case 172: return g_is_init ? 1 : (long)getpid();
+  case 173: return g_guest_ppid;
   // The guest is the host's uid (501 here), not 0. A Linux container answers this with a user
   // namespace and a uid map; macOS has none, but the shim IS the guest's kernel, so it can map.
   // RDUID0=1 reports 0/0. OPT-IN, and deliberately so: the tree is owned by the real uid and every

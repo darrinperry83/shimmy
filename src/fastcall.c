@@ -535,10 +535,14 @@ int fastcall_denied_site(const void* code, long nwords, long idx)
         int movz64 = (u & 0xFFE0001Fu) == (0xD2800000u | 8u);   // movz x8, #imm16
         if (movz32 || movz64) {
             unsigned nr = (u >> 5) & 0xFFFFu;
-            return (nr == 220u || nr == 93u || nr == 221u || nr == 260u || nr == 95u);
+            return (nr == 220u || nr == 435u || nr == 93u || nr == 221u || nr == 260u || nr == 95u);
         }
     }
-    return 0;
+    // No provable immediate: the syscall number is dynamic (glibc's generic syscall() loads x8
+    // from a variable, so the same `svc #0` site can be clone(220) or exit(93) at runtime).
+    // Patching it to the fast path made raw_clone()'s clone(220) return -ENOSYS, which froze
+    // systemd at "Failed to fork off sandboxing environment". Deny it: leave it on the trap path.
+    return 1;
 }
 
 static int fc_patch_core(void* code, size_t len, unsigned long va,

@@ -10,6 +10,8 @@
 #define RDGPU_GUEST_SYSCALL 0x2002u
 #define RDGPU_GUEST_DRAW_BATCH 6u
 #define RDGPU_GUEST_DRAW_POLL 7u
+#define RDGPU_GUEST_TEXTURE_UPLOAD 8u
+#define RDGPU_GUEST_TEXTURE_RELEASE 9u
 #define RDGPU_GUEST_FD_EXPORT 11u
 #define RDGPU_GUEST_FD_IMPORT 12u
 #define RDGPU_GUEST_IMAGE_STRIDE 13u
@@ -36,6 +38,15 @@ typedef long (*RDGPUDrawBatchTransport)(void *context,
                                       const RDGPUDrawBatchRequest *request,
                                       const void *snapshot,size_t bytes);
 typedef int (*RDGPUDrawPollTransport)(void *context,uint64_t fence);
+/* Upload a bounded RGBA8 image to a host MTLTexture. Returns a positive opaque
+ * texture handle or a negative errno; *generation is set on success. The pixel
+ * snapshot is host-owned and valid only for the duration of the call. */
+typedef long (*RDGPUTextureUpload)(void *context,uint32_t width,uint32_t height,
+                                   const void *pixels,size_t bytes,
+                                   uint64_t *generation);
+/* Retire a host texture; returns 0 or a negative errno. */
+typedef int (*RDGPUTextureRelease)(void *context,uint64_t handle,
+                                   uint64_t generation);
 typedef int (*RDGPUExportAuthorize)(void *context,pid_t attestedGuestPid,
                                     const uint8_t lease[16],uint64_t generation);
 /* Only a trusted signed host broker can issue the token. It atomically
@@ -66,6 +77,9 @@ typedef struct {
     RDGPUDrawBatchTransport drawTransport;
     RDGPUDrawPollTransport drawPollTransport;
     void *drawContext;
+    RDGPUTextureUpload textureUpload;
+    RDGPUTextureRelease textureRelease;
+    void *textureContext;
     void *context;
     RDGPUExportAuthorize exportAuthorize;
     void *exportContext;
@@ -96,6 +110,10 @@ void rdgpu_guest_set_draw_transport(RDGPUGuestState *state,
                                    RDGPUDrawBatchTransport transport,
                                    RDGPUDrawPollTransport poll,
                                    void *context);
+void rdgpu_guest_set_texture_transport(RDGPUGuestState *state,
+                                       RDGPUTextureUpload upload,
+                                       RDGPUTextureRelease release,
+                                       void *context);
 void rdgpu_guest_set_fd_export_transport(RDGPUGuestState *state,
                                         RDGPUFDExportIssue issue,void *context);
 void rdgpu_guest_set_fd_import_transport(RDGPUGuestState *state,

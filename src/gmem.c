@@ -2711,7 +2711,7 @@ static int fc_stub_patch(unsigned char* stg, size_t rlen, unsigned long addr,
   return done;
 }
 
-static int rewrite_runtime_exec(void* addr, size_t len, int fd, long off) {
+static int rewrite_runtime_exec(void* addr, size_t len, int fd, long off, int x18_pass) {
   if (!addr || !len) return 0;
   // RDNOJITREWRITE=1 disables rewriting of ANONYMOUS regions (guest-generated code) while leaving
   // file-backed ones alone. It exists to answer one question definitively: is rewriting the JIT's
@@ -2766,6 +2766,23 @@ static int rewrite_runtime_exec(void* addr, size_t len, int fd, long off) {
   } else {
     // Anonymous: this IS guest-generated code, and it needs the x18 pass as much as any image.
     // Passing the region's real address enables it (va == 0 is what disables it).
+    //
+    // EXCEPTION — V8's handed-back MAP_JIT code range (the g_hb path in gmem_wx_fault) passes
+    // x18_pass == 0. V8's arm64 register allocator RESERVES x18 (kPlatformRegister), so its
+    // generated code never names x18 — but its code-range pages interleave a SAFEPOINT TABLE and
+    // other metadata DATA with the instructions. That data is scanned by gmem_x18_classify() as
+    // if it were code, and a word of it that happens to decode as an x18 site either gets a veneer
+    // planted over the constant (corrupting V8's metadata -> wild faults) or, when it is UNSUP,
+    // bails the whole page and leaves every site raw. Neither is correct for V8, and there is
+    // nothing to rewrite: with x18 reserved there are no real x18 sites, so the pass can only
+    // corrupt data. Skip it and skip the `brk #0` fast path too — V8 emits `brk #0` as its own
+    // ABORT instruction, not as a syscall site, so patching it to `bl <thunk>` would turn a V8
+    // abort into a garbage syscall. The svc/tpidr/ctr rewrite (gmem_rewrite_exec_insns) stays:
+    // it matches exact encodings only, so it never fires on V8's data and remains correct if a
+    // future V8 build ever emits one of those instructions.
+    if (!x18_pass) {
+      gmem_rewrite_exec_insns((unsigned char*)addr, len);
+    } else {
     // The veneers go in a plain arena mmap'd right NEXT TO this region, because `b` has to
     // reach them: the shared arena is MAP_JIT, MAP_JIT cannot be combined with MAP_FIXED, so
     // the kernel places it where it likes — routinely outside b's +/-128MB. Without this hint
@@ -2786,6 +2803,7 @@ static int rewrite_runtime_exec(void* addr, size_t len, int fd, long off) {
           fprintf(stderr, "[fastcall] runtime-exec(anon) %p: patched=%d skipped(x30-live)=%d\n",
                   addr, pat, sk);
       } }
+    }
   }
   if (mprotect(addr, len, PROT_READ | PROT_EXEC) != 0) {
     fprintf(stderr, "[gmem] runtime-exec: cannot re-protect %p +%#zx as R+X: %s\n",
@@ -3276,7 +3294,7 @@ static long gmem_mmap_locked(unsigned long addr, size_t len, int prot, int flags
     void* p = mmap((void*)addr, rlen, mprot, hbase | MAP_FIXED, fd, (off_t)off);
     if (p == MAP_FAILED) return gm_fail();
     if (want_exec) {
-      rewrite_runtime_exec(p, rlen, fd, off);
+      rewrite_runtime_exec(p, rlen, fd, off, 1);
       img_record((unsigned long)(uintptr_t)p, rlen, fd);
     }
     return (long)(uintptr_t)p;
@@ -3653,13 +3671,109 @@ static int wx_raced(unsigned long addr) {
   return 1;
 }
 
+// --- MAP_JIT reservations the guest writes DIRECTLY (V8's JIT code range) -------------------
+// gmem_reserve() hands PROT_NONE/RX anonymous reservations back as MAP_JIT "rwx" (max_protection
+// reports R+W+X), but the guest thread runs pthread_jit_write_protect_np(1) and cannot write
+// them. V8 reserves its 256 MB code range PROT_NONE and then STOREs machine code straight into it
+// with no mprotect in between, so its first store faults. g_wxr never sees this (it only serves
+// the RWX-in-one-mmap path JSC/PCRE2 use). Hand the page back to the VM as plain RW and remember
+// it in g_hb; the page's own protection then carries the state, exactly like a g_wxr pool page:
+//   plain RW -> the next fetch fault must rewrite+flip R+X (publication)
+//   plain RX -> the next write fault must mprotect R+W (re-emission)
+// Only g_wxmu is taken here: gmem_wx_fault runs on the exception-server thread while the faulting
+// thread is stopped, and that thread may hold gm_lock, so MAP_JIT detection uses mach_vm_region
+// (never g_reg).
+#define GM_HB_MAX 65536
+static uintptr_t g_hb[GM_HB_MAX];
+static int      g_hb_n;
+
+static int g_hb_find(uintptr_t pg) {
+  for (int i = 0; i < g_hb_n; i++) if (g_hb[i] == pg) return i;
+  return -1;
+}
+static void g_hb_add(uintptr_t pg) {
+  if (g_hb_n >= GM_HB_MAX || g_hb_find(pg) >= 0) return;
+  g_hb[g_hb_n++] = pg;
+}
+static void g_hb_remove(uintptr_t pg) {
+  int i = g_hb_find(pg);
+  if (i >= 0) g_hb[i] = g_hb[--g_hb_n];
+}
+
+// Current VM protection bits of a page (0 if unmapped).
+static int page_prot(uintptr_t pg) {
+  mach_vm_address_t ra = (mach_vm_address_t)pg;
+  mach_vm_size_t rs = 0;
+  vm_region_basic_info_data_64_t bi;
+  mach_msg_type_number_t cnt = VM_REGION_BASIC_INFO_COUNT_64;
+  mach_port_t obj = MACH_PORT_NULL;
+  if (mach_vm_region(mach_task_self(), &ra, &rs, VM_REGION_BASIC_INFO_64,
+                     (vm_region_info_t)&bi, &cnt, &obj) != KERN_SUCCESS) return 0;
+  if (ra > pg || pg >= ra + rs) return 0;
+  return (int)bi.protection;
+}
+
+// True if `pg` is MAP_JIT. MAP_JIT is the only mapping that reports WRITE+EXECUTE in
+// max_protection on Apple Silicon (plain RWX mmap is EACCES even with the
+// allow-unsigned-executable-memory entitlement), so the test is unambiguous.
+static int page_is_mapjit(uintptr_t pg) {
+  mach_vm_address_t ra = (mach_vm_address_t)pg;
+  mach_vm_size_t rs = 0;
+  vm_region_basic_info_data_64_t bi;
+  mach_msg_type_number_t cnt = VM_REGION_BASIC_INFO_COUNT_64;
+  mach_port_t obj = MACH_PORT_NULL;
+  if (mach_vm_region(mach_task_self(), &ra, &rs, VM_REGION_BASIC_INFO_64,
+                     (vm_region_info_t)&bi, &cnt, &obj) != KERN_SUCCESS) return 0;
+  if (ra > pg || pg >= ra + rs) return 0;
+  return (bi.max_protection & VM_PROT_WRITE) && (bi.max_protection & VM_PROT_EXECUTE);
+}
+
 // 1 = flipped a page, resume the faulting thread at the same pc. 0 = not ours; report and die.
 int gmem_wx_fault(unsigned long addr, int instruction_fetch) {
   if (wx_off()) return 0;
   uintptr_t pg = PAGE_DOWN(addr);
   int handled = 0, scan = 0;
   pthread_mutex_lock(&g_wxmu);
-  for (int i = 0; i < g_wxr_n; i++) {
+
+  // ---- guest JIT writing a MAP_JIT reservation directly (V8's code range) ----
+  if (!instruction_fetch) {
+    int hb = g_hb_find(pg) >= 0;
+    if (hb) {
+      int p = page_prot(pg);
+      if (p & VM_PROT_EXECUTE) {
+        // Handed back earlier and since published (R+X): V8 is re-emitting code on a page it
+        // already executed. Make it writable again, preserving contents.
+        if (mprotect((void*)pg, (size_t)GPAGE, PROT_READ | PROT_WRITE) != 0) g_wx_decl++;
+        else { g_wx_wflip++; handled = 1; }
+      } else {
+        // Already writable and still faulting on a WRITE: a race, or a genuine bad access.
+        handled = wx_raced(addr); if (!handled) g_wx_decl++;
+      }
+    } else if (page_is_mapjit(pg)) {
+      // First STORE into a MAP_JIT reservation: hand the page back to the VM as plain RW so the
+      // guest thread (write-protect(1)) can write it. Old contents are zeros here.
+      void* p = mmap((void*)pg, (size_t)GPAGE, PROT_READ | PROT_WRITE,
+                     MAP_ANON | MAP_PRIVATE | MAP_FIXED, -1, 0);
+      if (p == MAP_FAILED) g_wx_decl++;
+      else { g_hb_add(pg); g_wx_wflip++; handled = 1; }
+    }
+  } else if (g_hb_find(pg) >= 0) {
+    int p = page_prot(pg);
+    if (!(p & VM_PROT_EXECUTE)) {
+      // Publication point for a handed-back page (V8's PROT_NONE MAP_JIT code range). Rewrite
+      // only the svc/tpidr/ctr sites: V8's register allocator reserves x18, so its code has no
+      // x18 sites to veneer/trap, and its pages interleave safepoint-table DATA that the x18
+      // classifier would otherwise corrupt. No x18 pass, no `brk #0` fast path (that brk is V8's
+      // abort), and no wx_scan_x18() post-check — there is nothing for it to find.
+      if (!rewrite_runtime_exec((void*)pg, (size_t)GPAGE, -1, 0, /*x18_pass=*/0)) g_wx_decl++;
+      else { g_wx_xflip++; handled = 1; }
+    } else {
+      // Already executable and still faulting on FETCH: a race, or a wild jump.
+      handled = wx_raced(addr); if (!handled) g_wx_decl++;
+    }
+  }
+
+  if (!handled) for (int i = 0; i < g_wxr_n; i++) {
     if (addr < g_wxr[i].lo || addr >= g_wxr[i].hi) continue;
     size_t ix = (pg - g_wxr[i].lo) / GPAGE;
     unsigned char* b = &g_wxr[i].x[ix / 8];
@@ -3697,7 +3811,7 @@ int gmem_wx_fault(unsigned long addr, int instruction_fetch) {
       } else if (g_wxr[i].a2_lo && b_in_range(pg, g_wxr[i].a2_next)) {
         g_vn_pre_next = &g_wxr[i].a2_next; g_vn_pre_hi = g_wxr[i].a2_hi;
       }
-      int rw_ok = rewrite_runtime_exec((void*)pg, (size_t)GPAGE, -1, 0);
+      int rw_ok = rewrite_runtime_exec((void*)pg, (size_t)GPAGE, -1, 0, 1);
       g_vn_pre_next = NULL; g_vn_pre_hi = 0;
       g_vn_region_lo = g_vn_region_hi = 0;
       if (!rw_ok) { g_wx_decl++; break; }
@@ -3740,6 +3854,12 @@ void gmem_wx_drop(unsigned long lo, unsigned long hi) {
       g_wxr[i] = g_wxr[--g_wxr_n];
       i--;
     }
+  }
+  // Handed-back JIT pages the unmap fully covers are gone; drop their records so a later fault
+  // on a reused address is not mistaken for ours.
+  for (int i = 0; i < g_hb_n; ) {
+    if (lo <= g_hb[i] && g_hb[i] + GPAGE <= hi) g_hb_remove(g_hb[i]);
+    else i++;
   }
   pthread_mutex_unlock(&g_wxmu);
 }
@@ -3840,7 +3960,7 @@ long gmem_mprotect(unsigned long addr, size_t len, int prot) {
     }
     if (prot & PROT_EXEC) {
       // The guest is publishing code it generated. Rewrite before it can run.
-      rewrite_runtime_exec((void*)p, (size_t)(seg_end - p), -1, 0);
+      rewrite_runtime_exec((void*)p, (size_t)(seg_end - p), -1, 0, 1);
       img_record(p, (unsigned long)(seg_end - p), -1);
     } else if (mprotect((void*)p, (size_t)(seg_end - p), prot) != 0) {
       rc = gm_fail(); break;

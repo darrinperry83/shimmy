@@ -25,6 +25,7 @@
 //     { u32 events; u32 pad; u64 data; } == 16 bytes with data at offset 8.
 #include <stdint.h>
 #include <stddef.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -46,7 +47,9 @@
 #include <netinet/tcp.h>
 #include <poll.h>
 #include "net.h"
+#include "syscalls.h"
 #include "snd_alsa.h"
+#include "pidfd_shim.h"
 
 // ---------------------------------------------------------------------------
 // Linux aarch64 syscall numbers we own
@@ -301,6 +304,42 @@ static inline double now_ms(void) {
 }
 
 // ---------------------------------------------------------------------------
+// RDNOTIFYDBG=1 — trace the sd_notify path (systemd Type=notify units).
+// ---------------------------------------------------------------------------
+// journald's READY=1 was SENT (sendto returned 37) but systemd PID 1 never marks the unit ACTIVE.
+// This pins down which side drops the datagram: the sender's connect/send, the receiver's
+// epoll-wake, or the receiver's recvmsg. Each guest process keeps its own list of "notify" fds
+// (the receive socket it bind()s, or the send socket it connect()s), so epoll/recvmsg can be
+// correlated to the notify socket without guessing its fd number.
+#define NOTIFYFD_MAX 16
+static int g_notifyfd[NOTIFYFD_MAX];
+static int g_notifyfd_n;
+static int g_notifydbg = -1;
+static inline int notifydbg_on(void) {
+  if (g_notifydbg < 0) { const char* s = getenv("RDNOTIFYDBG"); g_notifydbg = (s && *s && *s != '0'); }
+  return g_notifydbg;
+}
+static void notifydbg(const char* fmt, ...) {
+  if (!notifydbg_on()) return;
+  FILE* f = fopen("/tmp/rd_notify_dbg.txt", "a");
+  if (!f) return;
+  va_list ap; va_start(ap, fmt); vfprintf(f, fmt, ap); va_end(ap);
+  fclose(f);
+}
+static int notifyfd_is(int fd) {
+  for (int i = 0; i < g_notifyfd_n; i++) if (g_notifyfd[i] == fd) return 1;
+  return 0;
+}
+static void notifyfd_add(int fd) {
+  if (fd >= 0 && g_notifyfd_n < NOTIFYFD_MAX && !notifyfd_is(fd)) g_notifyfd[g_notifyfd_n++] = fd;
+}
+static void notifyfd_del(int fd) {
+  for (int i = 0; i < g_notifyfd_n; i++) if (g_notifyfd[i] == fd) {
+    g_notifyfd[i] = g_notifyfd[--g_notifyfd_n]; return;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // address family / socket type / protocol
 // ---------------------------------------------------------------------------
 static int af_l2h(int laf) {
@@ -338,6 +377,66 @@ static int apply_fd_flags(int fd, int nonblock, int cloexec) {
 // Guest processes expect EPIPE, not a fatal SIGPIPE delivered to the host process.
 static void kill_sigpipe(int fd) { int on = 1; setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof on); }
 
+// Pending-accept re-queue. macOS kqueue does NOT fire EVFILT_READ for a LISTENING SOCK_STREAM
+// socket when a connection arrives from a DIFFERENT process (it does for datagrams). systemd's
+// socket activation depends on that wake: PID1 watches /run/systemd/userdb/io.systemd.Multiplexer
+// and journald watches /run/systemd/journal/stdout, and neither accept()s because the kevent never
+// arrives. The epoll recovery path proves readiness by non-blocking accept()ing the pending
+// connection(s) and parking them here; the guest's accept() drains this queue first.
+// A query for SO_ACCEPTCONN may consume a real pending connection. Keep that
+// connection until the guest accepts it. Match both descriptor and file identity
+// so a recycled descriptor cannot receive another listener's old connection.
+struct accept_pending {
+  int listener, client;
+  dev_t dev; ino_t ino;
+  struct sockaddr_storage addr; socklen_t addrlen;
+  struct accept_pending* next;
+};
+static pthread_mutex_t g_accept_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct accept_pending* g_accept_pending;
+static void acceptq_push(int listener, int client, const struct sockaddr* addr, socklen_t addrlen) {
+  struct stat st;
+  if (fstat(listener, &st) < 0) { close(client); return; }
+  struct accept_pending* p = calloc(1, sizeof *p);
+  if (!p) { close(client); return; }
+  p->listener = listener; p->client = client;
+  p->dev = st.st_dev; p->ino = st.st_ino;
+  p->addrlen = addrlen < sizeof p->addr ? addrlen : sizeof p->addr;
+  if (addr && p->addrlen) memcpy(&p->addr, addr, p->addrlen);
+  pthread_mutex_lock(&g_accept_lock);
+  p->next = g_accept_pending; g_accept_pending = p;
+  pthread_mutex_unlock(&g_accept_lock);
+}
+static int acceptq_pop(int listener, struct sockaddr* addr, socklen_t* addrlen) {
+  struct stat st;
+  if (fstat(listener, &st) < 0) return -1;
+  pthread_mutex_lock(&g_accept_lock);
+  struct accept_pending** link = &g_accept_pending;
+  while (*link) {
+    struct accept_pending* p = *link;
+    if (p->listener == listener && (p->dev != st.st_dev || p->ino != st.st_ino)) {
+      *link = p->next;
+      close(p->client);
+      free(p);
+      continue;
+    }
+    if (p->listener == listener && p->dev == st.st_dev && p->ino == st.st_ino) {
+      *link = p->next;
+      int client = p->client;
+      if (addr && addrlen) {
+        socklen_t copied = *addrlen < p->addrlen ? *addrlen : p->addrlen;
+        if (copied) memcpy(addr, &p->addr, copied);
+        *addrlen = p->addrlen;
+      }
+      free(p);
+      pthread_mutex_unlock(&g_accept_lock);
+      return client;
+    }
+    link = &p->next;
+  }
+  pthread_mutex_unlock(&g_accept_lock);
+  return -1;
+}
 // ---------------------------------------------------------------------------
 // unix-socket path relocation
 // ---------------------------------------------------------------------------
@@ -380,7 +479,13 @@ static int mkdir_parent(const char* path) {
   char* slash = strrchr(tmp, '/');
   if (!slash || slash == tmp) return 0;
   *slash = 0;
-  return mkdir_p(tmp);
+  int r = mkdir_p(tmp);
+  if (r < 0) return r;
+  // systemd creates some socket directories mode 0600 (e.g. /run/udev), which on macOS cannot be
+  // traversed (no x bit), so bind() of the socket inside returns EACCES ("Failed to create
+  // listening socket: Permission denied"). Make the parent traversable before binding.
+  chmod(tmp, 0755);
+  return 0;
 }
 
 // Named sockets in a private group may not traverse dot components or a
@@ -416,7 +521,11 @@ static int group_guest_path_safe(const char* path) {
 
 // Where hex-encoded abstract names and the eventfd rendezvous sockets live.
 static void private_dir(char* out, size_t osz, const char* leaf) {
-  if (g_prefix_len) snprintf(out, osz, "%s/.rdx-%s", g_prefix, leaf);
+  // Prefer the shared group prefix (systemd boot: init + executors + daemons) so ABSTRACT Unix
+  // sockets such as @systemd-notify resolve to the same host dir in every process. eventfd names
+  // embed getpid() so sharing the dir is still collision-free.
+  if (g_group_prefix_len) snprintf(out, osz, "%s/.rdx-%s", g_group_prefix, leaf);
+  else if (g_prefix_len) snprintf(out, osz, "%s/.rdx-%s", g_prefix, leaf);
   else {
     const char* t = getenv("TMPDIR"); if (!t || !*t) t = "/tmp";
     size_t n = strlen(t);
@@ -476,6 +585,16 @@ static long unix_path_to_host(const char* sp, size_t splen, int for_bind,
     if (mkdir_p(dir) < 0 && errno != EEXIST) return lerr();
     char hex[2 * 128 + 1];
     hex_encode(name, nlen, hex);
+    // A long abstract name (e.g. the credential-load socket "@<16hex>/unit/<unit>/<name>",
+    // ~44 bytes) hex-encodes to ~88 chars, which overflows macOS's 104-byte sun_path and made
+    // bind() return ENAMETOOLONG (systemd-userdbd's exit 1 / ERRNO=36). Hash it to a fixed
+    // 16-hex token instead; bind() and connect() hash identically, so both sides still
+    // rendezvous on the same short path.
+    if (strlen(dir) + 1 + strlen(hex) >= 104) {
+      uint64_t h = 0xcbf29ce484222325ULL;
+      for (size_t i = 0; i < nlen; i++) { h ^= name[i]; h *= 0x100000001b3ULL; }
+      snprintf(hex, sizeof hex, "%016llx", (unsigned long long)h);
+    }
     int n = snprintf(out, osz, "%s/%s", dir, hex);
     if (n < 0 || (size_t)n >= osz) return -L_ENAMETOOLONG;
     *abstract = 1;
@@ -488,6 +607,34 @@ static long unix_path_to_host(const char* sp, size_t splen, int for_bind,
   int n;
   int display_path = !strcmp(path, "/tmp/wayland-0") ||
                      !strcmp(path, "/tmp/.X11-unix/X0");
+  // A connect() to a socket-unit Symlinks alias (e.g. /run/systemd/userdb/io.systemd.DropIn ->
+  // /run/systemd/userdb/io.systemd.Multiplexer) must follow the rootfs symlink and then land in the
+  // group namespace, because the actual listening socket lives there (only the alias symlink is in
+  // the rootfs). Resolve the alias chain first; the resolved guest path then maps normally.
+  if (!for_bind && path[0] == '/' && !display_path) {
+    const char* g_root = syscalls_get_root();
+    size_t g_rootlen = g_root ? strlen(g_root) : 0;
+    if (g_rootlen) {
+      char cur[PATH_MAX];
+      snprintf(cur, sizeof cur, "%s", path);
+      for (int depth = 0; depth < 8; depth++) {
+        char rp[PATH_MAX];
+        if (snprintf(rp, sizeof rp, "%s%s", g_root, cur) >= (int)sizeof rp) break;
+        char tgt[PATH_MAX];
+        ssize_t rl = readlink(rp, tgt, sizeof tgt - 1);
+        if (rl <= 0) break;                    // not a symlink (or error): keep cur
+        tgt[rl] = 0;
+        if (tgt[0] == '/') snprintf(cur, sizeof cur, "%s", tgt);
+        else {                                 // relative target: resolve against cur's dir
+          char dir[PATH_MAX]; snprintf(dir, sizeof dir, "%s", cur);
+          char* slash = strrchr(dir, '/');
+          if (slash) *slash = 0; else snprintf(dir, sizeof dir, ".");
+          snprintf(cur, sizeof cur, "%s/%s", dir, tgt);
+        }
+      }
+      snprintf(path, sizeof path, "%s", cur);
+    }
+  }
   if (g_group_prefix_len && path[0] == '/' && !display_path) {
     if (!group_guest_path_safe(path)) return -L_EACCES;
     n = snprintf(out, osz, "%s%s", g_group_prefix, path);
@@ -546,8 +693,12 @@ static long sa_to_host(const void* lsa, uint32_t llen, int for_bind,
     memcpy(hu->sun_path, host, n + 1);
     hu->sun_len = (unsigned char)(offsetof(struct sockaddr_un, sun_path) + n + 1);
     *hlen = (socklen_t)hu->sun_len;
-    // Linux's abstract namespace has no persistence: a stale host file would wrongly EADDRINUSE.
-    if (for_bind && abstract) unlink(host);
+    // Linux bind() refuses to overwrite an existing socket file, so callers (systemd socket
+    // activation) unlink first. The abstract namespace has no persistence at all, and a pathname
+    // socket whose host file is stale (a previous boot's socket, or a regular file shadowing the
+    // name) would wrongly EADDRINUSE. Unlink before bind for BOTH — the rootfs /run is not a tmpfs
+    // here, so stale journald socket files from an earlier run linger and must be replaced.
+    if (for_bind) unlink(host);
     return 0;
   }
   if (hfam == AF_INET) {
@@ -665,6 +816,16 @@ static const struct optmap k_sol_socket[] = {
   { 19, SO_SNDLOWAT    },  // SO_SNDLOWAT     0x1003
   { 20, SO_RCVTIMEO    },  // SO_RCVTIMEO     0x1006 (timeval is converted)
   { 21, SO_SNDTIMEO    },  // SO_SNDTIMEO     0x1005
+  // SO_ATTACH_FILTER / SO_DETACH_FILTER / SO_ATTACH_BPF install a BPF socket filter so the
+  // caller only receives uevents it subscribed to. The shim's netlink socket never delivers any
+  // uevent (there is no kernel uevent source), so the filter can never run — "accepted, and
+  // nothing arrives" is exactly what the caller would see on a quiet Linux host. NOOP is
+  // faithful here. libudev's sd_device_monitor_filter_update() (reached from
+  // udev_monitor_enable_receiving -> udev_monitor_filter_update) needs this for libinput's
+  // udev seat assignment, which otherwise fails with "failed to bind the udev monitor".
+  { 26, OPT_NOOP       },  // SO_ATTACH_FILTER — BPF, no macOS analog; shim netlink is silent
+  { 27, OPT_NOOP       },  // SO_DETACH_FILTER (= SO_DETACH_BPF)
+  { 50, OPT_NOOP       },  // SO_ATTACH_BPF    — same shape, modern systemd prefers this
   { 29, SO_TIMESTAMP   },  // SO_TIMESTAMP    0x0400
   { 30, SO_ACCEPTCONN  },  // SO_ACCEPTCONN   0x0002
   { 31, OPT_BAD        },  // SO_PEERSEC
@@ -676,11 +837,10 @@ static const struct optmap k_sol_socket[] = {
   // reason and not because it looks harmless. (OPT_NOOP sweep, W2.)
   { 34, OPT_NOOP       },  // SO_PASSSEC     — faithful: no LSM, so Linux sends no label either
   { 35, OPT_NOOP       },  // SO_TIMESTAMPNS — emulated, intercepted in do_setsockopt()
-  // SO_PEERSEC stays OPT_BAD deliberately. Refusing an option is HONEST:
-  // the caller sees ENOPROTOOPT and takes its fallback. That is the whole lesson of this sweep --
-  // the dangerous answer is not "no", it is "yes" followed by nothing.
-  { 38, OPT_BAD        },  // SO_PROTOCOL: answered by do_getsockopt()
-  { 39, OPT_BAD        },  // SO_DOMAIN: answered by do_getsockopt()
+  // SO_PROTOCOL and SO_DOMAIN are answered from the actual socket in do_getsockopt().
+  // SO_PEERSEC remains unsupported because this shim has no Linux LSM label.
+  { 38, OPT_BAD        },  // SO_PROTOCOL (getsockopt special case)
+  { 39, OPT_BAD        },  // SO_DOMAIN   (getsockopt special case)
 };
 // ---- OPT_NOOP audit (W2) -------------------------------------------------------------------
 // The rule this table now follows, after SO_PASSCRED cost a day:
@@ -773,65 +933,6 @@ static int passcred_get(int fd) {
   for (int i = 0; i < g_passcred_n; i++) if (g_passcred[i] == fd) return 1;
   return 0;
 }
-// Darwin's SO_ACCEPTCONN query fails on Unix sockets. A nonblocking accept
-// distinguishes listeners from other sockets, but a pending connection must
-// remain available to the guest's subsequent accept4(). Keep it here rather
-// than silently discarding it during the query.
-struct accept_pending {
-  int listener, client;
-  dev_t dev; ino_t ino;
-  struct sockaddr_storage addr; socklen_t addrlen;
-  struct accept_pending* next;
-};
-static pthread_mutex_t g_accept_lock = PTHREAD_MUTEX_INITIALIZER;
-static struct accept_pending* g_accept_pending;
-static int accept_pending_push(int listener, int client,
-                               const struct sockaddr* addr, socklen_t addrlen) {
-  struct stat st;
-  if (fstat(listener, &st) < 0) return -1;
-  struct accept_pending* p = calloc(1, sizeof *p);
-  if (!p) return -1;
-  p->listener = listener; p->client = client;
-  p->dev = st.st_dev; p->ino = st.st_ino;
-  p->addrlen = addrlen < sizeof p->addr ? addrlen : sizeof p->addr;
-  if (addr && p->addrlen) memcpy(&p->addr, addr, p->addrlen);
-  pthread_mutex_lock(&g_accept_lock);
-  p->next = g_accept_pending; g_accept_pending = p;
-  pthread_mutex_unlock(&g_accept_lock);
-  return 0;
-}
-static int accept_pending_pop(int listener, struct sockaddr* addr, socklen_t* addrlen) {
-  struct stat st;
-  if (fstat(listener, &st) < 0) return -1;
-  pthread_mutex_lock(&g_accept_lock);
-  struct accept_pending** link = &g_accept_pending;
-  while (*link) {
-    struct accept_pending* p = *link;
-    if (p->listener == listener && (p->dev != st.st_dev || p->ino != st.st_ino)) {
-      // The numeric fd was closed and reused. Never hand its old connection
-      // to the new listener.
-      *link = p->next;
-      close(p->client);
-      free(p);
-      continue;
-    }
-    if (p->listener == listener && p->dev == st.st_dev && p->ino == st.st_ino) {
-      *link = p->next;
-      int client = p->client;
-      if (addr && addrlen) {
-        socklen_t copied = *addrlen < p->addrlen ? *addrlen : p->addrlen;
-        if (copied) memcpy(addr, &p->addr, copied);
-        *addrlen = p->addrlen;
-      }
-      free(p);
-      pthread_mutex_unlock(&g_accept_lock);
-      return client;
-    }
-    link = &p->next;
-  }
-  pthread_mutex_unlock(&g_accept_lock);
-  return -1;
-}
 // socketpair() bookkeeping. macOS will not tell us who holds the other end of a socketpair --
 // getsockopt(SOL_LOCAL, LOCAL_PEERPID) is ENOTCONN, MEASURED, for both SOCK_STREAM and SOCK_DGRAM
 // -- and there is no working sender-stamped alternative either: Darwin defines the SCM_CREDS
@@ -886,6 +987,89 @@ static int peer_ucred(int fd, struct lin_ucred* out) {
   if (getenv("RDUID0")) { uid = 0; gid = 0; }
   out->pid = (int32_t)ppid; out->uid = (uint32_t)uid; out->gid = (uint32_t)gid;
   return 1;
+}
+
+// ---------------------------------------------------------------------------
+// Sender credentials for DATAGRAMS (sd_notify / SCM_CREDENTIALS)
+// ---------------------------------------------------------------------------
+// Linux attaches SCM_CREDENTIALS to every datagram received on a SO_PASSCRED socket, carrying the
+// SENDER's {pid,uid,gid}. macOS has no such thing, and LOCAL_PEERPID/LOCAL_PEERCRED only work on
+// CONNECTED sockets — systemd's /run/systemd/notify receive socket is bound but never connected, so
+// getsockopt(LOCAL_PEERPID) fails there and journald's "READY=1" arrived with no credentials, which
+// systemd dropped with "Got notification datagram lacking valid credential information, ignoring."
+//
+// Fix: when a DGRAM socket autobinds on connect() (see sys_connect) it is bound to a pathname that
+// ENCODES its guest pid (".rdx-sender/<pid>.<seq>"). The receiving side reads the datagram's source
+// path and recovers the sender pid from it. The uid/gid are 0 under RDUID0 (the guest's own view).
+extern long syscalls_guest_pid(void);
+#define SENDER_DIR ".rdx-sender"
+static int sender_pid_from_path(const char* hp, int32_t* out) {
+  const char* m = strstr(hp, SENDER_DIR "/");
+  if (!m) return 0;
+  const char* p = m + strlen(SENDER_DIR) + 1;   // past ".rdx-sender/"
+  char* end = NULL;
+  long pid = strtol(p, &end, 10);
+  if (end == p || pid <= 0 || pid > INT32_MAX) return 0;
+  *out = (int32_t)pid;
+  return 1;
+}
+static int sender_ucred(int fd, const char* src_host_path, struct lin_ucred* out) {
+  int32_t pid = 0;
+  if (!(src_host_path && sender_pid_from_path(src_host_path, &pid))) {
+    pid_t ppid = 0; socklen_t pl = sizeof ppid;
+    if (getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID, &ppid, &pl) != 0 || ppid <= 0)
+      ppid = (pid_t)spair_peer_pid(fd);
+    pid = (int32_t)ppid;
+  }
+  notifydbg("pid=%d SENDER_UCRED fd=%d src='%s' -> pid=%d\n",
+            (int)getpid(), fd, src_host_path ? src_host_path : "(null)", (int)pid);
+  if (pid <= 0) return 0;
+  uid_t uid = 0; gid_t gid = 0;
+  if (getpeereid(fd, &uid, &gid) != 0) { uid = getuid(); gid = getgid(); }
+  if (getenv("RDUID0")) { uid = 0; gid = 0; }
+  out->pid = pid; out->uid = (uint32_t)uid; out->gid = (uint32_t)gid;
+  return 1;
+}
+
+// Bind an unbound AF_UNIX DGRAM socket to ".rdx-sender/<guest_pid>.<seq>" so its datagrams carry a
+// source pathname that the receiver can turn into SCM_CREDENTIALS (see sender_ucred). Used on
+// connect() AND on the first sendto/sendmsg — sd_notify() uses sendmsg without connect, so autobinding
+// only on connect left those "READY=1" datagrams with an empty source and no credentials.
+static void autobind_sender(int fd) {
+  struct sockaddr_storage ls; socklen_t llen = sizeof ls;
+  // macOS connect() on a DGRAM socket reports getsockname() as sun_len=16 with an EMPTY sun_path, so
+  // the meaningful test for "not yet bound" is an empty sun_path, not the length.
+  if (getsockname(fd, (struct sockaddr*)&ls, &llen) != 0 || ls.ss_family != AF_UNIX ||
+      ((struct sockaddr_un*)&ls)->sun_path[0] != 0)
+    return;
+  static unsigned seq;
+  char spath[PATH_MAX];
+  const char* base = g_group_prefix_len ? g_group_prefix : "/tmp";
+  if ((size_t)snprintf(spath, sizeof spath, "%s/%s/%ld.%u", base, SENDER_DIR,
+                       syscalls_guest_pid(), ++seq) >= sizeof spath)
+    snprintf(spath, sizeof spath, "/tmp/%s/%d.%u", SENDER_DIR, (int)getpid(), ++seq);
+  char sdir[PATH_MAX];
+  snprintf(sdir, sizeof sdir, "%s/%s", base, SENDER_DIR);
+  mkdir_p(sdir);
+  unlink(spath);   // stale leftover from a previous run must not shadow the bind
+  struct sockaddr_un ab; memset(&ab, 0, sizeof ab);
+  ab.sun_family = AF_UNIX;
+  size_t spn = strlen(spath);
+  if (spn >= sizeof ab.sun_path) return;
+  ab.sun_len = (socklen_t)(offsetof(struct sockaddr_un, sun_path) + spn + 1);
+  memcpy(ab.sun_path, spath, spn + 1);
+  if (bind(fd, (struct sockaddr*)&ab, ab.sun_len) < 0) {
+    notifydbg("pid=%d AUTO_BIND pidpath '%s' FAILED errno=%d\n", (int)getpid(), spath, errno);
+    // Fall back to the old empty-name autobind; the datagram will lack credentials but still be
+    // delivered (macOS assigns an ephemeral name).
+    struct sockaddr_un eab; memset(&eab, 0, sizeof eab);
+    eab.sun_family = AF_UNIX;
+    eab.sun_len = (socklen_t)(offsetof(struct sockaddr_un, sun_path) + 1);
+    eab.sun_path[0] = 0;
+    bind(fd, (struct sockaddr*)&eab, eab.sun_len);
+  } else {
+    notifydbg("pid=%d AUTO_BIND pidpath '%s' ok\n", (int)getpid(), spath);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -973,36 +1157,35 @@ static long do_getsockopt(int fd, int llevel, int lname, void* val, uint32_t* le
     else if (len) *len = 0;
     return 0;
   }
-  if (llevel == L_SOL_SOCKET && lname == 30) {     // SO_ACCEPTCONN
+  if (llevel == L_SOL_SOCKET && lname == 30) {
+    // Darwin defines SO_ACCEPTCONN but getsockopt returns ENOPROTOOPT even for a listening
+    // AF_UNIX socket. Probe accept() nonblocking, preserving a pending connection in the
+    // same accept queue used by the epoll bridge. This is required by sd_is_socket().
     if (!val || !len || *len < sizeof(int)) return -L_EINVAL;
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags < 0) return lerr();
     if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) return lerr();
     struct sockaddr_storage sa; socklen_t salen = sizeof sa;
-    int client = accept(fd, (struct sockaddr*)&sa, &salen);
+    int cfd = accept(fd, (struct sockaddr*)&sa, &salen);
     int saved_errno = errno;
     fcntl(fd, F_SETFL, flags);
-    int listening = 0;
-    if (client >= 0) {
-      if (accept_pending_push(fd, client, (struct sockaddr*)&sa, salen) < 0) {
-        close(client);
-        return -L_ENOMEM;
-      }
-      listening = 1;
+    int answer = 0;
+    if (cfd >= 0) {
+      acceptq_push(fd, cfd, (struct sockaddr*)&sa, salen);
+      answer = 1;
     } else if (saved_errno == EAGAIN || saved_errno == EWOULDBLOCK) {
-      listening = 1;
+      answer = 1;
     } else if (saved_errno != EINVAL && saved_errno != EOPNOTSUPP) {
       errno = saved_errno;
       return lerr();
     }
-    memcpy(val, &listening, sizeof listening);
-    *len = sizeof listening;
+    memcpy(val, &answer, sizeof answer);
+    *len = sizeof answer;
     return 0;
   }
   if (llevel == L_SOL_SOCKET && (lname == 38 || lname == 39)) {
-    // Darwin does not offer Linux SO_PROTOCOL/SO_DOMAIN. Derive both from
-    // the actual host socket; systemd's sd_is_socket() checks them on inherited
-    // activation descriptors before accepting the socket.
+    // Inherited activation sockets must answer these Linux queries. In particular,
+    // sd_is_socket() and dbus-broker reject ENOPROTOOPT for SO_PROTOCOL.
     if (!val || !len || *len < sizeof(int)) return -L_EINVAL;
     struct sockaddr_storage sa;
     socklen_t sa_len = sizeof sa;
@@ -1245,6 +1428,12 @@ static void ep_del(struct epinst* e, int fd) {
 #define EP_WANT_WRITE (L_EPOLLOUT | L_EPOLLWRNORM | L_EPOLLWRBAND)
 
 static long ep_apply(int kq, int fd, uint32_t events) {
+  if (notifyfd_is(fd))
+    notifydbg("pid=%d EP_APPLY kq=%d fd=%d events=%#x\n", (int)getpid(), kq, fd, events);
+  if (getenv("RDNETSOCK")) {
+    FILE* f = fopen("/tmp/rd_netsock_dbg.txt", "a");
+    if (f) { fprintf(f, "pid=%d EP_APPLY kq=%d fd=%d events=%#x\n", (int)getpid(), kq, fd, events); fclose(f); }
+  }
   struct kevent chg[2];
   int nadd = 0;
   unsigned short base = EV_ADD;
@@ -1262,6 +1451,8 @@ static long ep_apply(int kq, int fd, uint32_t events) {
   return 0;
 }
 static void ep_unapply(int kq, int fd) {
+  if (notifyfd_is(fd))
+    notifydbg("pid=%d EP_UNAPPLY kq=%d fd=%d\n", (int)getpid(), kq, fd);
   struct kevent d[2];
   EV_SET(&d[0], (uintptr_t)fd, EVFILT_READ, EV_DELETE, 0, 0, NULL);
   EV_SET(&d[1], (uintptr_t)fd, EVFILT_WRITE, EV_DELETE, 0, 0, NULL);
@@ -1269,9 +1460,34 @@ static void ep_unapply(int kq, int fd) {
   kevent(kq, &d[1], 1, NULL, 0, NULL);
 }
 
+// close(2) of a watched fd must remove it from every epoll (and every kqueue), exactly like Linux:
+// Linux implicitly drops a descriptor from all epoll sets on close. kqueue keys on the fd NUMBER,
+// so a stale registration would fire for a LATER unrelated file that reuses the number. That is
+// the executor busy-loop: journald's systemd-executor closed the journal stream socket (fd 11) but
+// the kqueue kept it registered, the number was reused, and epoll_pwait returned it "readable"
+// forever — fcntl(11)+close(11) in a 100%-CPU loop until the 90s start timeout.
+void net_fd_closed(int fd) {
+  if (fd < 0) return;
+  if (notifyfd_is(fd)) notifydbg("pid=%d CLOSE notify fd=%d\n", (int)getpid(), fd);
+  notifyfd_del(fd);
+  pthread_mutex_lock(&g_lock);
+  for (struct epinst* e = g_ep; e; e = e->next) {
+    struct epent* p = ep_lookup(e, fd);
+    if (p) {
+      ep_unapply(e->kq, fd);
+      ep_del(e, fd);
+    }
+  }
+  pthread_mutex_unlock(&g_lock);
+}
+
 static long sys_epoll_create1(int flags) {
   int kq = kqueue();
   if (kq < 0) return lerr();
+  if (notifydbg_on()) {
+    static int kqseq;
+    notifydbg("pid=%d EPOLL_CREATE kq=%d seq=%d\n", (int)getpid(), kq, ++kqseq);
+  }
   apply_fd_flags(kq, 0, (flags & L_EPOLL_CLOEXEC) != 0);
   pthread_mutex_lock(&g_lock);
   ep_drop(kq);
@@ -1316,6 +1532,9 @@ static long sys_epoll_ctl(int epfd, int op, int fd, struct lin_epoll_event* uev)
     default:
       r = -L_EINVAL;
   }
+  if (notifyfd_is(fd))
+    notifydbg("pid=%d EPOLL_CTL op=%d epfd=%d fd=%d events=%#x r=%ld\n",
+              (int)getpid(), op, epfd, fd, ev.events, r);
   pthread_mutex_unlock(&g_lock);
   return r;
 }
@@ -1336,24 +1555,124 @@ static long sys_epoll_pwait(int epfd, struct lin_epoll_event* uev, int maxevents
   if (!idents) { free(kv); return -L_ENOMEM; }
 
   double t0 = polllog_on() ? now_ms() : 0;
+  if (notifydbg_on()) {
+    static int nepd;
+    if (nepd < 40) { nepd++; notifydbg("pid=%d EPOLL_WAIT epfd=%d maxev=%d\n", (int)getpid(), epfd, maxevents); }
+  }
   int n = kevent(epfd, NULL, 0, kv, maxevents, tsp);
-  if (polllog_on()) fprintf(stderr, "[polllog] t=%.2f epoll_pwait req=%dms act=%.2fms ret=%d\n",
-                            now_ms(), timeout_ms, now_ms() - t0, n);
+  if (notifydbg_on()) {
+    static int nret;
+    if (nret < 30 && n > 0) {
+      char fds[256]; size_t fl = 0; fds[0] = 0;
+      for (int i = 0; i < n && fl + 16 < sizeof fds; i++)
+        fl += (size_t)snprintf(fds + fl, sizeof fds - fl, "%s%d", i ? "," : "", (int)kv[i].ident);
+      nret++;
+      notifydbg("pid=%d EPOLL_RET epfd=%d n=%d fds=[%s]\n", (int)getpid(), epfd, n, fds);
+    }
+  }
+  if (polllog_on()) {
+    char fds[512]; size_t fl = 0; fds[0] = 0;
+    for (int i = 0; i < n && fl + 16 < sizeof fds; i++) {
+      fl += (size_t)snprintf(fds + fl, sizeof fds - fl, "%s%d:%d:%#x:%ld",
+                             i ? "," : "", (int)kv[i].ident, kv[i].filter,
+                             (unsigned)kv[i].flags, (long)kv[i].data);
+    }
+    fprintf(stderr, "[polllog] t=%.2f epoll_pwait req=%dms act=%.2fms ret=%d fds=[%s]\n",
+            now_ms(), timeout_ms, now_ms() - t0, n, fds);
+  }
   if (n < 0) { long e = lerr(); free(kv); free(idents); return e; }
+
+  // macOS kqueue sometimes fails to report a datagram on a bound AF_UNIX socket that received from a
+  // DIFFERENT process — systemd's /run/systemd/notify is exactly that: journald's "READY=1" sat in the
+  // socket's receive queue but EVFILT_READ never fired, so systemd timed journald out after 90s. The
+  // same quirk hits pidfds (inner kqueue with a pending NOTE_EXIT). For every registered EPOLLIN fd
+  // that has data/events NOW but is absent from this kevent result, re-apply its registration and hand
+  // the event back, so the guest reads it this round and kqueue reports it correctly from then on.
+  if (n >= 0) {
+    pthread_mutex_lock(&g_lock);
+    struct epinst* e = ep_find(epfd);
+    if (e) {
+      for (int i = 0; i < e->n && n < maxevents; i++) {
+        int rfd = e->v[i].fd;
+        if (!(e->v[i].events & L_EPOLLIN)) continue;
+        int in_res = 0;
+        for (int j = 0; j < n; j++) if ((int)kv[j].ident == rfd) { in_res = 1; break; }
+        if (in_res) continue;
+        struct stat st;
+        int has_data = 0;
+        if (fstat(rfd, &st) == 0 && S_ISSOCK(st.st_mode)) {
+          // LISTENING socket: the kqueue does not fire EVFILT_READ for a STREAM listen socket with
+          // a pending connection, so prove readiness by non-blocking accept() and re-queue the
+          // connection for the guest's accept(). macOS has no working SO_ACCEPTCONN getsockopt, so
+          // detect "listening" from accept()'s errno instead: EAGAIN == listening/empty,
+          // EINVAL/EOPNOTSUPP/ENOTSOCK == not a listening socket.
+          int fl = fcntl(rfd, F_GETFL, 0);
+          fcntl(rfd, F_SETFL, fl | O_NONBLOCK);
+          struct sockaddr_storage sa; socklen_t salen = sizeof sa;
+          int cfd = accept(rfd, (struct sockaddr*)&sa, &salen);
+          if (cfd >= 0) {
+            acceptq_push(rfd, cfd, (struct sockaddr*)&sa, salen);
+            has_data = 1;
+            int c2;
+            while ((c2 = accept(rfd, (struct sockaddr*)&sa, &salen)) >= 0)
+              acceptq_push(rfd, c2, (struct sockaddr*)&sa, salen);
+          } else if (errno == EINVAL || errno == EOPNOTSUPP || errno == ENOTSOCK) {
+            char tmp;
+            has_data = recv(rfd, &tmp, 1, MSG_PEEK | MSG_DONTWAIT) > 0;
+          }
+          fcntl(rfd, F_SETFL, fl);
+        } else if (pidfd_shim_pid(rfd) > 0) {
+          // pidfd: a kqueue watching a child pid; "readable" once the child exits.
+          struct kevent kev;
+          struct timespec zts = {0, 0};
+          has_data = kevent(rfd, NULL, 0, &kev, 1, &zts) > 0;
+        }
+        if (has_data) {
+          notifydbg("pid=%d EPOLL_RECOVER fd=%d (pending, absent from kevent result)\n",
+                    (int)getpid(), rfd);
+          ep_apply(epfd, rfd, e->v[i].events);   // re-register so the kqueue reports it going forward
+          EV_SET(&kv[n], (uintptr_t)rfd, EVFILT_READ, 0, 0, 1, NULL);
+          n++;
+        }
+      }
+    }
+    pthread_mutex_unlock(&g_lock);
+  }
 
   int out = 0;
   for (int i = 0; i < n; i++) {
     int fd = (int)kv[i].ident;
+    if (getenv("RDNETSOCK") && fd >= 32 && fd <= 60) {
+      FILE* f = fopen("/tmp/rd_netsock_dbg.txt", "a");
+      if (f) { fprintf(f, "pid=%d KEVENT fd=%d filter=%d flags=%#x data=%lld\n",
+                       (int)getpid(), fd, kv[i].filter, kv[i].flags, (long long)kv[i].data); fclose(f); }
+    }
+    if (notifyfd_is(fd))
+      notifydbg("pid=%d EPOLL notify fd=%d filter=%d flags=%#x data=%lld\n",
+                (int)getpid(), fd, kv[i].filter, kv[i].flags, (long long)kv[i].data);
+    if (getenv("RDEPOLLDBG")) {
+      FILE* ef = fopen("/tmp/rd_epoll_dbg.txt", "a");
+      if (ef) { fprintf(ef, "epoll fd=%d filter=%d flags=%#x fflags=%#x data=%lld\n",
+                        fd, kv[i].filter, kv[i].flags, kv[i].fflags, (long long)kv[i].data); fclose(ef); }
+    }
     uint32_t bits = 0;
     if (kv[i].filter == EVFILT_READ) {
-      bits |= L_EPOLLIN | L_EPOLLRDNORM;
+      // EPOLLIN only, NOT EPOLLIN|EPOLLRDNORM. Linux signalfd/eventfd/timerfd report EPOLLIN
+      // (0x1) alone, and systemd's manager_dispatch_signal_fd() checks `revents != EPOLLIN`
+      // exactly; the extra EPOLLRDNORM (0x40) made every signal wake log "Got unexpected events
+      // from signal file descriptor" and spin the event loop.
+      bits |= L_EPOLLIN;
       if (kv[i].flags & EV_EOF) bits |= L_EPOLLRDHUP;
     } else if (kv[i].filter == EVFILT_WRITE) {
-      bits |= L_EPOLLOUT | L_EPOLLWRNORM;
+      bits |= L_EPOLLOUT;
       if (kv[i].flags & EV_EOF) bits |= L_EPOLLHUP;
     }
     if ((kv[i].flags & EV_ERROR) && kv[i].data) bits |= L_EPOLLERR;
     if ((kv[i].flags & EV_EOF) && kv[i].fflags) bits |= L_EPOLLERR;
+    if (getenv("RDEPOLLDBG")) {
+      FILE* ef = fopen("/tmp/rd_epoll_dbg.txt", "a");
+      if (ef) { fprintf(ef, "  -> bits=%#x\n", bits); fclose(ef); }
+    }
 
     int slot = -1;                              // coalesce both filters of one fd into one event
     for (int j = 0; j < out; j++) if (idents[j] == fd) { slot = j; break; }
@@ -1369,6 +1688,19 @@ static long sys_epoll_pwait(int epfd, struct lin_epoll_event* uev, int maxevents
       struct epent* p = e ? ep_lookup(e, fd) : NULL;
       if (p) uev[slot].data = p->data;
       pthread_mutex_unlock(&g_lock);
+    }
+    // Linux only reports events the caller REGISTERED (the interest mask), plus EPOLLERR/EPOLLHUP
+    // which are always delivered. Returning e.g. EPOLLRDHUP (0x2000) for a read-EOF on an fd the
+    // guest registered as plain EPOLLIN made systemd-journald log "Got invalid event from epoll for
+    // stdout stream: 2001" and spin. Mask with the stored interest mask, keep err/hup.
+    {
+      uint32_t reg = 0;
+      pthread_mutex_lock(&g_lock);
+      struct epinst* e = ep_find(epfd);
+      struct epent* p = e ? ep_lookup(e, fd) : NULL;
+      if (p) reg = p->events;
+      pthread_mutex_unlock(&g_lock);
+      bits = (bits & reg) | (bits & (L_EPOLLERR | L_EPOLLHUP));
     }
     uev[slot].events |= bits;
   }
@@ -1406,6 +1738,32 @@ static short pollev_h2l(short hr, short lwant) {
   return l;
 }
 
+static void pfdbg_fd(int fd, short levents) {
+  if (!getenv("RDPOLLFDDBG")) return;
+  FILE* f = fopen("/tmp/rd_pollfd_dbg.txt", "a");
+  if (!f) return;
+  struct stat st;
+  char type[16] = "?";
+  if (fstat(fd, &st) == 0) {
+    if (S_ISFIFO(st.st_mode)) snprintf(type, sizeof type, "FIFO");
+    else if (S_ISSOCK(st.st_mode)) snprintf(type, sizeof type, "SOCKET");
+    else if (S_ISREG(st.st_mode)) snprintf(type, sizeof type, "REG");
+    else if (S_ISCHR(st.st_mode)) snprintf(type, sizeof type, "CHR");
+    else snprintf(type, sizeof type, "other");
+    fprintf(f, "pid=%d fd=%d type=%s ino=%llu events=%#hx ", (int)getpid(), fd, type,
+            (unsigned long long)st.st_ino, levents);
+  } else {
+    fprintf(f, "pid=%d fd=%d fstat-err=%d events=%#hx ", (int)getpid(), fd, errno, levents);
+  }
+  char path[4096];
+  if (fcntl(fd, F_GETPATH, path) == 0) fprintf(f, "path=%s ", path);
+  struct sockaddr_un peer; socklen_t plen = sizeof peer;
+  if (getpeername(fd, (struct sockaddr*)&peer, &plen) == 0 && peer.sun_family == AF_UNIX)
+    fprintf(f, "peer=%s ", peer.sun_path);
+  fprintf(f, "\n");
+  fclose(f);
+}
+
 static int poll_has_shim_eventfd(const struct pollfd* fds, unsigned long count) {
   for (unsigned long i = 0; i < count; i++) {
     struct sockaddr_un peer = {0};
@@ -1425,6 +1783,10 @@ static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_
     if (ms > INT_MAX) ms = INT_MAX;
     timeout = (int)ms;
   }
+  if (getenv("RDEXECDBG")) {
+    FILE* pf = fopen("/tmp/rd_exec_dbg.txt", "a");
+    if (pf) { fprintf(pf, "pid=%d PPOLL nfds=%lu timeout=%d\n", (int)getpid(), nfds, timeout); fclose(pf); }
+  }
   if (nfds == 0) {
     double t0 = polllog_on() ? now_ms() : 0;
     long rr = lret(poll(NULL, 0, timeout));
@@ -1439,6 +1801,7 @@ static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_
     hf[i].fd = ufds[i].fd;
     hf[i].events = pollev_l2h(ufds[i].events);
     hf[i].revents = 0;
+    pfdbg_fd(ufds[i].fd, ufds[i].events);
   }
   // The synthetic ALSA PCM fd is not a real file host poll() can block on: it is a /dev/null
   // fd whose "writable" state is the ring-buffer fill level, advanced by the CoreAudio render
@@ -1620,9 +1983,9 @@ static long sys_socket(int ldomain, int ltype, int protocol) {
   // difference between KWin's GpuManager booting (udev_monitor_new_from_netlink returns non-NULL)
   // and a null deref. See the GpuManager crash note in the KDE integration docs.
   if (ldomain == L_AF_NETLINK) {
-    // There is no audit backend. Let libaudit disable optional auditing rather
-    // than handing it a fake socket whose first send inevitably fails.
-    if (protocol == 9) return -L_EAFNOSUPPORT; // NETLINK_AUDIT
+    // NETLINK_AUDIT (9) has no backend here. Fail at socket creation so libaudit can
+    // disable optional audit, instead of promising a socket and failing its sendto().
+    if (protocol == 9) return -L_EAFNOSUPPORT;
     int nonblock = (ltype & L_SOCK_NONBLOCK) != 0, cloexec = (ltype & L_SOCK_CLOEXEC) != 0;
     // A host AF_UNIX datagram socket: never connected, never written to, so poll()/epoll never
     // reports it readable and recv() returns EAGAIN — exactly a netlink socket with no events.
@@ -1636,9 +1999,16 @@ static long sys_socket(int ldomain, int ltype, int protocol) {
   if (hdom < 0) return -L_EAFNOSUPPORT;
   int nonblock = (ltype & L_SOCK_NONBLOCK) != 0, cloexec = (ltype & L_SOCK_CLOEXEC) != 0;
   int htype = ltype & ~(L_SOCK_NONBLOCK | L_SOCK_CLOEXEC);
-  // See sys_socketpair() below for why SOCK_SEQPACKET becomes SOCK_DGRAM on AF_UNIX.
-  int fd = socket(hdom, (hdom == AF_UNIX && htype == SOCK_SEQPACKET) ? SOCK_DGRAM : htype,
+  // A single SOCK_SEQPACKET AF_UNIX socket is almost always either a LISTENING socket (systemd's
+  // .socket units — coredump.socket, udevd-control.socket) or a CONNECTING client of one. Both
+  // need connection-oriented semantics, so map to SOCK_STREAM: Darwin has no SEQPACKET, and a
+  // SOCK_DGRAM substitute makes listen() fail EOPNOTSUPP ("Failed to create listening socket").
+  // (socketpair() below keeps its own SOCK_DGRAM fallback, where message boundaries are the point.)
+  int fd = socket(hdom, (hdom == AF_UNIX && htype == SOCK_SEQPACKET) ? SOCK_STREAM : htype,
                   protocol);
+  if (getenv("RDNETSOCK") && hdom == AF_UNIX)
+    fprintf(stderr, "[netsock] socket dom=%d type=%d proto=%d -> fd=%d errno=%d\n",
+            ldomain, htype, protocol, fd, fd < 0 ? errno : 0);
   if (fd < 0) return lerr();
   kill_sigpipe(fd);
   apply_fd_flags(fd, nonblock, cloexec);
@@ -1730,8 +2100,29 @@ static long sys_bind(int fd, const void* uaddr, uint32_t len) {
     }
   }
   if (r < 0) return r;
+  // journald/udevd bind their Unix sockets at /run/systemd/journal/{stdout,dev-log,socket} (and
+  // /run/udev/control). A stale 0-byte REGULAR file left in the rootfs from a previous boot shadows
+  // the bind (EADDRINUSE); remove it so the socket node can be created. Never touch a real socket.
+  {
+    struct sockaddr_un* su = (struct sockaddr_un*)&hs;
+    if (su->sun_family == AF_UNIX && su->sun_path[0]) {
+      struct stat st;
+      if (lstat(su->sun_path, &st) == 0 && S_ISREG(st.st_mode)) unlink(su->sun_path);
+    }
+  }
   long out = lret(bind(fd, (struct sockaddr*)&hs, hlen));
   if (getenv("RDNETSOCK") && out < 0) fprintf(stderr, "[netsock] bind result=%ld errno=%d\n", out, errno);
+  if (out >= 0 && uaddr && len >= 2) {
+    uint16_t fam; memcpy(&fam, uaddr, 2);
+    if (fam == L_AF_UNIX) {
+      const struct lin_sockaddr_un* lu = (const struct lin_sockaddr_un*)uaddr;
+      if (lu->sun_path[0] && strstr(lu->sun_path, "notify")) {
+        notifyfd_add(fd);
+        notifydbg("pid=%d BIND notify fd=%d guest=%s host=%s res=%ld\n",
+                  (int)getpid(), fd, lu->sun_path, ((struct sockaddr_un*)&hs)->sun_path, out);
+      }
+    }
+  }
   return out;
 }
 static long sys_connect(int fd, const void* uaddr, uint32_t len) {
@@ -1748,14 +2139,39 @@ static long sys_connect(int fd, const void* uaddr, uint32_t len) {
   }
   if (r < 0) return r;
   long out = lret(connect(fd, (struct sockaddr*)&hs, hlen));
+  if (getenv("RDNETSOCK") && hs.ss_family == AF_UNIX) {
+    const char* p = ((struct sockaddr_un*)&hs)->sun_path;
+    if (strstr(p, "userdb") || strstr(p, "journal")) {
+      FILE* f = fopen("/tmp/rd_netsock_dbg.txt", "a");
+      if (f) { fprintf(f, "pid=%d CONNECT fd=%d path=%s res=%ld errno=%d\n",
+                       (int)getpid(), fd, p, out, out < 0 ? errno : 0); fclose(f); }
+    }
+  }
+  if (hs.ss_family == AF_UNIX && strstr(((struct sockaddr_un*)&hs)->sun_path, "notify")) {
+    notifyfd_add(fd);
+    notifydbg("pid=%d CONNECT notify fd=%d host=%s res=%ld\n",
+              (int)getpid(), fd, ((struct sockaddr_un*)&hs)->sun_path, out);
+  }
   if (getenv("RDNETSOCK") && out < 0) fprintf(stderr, "[netsock] connect result=%ld errno=%d\n", out, errno);
+  if (out == 0) {
+    // Linux autobinds an AF_UNIX DGRAM socket on connect(); macOS does not. Without a local name a
+    // datagram sent on a connected DGRAM socket carries no sender address and is dropped. Autobind to
+    // a pathname that ENCODES the sender's guest pid, so the receiver can recover SCM_CREDENTIALS
+    // (macOS has no datagram credentials) — see sender_ucred().
+    autobind_sender(fd);
+  }
   return out;
 }
 static long sys_accept4(int fd, unsigned long uaddr, unsigned long ulen, int flags) {
   struct sockaddr_storage hs; socklen_t hlen = sizeof hs;
   memset(&hs, 0, sizeof hs);
-  int nfd = accept_pending_pop(fd, (struct sockaddr*)&hs, &hlen);
-  if (nfd < 0) nfd = accept(fd, (struct sockaddr*)&hs, &hlen);
+  int nfd = acceptq_pop(fd, (struct sockaddr*)&hs, &hlen);   // re-queued by the epoll recovery path?
+  if (nfd < 0)
+    nfd = accept(fd, (struct sockaddr*)&hs, &hlen);
+  if (getenv("RDNETSOCK")) {
+    FILE* f = fopen("/tmp/rd_netsock_dbg.txt", "a");
+    if (f) { fprintf(f, "pid=%d ACCEPT fd=%d -> %d errno=%d\n", (int)getpid(), fd, nfd, nfd < 0 ? errno : 0); fclose(f); }
+  }
   if (nfd < 0) return lerr();
   kill_sigpipe(nfd);
   apply_fd_flags(nfd, (flags & L_SOCK_NONBLOCK) != 0, (flags & L_SOCK_CLOEXEC) != 0);
@@ -1777,13 +2193,37 @@ static long sys_getsockname(int fd, unsigned long uaddr, unsigned long ulen, int
 static long sys_sendto(int fd, const void* buf, size_t len, int lflags,
                        const void* uaddr, uint32_t alen) {
   int hflags = msgflags_l2h(lflags);
+  long res;
   if (uaddr && alen) {
     struct sockaddr_storage hs; socklen_t hlen = 0;
     long r = sa_to_host(uaddr, alen, 0, &hs, &hlen);
     if (r < 0) return r;
-    return lret(sendto(fd, buf, len, hflags, (struct sockaddr*)&hs, hlen));
+    // sd_notify() sends via sendmsg/sendto WITHOUT connect(); autobind here so the datagram carries
+    // the sender's pid path and the receiver can synthesise SCM_CREDENTIALS.
+    if (hs.ss_family == AF_UNIX && ((struct sockaddr_un*)&hs)->sun_path[0])
+      autobind_sender(fd);
+    res = lret(sendto(fd, buf, len, hflags, (struct sockaddr*)&hs, hlen));
+  } else {
+    res = lret(sendto(fd, buf, len, hflags, NULL, 0));
   }
-  return lret(sendto(fd, buf, len, hflags, NULL, 0));
+  if (getenv("RDEXECDBG")) {
+    char peek[64] = {0};
+    if (buf && len) { size_t cp = len < sizeof peek - 1 ? len : sizeof peek - 1; memcpy(peek, buf, cp); }
+    if (strstr(peek, "READY") || strstr(peek, "STATUS") || strstr(peek, "MAINPID") || strstr(peek, "STOPPING")) {
+      static int nsd2;
+      if (nsd2 < 60) { nsd2++;
+        char pn[128] = "?"; struct sockaddr_storage p; socklen_t pl = sizeof p;
+        if (getpeername(fd, (struct sockaddr*)&p, &pl) == 0 && p.ss_family == AF_UNIX)
+          snprintf(pn, sizeof pn, "%s", ((struct sockaddr_un*)&p)->sun_path);
+        char ln[128] = "?"; struct sockaddr_storage l; socklen_t ll = sizeof l;
+        if (getsockname(fd, (struct sockaddr*)&l, &ll) == 0 && l.ss_family == AF_UNIX)
+          snprintf(ln, sizeof ln, "%s", ((struct sockaddr_un*)&l)->sun_path);
+        FILE* f = fopen("/tmp/rd_exec_dbg.txt", "a");
+        if (f) { fprintf(f, "pid=%d SENDTO fd=%d len=%zu res=%ld peer=%s local=%s data=%s\n", (int)getpid(), fd, len, res, pn, ln, peek); fclose(f); }
+      }
+    }
+  }
+  return res;
 }
 static long sys_recvfrom(int fd, void* buf, size_t len, int lflags,
                          unsigned long uaddr, unsigned long ulen) {
@@ -1808,6 +2248,10 @@ static long sys_sendmsg(int fd, const struct lin_msghdr* lm, int lflags) {
     long r = sa_to_host((const void*)lm->msg_name, lm->msg_namelen, 0, &hs, &hslen);
     if (r < 0) return r;
     hm.msg_name = &hs; hm.msg_namelen = hslen;
+    // sd_notify() sends via sendmsg without connect(); autobind so the datagram carries the sender
+    // pid path (recoverable as SCM_CREDENTIALS on the receive side).
+    if (hs.ss_family == AF_UNIX && ((struct sockaddr_un*)&hs)->sun_path[0])
+      autobind_sender(fd);
   }
   hm.msg_iov = (struct iovec*)lm->msg_iov;          // identical layout on both sides
   if (lm->msg_iovlen > INT_MAX) return -L_EINVAL;
@@ -1822,6 +2266,22 @@ static long sys_sendmsg(int fd, const struct lin_msghdr* lm, int lflags) {
   ssize_t n = sendmsg(fd, &hm, msgflags_l2h(lflags));
   long out = (n < 0) ? lerr() : (long)n;
   free(hctl);
+  if (getenv("RDEXECDBG")) {
+    // Peek the payload to see if a service is sending sd_notify (READY=1/STATUS=...).
+    char peek[64] = {0};
+    if (hm.msg_iovlen > 0 && hm.msg_iov && hm.msg_iov[0].iov_base) {
+      size_t cp = hm.msg_iov[0].iov_len < sizeof peek - 1 ? hm.msg_iov[0].iov_len : sizeof peek - 1;
+      memcpy(peek, hm.msg_iov[0].iov_base, cp);
+    }
+    if (strstr(peek, "READY") || strstr(peek, "STATUS") || strstr(peek, "MAINPID") ||
+        strstr(peek, "WATCHDOG") || strstr(peek, "STOPPING")) {
+      static int nsd;
+      if (nsd < 60) { nsd++;
+        FILE* f = fopen("/tmp/rd_exec_dbg.txt", "a");
+        if (f) { fprintf(f, "pid=%d SENDMSG fd=%d n=%ld data=%s\n", (int)getpid(), fd, out, peek); fclose(f); }
+      }
+    }
+  }
   return out;
 }
 
@@ -1858,7 +2318,9 @@ static long sys_recvmsg(int fd, struct lin_msghdr* lm, int lflags) {
   if (!lm) return -L_EFAULT;
   struct msghdr hm; memset(&hm, 0, sizeof hm);
   struct sockaddr_storage hs; memset(&hs, 0, sizeof hs);
-  if (lm->msg_name && lm->msg_namelen) { hm.msg_name = &hs; hm.msg_namelen = sizeof hs; }
+  // Always capture the sender address — even when the guest's msg_name is NULL — so the SCM_CREDENTIALS
+  // synthesis below can recover the sender pid from ".rdx-sender/<pid>.<seq>" (see sender_ucred).
+  hm.msg_name = &hs; hm.msg_namelen = sizeof hs;
   hm.msg_iov = (struct iovec*)lm->msg_iov;
   if (lm->msg_iovlen > INT_MAX) return -L_EINVAL;
   hm.msg_iovlen = (int)lm->msg_iovlen;
@@ -1872,6 +2334,27 @@ static long sys_recvmsg(int fd, struct lin_msghdr* lm, int lflags) {
     hm.msg_control = hctl; hm.msg_controllen = (socklen_t)hcap;
   }
   ssize_t n = recvmsg(fd, &hm, msgflags_l2h(lflags));
+  if (notifyfd_is(fd)) {
+    char pk[128] = {0};
+    if (n > 0 && hm.msg_iovlen > 0 && hm.msg_iov && hm.msg_iov[0].iov_base) {
+      size_t cp = hm.msg_iov[0].iov_len < sizeof pk - 1 ? hm.msg_iov[0].iov_len : sizeof pk - 1;
+      memcpy(pk, hm.msg_iov[0].iov_base, cp);
+    }
+    notifydbg("pid=%d RECVMSG notify fd=%d n=%zd flags=%d data=%s\n",
+              (int)getpid(), fd, n, (int)lflags, pk);
+  }
+  if (getenv("RDEXECDBG") && fd >= 20 && n > 0) {
+    static int nrcv;
+    if (nrcv < 60) { nrcv++;
+      char pk[64] = {0};
+      if (hm.msg_iovlen > 0 && hm.msg_iov && hm.msg_iov[0].iov_base) {
+        size_t cp = hm.msg_iov[0].iov_len < sizeof pk - 1 ? hm.msg_iov[0].iov_len : sizeof pk - 1;
+        memcpy(pk, hm.msg_iov[0].iov_base, cp);
+      }
+      FILE* f = fopen("/tmp/rd_exec_dbg.txt", "a");
+      if (f) { fprintf(f, "pid=%d RECVMSG fd=%d n=%zd data=%s\n", (int)getpid(), fd, n, pk); fclose(f); }
+    }
+  }
   // RDCREDLOG=1: WebKit's readPIDFromPeer has THREE failure messages and only one of them means
   // what it says. Log the actual byte count on a credential socket so "short read" is measured
   // rather than assumed -- 0 means the peer hung up, anything else means it did not.
@@ -1882,6 +2365,34 @@ static long sys_recvmsg(int fd, struct lin_msghdr* lm, int lflags) {
             fd, want, n, (unsigned)hm.msg_controllen);
   }
   if (n < 0) { long e = lerr(); free(hctl); return e; }
+
+  // systemd's executor sends the spawned service's pidfd + pid over a socketpair
+  // (send_one_fd_iov: one SCM_RIGHTS fd plus one 4-byte pid iovec). The pidfd is a kqueue whose
+  // pid->fd mapping lives in the SENDER's registry; the receiver cannot see it, so re-register the
+  // transferred fd here, using the pid that rides alongside it in the message body. This is what
+  // lets PID 1 resolve a transferred pidfd for PIDFD_GET_INFO and /proc/self/fdinfo/<fd>.
+  if (n == 4 && hm.msg_iovlen == 1 && hm.msg_control && hm.msg_iov && hm.msg_iov[0].iov_base) {
+    int nfd = 0, gotfd = -1;
+    for (struct cmsghdr* c = CMSG_FIRSTHDR(&hm); c; c = CMSG_NXTHDR(&hm, c)) {
+      if (c->cmsg_level == SOL_SOCKET && c->cmsg_type == SCM_RIGHTS) {
+        int cnt = (int)((c->cmsg_len >= CMSG_LEN(0) ? c->cmsg_len - CMSG_LEN(0) : 0) / sizeof(int));
+        for (int i = 0; i < cnt; i++) {
+          int rfd; memcpy(&rfd, CMSG_DATA(c) + i * sizeof(int), sizeof rfd);
+          gotfd = rfd; nfd++;
+        }
+      }
+    }
+    if (nfd == 1 && gotfd >= 0) {
+      pid_t rpid = 0;
+      memcpy(&rpid, hm.msg_iov[0].iov_base, sizeof rpid);
+      if (getenv("RDEXECDBG")) {
+        FILE* f = fopen("/tmp/rd_exec_dbg.txt", "a");
+        if (f) { fprintf(f, "pid=%d PIDFD-SCM gotfd=%d rpid=%d reg=%d n=%zd\n",
+                         (int)getpid(), gotfd, (int)rpid, (rpid > 0 && rpid < 0x7fffffff), n); fclose(f); }
+      }
+      if (rpid > 0 && rpid < 0x7fffffff) pidfd_shim_register(gotfd, rpid);
+    }
+  }
 
   int lflags_out = msgflags_h2l(hm.msg_flags);
   if (hm.msg_name && lm->msg_name) {
@@ -1895,11 +2406,13 @@ static long sys_recvmsg(int fd, struct lin_msghdr* lm, int lflags) {
     size_t used = cmsg_h2l(fd, &hm, (uint8_t*)lm->msg_control, lcap,
                            (lflags & L_MSG_CMSG_CLOEXEC) != 0, &trunc, &gave);
     // SO_PASSCRED was asked for on this fd, so Linux would have appended SCM_CREDENTIALS here.
-    // Darwin never will, so build it from the socket's own knowledge of its peer.
+    // Darwin never will, so build it from the datagram's source path (sender pid) or the socket's
+    // own knowledge of its peer.
     if (!gave && passcred_get(fd)) {
       struct lin_ucred uc;
       size_t need = LCMSG_ALIGN(LCMSG_HDRLEN + sizeof uc);
-      if (used + need <= lcap && peer_ucred(fd, &uc)) {
+      const char* srcp = hs.ss_family == AF_UNIX ? ((struct sockaddr_un*)&hs)->sun_path : NULL;
+      if (used + need <= lcap && sender_ucred(fd, srcp, &uc)) {
         uint8_t* p = (uint8_t*)lm->msg_control + used;
         struct lin_cmsghdr lh;
         lh.cmsg_len = (uint64_t)(LCMSG_HDRLEN + sizeof uc);
@@ -1981,6 +2494,20 @@ void net_init(void) {
   // A guest write to a closed socket must yield EPIPE, not kill the host process.
   signal(SIGPIPE, SIG_IGN);
   const char* group = getenv("RDSOCKETGROUP");
+  if (!group || group[0] != '/') {
+    // A multi-process guest (systemd boot: init + systemd-executor + journald/udevd/getty) needs
+    // its /run/... and abstract Unix sockets SHARED across processes, but RDUNIXPREFIX is per-pid
+    // (so each exec'd child got its own /tmp/rdx-<pid>, journald's sd_notify/@systemd-notify and
+    // the journal/udev sockets never met, and every Type=notify unit timed out). RDSHIM_BOOT is a
+    // per-boot token shared by every shim process of this guest, so derive a shared group from it.
+    // Display sockets (wayland-0/X0) are excluded from the group path, so they stay per-process.
+    const char* boot = getenv("RDSHIM_BOOT");
+    if (boot && *boot) {
+      char auto_group[512];
+      snprintf(auto_group, sizeof auto_group, "/tmp/rdboot-%s", boot);
+      group = auto_group;
+    }
+  }
   if (group && group[0] == '/') {
     snprintf(g_group_prefix, sizeof g_group_prefix, "%s", group);
     g_group_prefix_len = strlen(g_group_prefix);
@@ -2054,8 +2581,16 @@ long net_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigned 
       return sys_socketpair((int)(long)a0, (int)(long)a1, (int)(long)a2, (int*)a3);
     case LSYS_bind:
       return sys_bind((int)(long)a0, (const void*)a1, (uint32_t)a2);
-    case LSYS_listen:
-      return lret(listen((int)(long)a0, (int)(long)a1));
+    case LSYS_listen: {
+      long r = lret(listen((int)(long)a0, (int)(long)a1));
+      if (getenv("RDNETSOCK")) fprintf(stderr, "[netsock] listen fd=%d -> %ld errno=%d\n",
+                                       (int)(long)a0, r, errno);
+      if (getenv("RDNETSOCK")) {
+        FILE* f = fopen("/tmp/rd_netsock_dbg.txt", "a");
+        if (f) { fprintf(f, "pid=%d LISTEN fd=%d -> %ld\n", (int)getpid(), (int)(long)a0, r); fclose(f); }
+      }
+      return r;
+    }
     case LSYS_accept:
       return sys_accept4((int)(long)a0, a1, a2, 0);
     case LSYS_accept4:

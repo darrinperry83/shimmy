@@ -1,6 +1,8 @@
 #include "timerfd_shim.h"
+#include "syscalls.h"             // shim_fd_reserve / shim_fd_unreserve
 #include <dispatch/dispatch.h>
 #include <sys/socket.h>
+#include <sys/resource.h>
 #include <stdatomic.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -35,9 +37,24 @@ static void trace_timer(const char* kind, int fd, int64_t value, int64_t interva
   } else if (!strcmp(kind, "fire") && atomic_fetch_add(&trace_fires, 1) >= 50) return;
   fprintf(stderr, "[timerfd] %s fd=%d value_ns=%lld interval_ns=%lld\n",
           kind, fd, (long long)value, (long long)interval);
+  if (getenv("RDEXECDBG")) {
+    FILE* f = fopen("/tmp/rd_exec_dbg.txt", "a");
+    if (f) { fprintf(f, "pid=%d TIMERFD %s fd=%d value_ns=%lld interval_ns=%lld\n",
+                     (int)getpid(), kind, fd, (long long)value, (long long)interval); fclose(f); }
+  }
 }
 
-static int64_t ns(struct timespec t) { return (int64_t)t.tv_sec * 1000000000LL + t.tv_nsec; }
+static int64_t ns(struct timespec t) {
+  // Saturate. systemd's time_change_fd() arms a REALTIME timerfd at TIME_T_MAX (INT64_MAX secs)
+  // with TFD_TIMER_CANCEL_ON_SET so it "never fires" and only wakes on a clock jump. tv_sec*1e9
+  // overflows int64 there (INT64_MAX*1e9 == -1000000000 in two's-complement), so the shim read the
+  // never-fire deadline as 1s-in-the-past, fired it immediately, and systemd recreated the
+  // clock-change source forever -- a tight loop that prevented PID 1 from ever spawning a unit.
+  // Clamp to int64 so a far-future deadline stays far-future instead of wrapping into the past.
+  if (t.tv_sec > INT64_MAX / 1000000000LL) return INT64_MAX;
+  if (t.tv_sec < INT64_MIN / 1000000000LL) return INT64_MIN;
+  return (int64_t)t.tv_sec * 1000000000LL + t.tv_nsec;
+}
 static struct timespec from_ns(int64_t n) {
   struct timespec t = { n / 1000000000LL, n % 1000000000LL };
   return t;
@@ -76,8 +93,11 @@ static void fire(void* context) {
   pthread_mutex_unlock(&lock);
 }
 static void cancelled(void* context) {
-  struct timer_slot* slot = context;
-  if (slot->writer >= 0) { close(slot->writer); slot->writer = -1; }
+  // The writer is closed synchronously in timerfd_shim_closed (and its fd reserved there). The
+  // slot may already have been REUSED by a later timerfd_create by the time this async cancel
+  // handler runs, so it must not touch slot->writer here — that would close the NEW timerfd's
+  // write end. No-op.
+  (void)context;
 }
 static struct timer_slot* lookup(int fd) {
   for (int i = 0; i < count; i++) if (slots[i].fd == fd) return &slots[i];
@@ -90,13 +110,32 @@ long timerfd_create_shim(int clockid, int flags) {
   if (count >= MAX_TIMERFD) { pthread_mutex_unlock(&lock); return -24; }
   int pair[2];
   if (socketpair(AF_UNIX, SOCK_DGRAM, 0, pair) < 0) {
-    int rc = -errno; pthread_mutex_unlock(&lock); return rc;
+    int rc = -errno;
+    if (getenv("RDTIMERFDDBG")) {
+      struct rlimit rl; getrlimit(RLIMIT_NOFILE, &rl);
+      FILE* tf = fopen("/tmp/rd_timerfd_dbg.txt", "a");
+      if (tf) { fprintf(tf, "socketpair FAIL errno=%d nofile_cur=%llu count=%d\n",
+                        errno, (unsigned long long)rl.rlim_cur, count); fclose(tf); }
+    }
+    pthread_mutex_unlock(&lock); return rc;
   }
   fcntl(pair[1], F_SETFL, O_NONBLOCK);
   if (flags & L_NONBLOCK) fcntl(pair[0], F_SETFL, O_NONBLOCK);
   if (flags & L_CLOEXEC) { fcntl(pair[0], F_SETFD, FD_CLOEXEC); fcntl(pair[1], F_SETFD, FD_CLOEXEC); }
+  // The write end is shim-internal (written by the dispatch timer source). A forked child's
+  // close_range() would close it and make the parent's timerfd read end report EOF forever.
+  // Reserve the READ end too: the shim's vfork child shares the fd table, so its close_range()
+  // would also close the parent's timerfd read end.
+  pair[0] = shim_fd_reserve(pair[0]);
+  pair[1] = shim_fd_reserve(pair[1]);
   if (!queue) queue = dispatch_queue_create("org.linux-shim.timerfd", DISPATCH_QUEUE_SERIAL);
-  struct timer_slot* slot = &slots[count];
+  // Reuse a freed slot (fd == -1). The old code always appended at slots[count] and only grew
+  // `count`, so 32 create/close cycles (systemd churns a restart timer + watchdog per unit) filled
+  // the registry and timerfd_create started returning -EMFILE ("Failed to install restart timer:
+  // Too many open files" / mount tasks "Too many open files").
+  int index = count;
+  for (int i = 0; i < count; i++) if (slots[i].fd == -1) { index = i; break; }
+  struct timer_slot* slot = &slots[index];
   memset(slot, 0, sizeof *slot);
   slot->fd = pair[0]; slot->writer = pair[1]; slot->clockid = clockid;
   slot->source = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
@@ -106,7 +145,7 @@ long timerfd_create_shim(int clockid, int flags) {
   dispatch_source_set_cancel_handler_f(slot->source, cancelled);
   dispatch_source_set_timer(slot->source, DISPATCH_TIME_FOREVER, DISPATCH_TIME_FOREVER, 0);
   dispatch_resume(slot->source);
-  count++;
+  if (index == count) count++;
   trace_timer("create", slot->fd, clockid, flags);
   pthread_mutex_unlock(&lock);
   return pair[0];
@@ -121,7 +160,11 @@ static void current_locked(struct timer_slot* slot, linux_itimerspec* current) {
 }
 long timerfd_settime_shim(int fd, int flags, const linux_itimerspec* next, linux_itimerspec* old) {
   if (!next) return -14;
-  if (flags & ~1) return -22;
+  // Linux timerfd_settime flags: TFD_TIMER_ABSTIME(1) | TFD_TIMER_CANCEL_ON_SET(2).
+  // systemd arms its REALTIME clock source with BOTH (0x3); rejecting bit 2 returned -EINVAL and
+  // broke sd-event's clock/timer layer. CANCEL_ON_SET (cancel on clock_settime) is accepted and its
+  // semantics ignored -- the shim never discontinuously jumps the guest clock.
+  if (flags & ~3) return -22;
   if (next->it_value.tv_sec < 0 || next->it_value.tv_nsec < 0 || next->it_value.tv_nsec >= 1000000000 ||
       next->it_interval.tv_sec < 0 || next->it_interval.tv_nsec < 0 || next->it_interval.tv_nsec >= 1000000000) return -22;
   pthread_mutex_lock(&lock);
@@ -162,6 +205,13 @@ long timerfd_gettime_shim(int fd, linux_itimerspec* current) {
 void timerfd_shim_closed(int fd) {
   pthread_mutex_lock(&lock);
   struct timer_slot* slot = lookup(fd);
-  if (slot) { trace_timer("close", fd, 0, 0); slot->fd = -1; dispatch_source_cancel(slot->source); slot->due_ns = 0; }
+  if (slot) {
+    trace_timer("close", fd, 0, 0);
+    slot->fd = -1;
+    if (slot->writer >= 0) { shim_fd_unreserve(slot->writer); close(slot->writer); slot->writer = -1; }
+    dispatch_source_cancel(slot->source);
+    slot->source = NULL;
+    slot->due_ns = 0;
+  }
   pthread_mutex_unlock(&lock);
 }

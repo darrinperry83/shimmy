@@ -7,6 +7,10 @@ extern "C" {
 
 // Guest filesystem root: every guest-absolute path is resolved as <root><path>.
 void syscalls_set_root(const char* root);
+// The host path of the guest filesystem root (no trailing '/'). Exposed for net.c's symlink
+// resolution of socket-unit Symlinks aliases, which live in the rootfs while the sockets live
+// in the group namespace.
+const char* syscalls_get_root(void);
 // The guest path of the running program (for /proc/self/exe and AT_EXECFN).
 void syscalls_set_exe(const char* guest_path);
 // The guest cwd. execve is serviced by re-exec'ing the shim, so this must be carried across it
@@ -55,7 +59,7 @@ int  linux_errno_from_host(int host_errno);
 // Anything the shim opens and needs to keep must be registered here. close_range() skips
 // registered descriptors; nothing else is affected, and a guest closing such an fd BY NUMBER is
 // still allowed through (it can only do that if it genuinely owns it).
-void shim_fd_reserve(int fd);
+int  shim_fd_reserve(int fd);   // returns the (possibly relocated) fd
 void shim_fd_unreserve(int fd);
 int  shim_fd_reserved(int fd);
 

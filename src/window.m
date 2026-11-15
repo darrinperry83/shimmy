@@ -60,6 +60,12 @@
 #include "capresent.h"
 #include "present_feedback.h"
 #include "rdgpu_scanout_client.h"
+#include "vt.h"
+#include "evdev.h"
+#include "drmasahi.h"
+#include <unistd.h>
+#include <strings.h>
+#include <ctype.h>
 #include <IOKit/pwr_mgt/IOPMLib.h>
 
 @interface RDPrimaryGuestWindow : NSWindow
@@ -160,6 +166,194 @@ static id                         gDelegate;   // strong ref: NSWindow.delegate 
 static int                        gSettingContentSize;
 static _Atomic(int)               gPendingResizeW, gPendingResizeH;
 
+// ---------------------------------------------------------------- the flick (takeover toggle)
+// RDNATIVE_FLICK_KEY is a configurable macOS key combo (default "Ctrl+Alt+Shift+Space") that
+// toggles the takeover live: Linux owns the display(s) <-> macOS re-composites. The combo is
+// intercepted in the input path (ev_handle) BEFORE the guest sees it, and flips a runtime flag
+// that present_source() reads every frame — so the present sink switches between the direct
+// scanout handoff (rdgpu_scanout_present) and the ordinary CAMetalLayer present. The scanout
+// payload is also told to re-set/clear the display `online` flag via RDGPU_MSG_ID_TOGGLE, so the
+// flip is near-instant in both directions. Combo syntax: "Ctrl+Alt+Shift+Space" — modifier names
+// (Ctrl/Control, Alt/Option, Shift, Cmd/Command/Meta/Logo/Win/Super) plus one key (a-z, 0-9, or
+// Space/Tab/Return/Enter/Escape/Esc/Backspace/Delete/F1..F12/arrows, or a raw macOS keycode).
+static atomic_int            gFlickTakeover;   // 1 = Linux owns display(s), 0 = macOS owns them
+static NSEventModifierFlags  gFlickMods;       // raw NSEvent modifier mask required
+static unsigned short        gFlickKeyCode;    // macOS virtual keycode required
+static int                   gFlickEnabled;    // 0 = no flick (unset / parse failed)
+static unsigned short        gFlickSwallowKeyUp; // keyCode whose key-up to swallow after a flick
+static pthread_once_t        gFlickOnce = PTHREAD_ONCE_INIT;
+
+static int flick_mod_flag(const char* tok) {
+  if (!strcasecmp(tok, "ctrl") || !strcasecmp(tok, "control"))    return NSEventModifierFlagControl;
+  if (!strcasecmp(tok, "alt")  || !strcasecmp(tok, "option") ||
+      !strcasecmp(tok, "opt"))                                   return NSEventModifierFlagOption;
+  if (!strcasecmp(tok, "shift"))                                 return NSEventModifierFlagShift;
+  if (!strcasecmp(tok, "cmd")  || !strcasecmp(tok, "command") ||
+      !strcasecmp(tok, "meta") || !strcasecmp(tok, "logo") ||
+      !strcasecmp(tok, "win")  || !strcasecmp(tok, "super"))     return NSEventModifierFlagCommand;
+  return 0;
+}
+
+static int flick_key_code(const char* tok) {
+  // A single ASCII letter/digit maps to its PHYSICAL ANSI key position (the kVK_ANSI_* table),
+  // not to an alphabetical index — macOS virtual keycodes are positional.
+  if (tok[0] && !tok[1]) {
+    int c = tolower((unsigned char)tok[0]);
+    static const unsigned short letters[26] = {
+      0x00,0x0B,0x08,0x02,0x0E,0x03,0x05,0x04,0x22,0x26,0x28,0x25,0x2E,
+      0x2D,0x1F,0x23,0x0C,0x0F,0x01,0x11,0x20,0x09,0x0D,0x07,0x10,0x06};
+    static const unsigned short digits[10] = {0x1D,0x12,0x13,0x14,0x15,0x17,0x16,0x1A,0x1C,0x19};
+    if (c >= 'a' && c <= 'z') return letters[c - 'a'];
+    if (c >= '0' && c <= '9') return digits[c - '0'];
+  }
+  if (!strcasecmp(tok, "space"))                                  return 0x31;
+  if (!strcasecmp(tok, "tab"))                                    return 0x30;
+  if (!strcasecmp(tok, "return") || !strcasecmp(tok, "enter"))    return 0x24;
+  if (!strcasecmp(tok, "escape") || !strcasecmp(tok, "esc"))      return 0x35;
+  if (!strcasecmp(tok, "backspace") || !strcasecmp(tok, "delete"))return 0x33;
+  if (!strcasecmp(tok, "up"))                                     return 0x7E;
+  if (!strcasecmp(tok, "down"))                                   return 0x7D;
+  if (!strcasecmp(tok, "left"))                                   return 0x7B;
+  if (!strcasecmp(tok, "right"))                                  return 0x7C;
+  if (!strcasecmp(tok, "home"))                                   return 0x73;
+  if (!strcasecmp(tok, "end"))                                    return 0x77;
+  if (!strcasecmp(tok, "pageup"))                                 return 0x74;
+  if (!strcasecmp(tok, "pagedown"))                               return 0x79;
+  static const unsigned short fkeys[12] = {0x7A,0x78,0x63,0x76,0x60,0x61,0x62,0x64,0x65,0x6D,0x67,0x6F};
+  if (tok[0] == 'f' || tok[0] == 'F') {
+    int n = atoi(tok + 1);
+    if (n >= 1 && n <= 12) return fkeys[n - 1];
+  }
+  // Raw macOS virtual keycode escape hatch (decimal or 0x hex).
+  char* end = NULL;
+  long raw = strtol(tok, &end, 0);
+  if (end && *end == '\0' && end != tok && raw >= 0 && raw <= 0xff) return (unsigned short)raw;
+  return -1;
+}
+
+static void flick_parse(const char* spec, NSEventModifierFlags* mods, unsigned short* key) {
+  *mods = 0; *key = 0;
+  if (!spec || !*spec) return;
+  char buf[256];
+  size_t i = 0;
+  while (spec[i] && i < sizeof buf - 1) { buf[i] = spec[i]; i++; }
+  buf[i] = 0;
+  char* save = NULL;
+  for (char* tok = strtok_r(buf, "+", &save); tok; tok = strtok_r(NULL, "+", &save)) {
+    while (*tok == ' ' || *tok == '\t') tok++;
+    size_t n = strlen(tok);
+    while (n && (tok[n - 1] == ' ' || tok[n - 1] == '\t')) tok[--n] = 0;
+    if (!*tok) continue;
+    NSEventModifierFlags m = flick_mod_flag(tok);
+    if (m) { *mods |= m; continue; }
+    int k = flick_key_code(tok);
+    if (k >= 0) *key = (unsigned short)k;
+  }
+}
+
+static void flick_init(void) {
+  const char* spec = getenv("RDNATIVE_FLICK_KEY");
+  const int disabled = (spec && *spec == '0');
+  const char* combo = (!disabled && spec && *spec) ? spec : NULL;
+  gFlickEnabled = 0;
+  if (!disabled) {
+    flick_parse(combo ? combo : "Ctrl+Alt+Shift+Space", &gFlickMods, &gFlickKeyCode);
+    if (gFlickKeyCode) gFlickEnabled = 1;
+  }
+  atomic_store(&gFlickTakeover, rdgpu_scanout_enabled() ? 1 : 0);
+  const char* take = atomic_load(&gFlickTakeover) ? "ON (Linux owns display(s))"
+                                                  : "OFF (macOS owns display(s))";
+  if (gFlickEnabled)
+    fprintf(stderr, "[flick] armed: combo \"%s\" keyCode=0x%x mods=0x%lx; takeover starts %s\n",
+            combo ? combo : "Ctrl+Alt+Shift+Space", (unsigned)gFlickKeyCode,
+            (unsigned long)gFlickMods, take);
+  else
+    fprintf(stderr, "[flick] disabled%s; takeover starts %s\n",
+            disabled ? " (RDNATIVE_FLICK_KEY=0)" : " (combo did not parse)", take);
+}
+
+// C-visible runtime takeover state. Presenter threads read it every frame to pick the present
+// sink; the input path flips it on the flick combo. Initialised from the RDGPU_SCANOUT gate so a
+// scanout run starts in takeover and a windowed run starts un-taken-over.
+int gpuwin_takeover_active(void) {
+  pthread_once(&gFlickOnce, flick_init);
+  return atomic_load(&gFlickTakeover);
+}
+
+static int flick_matches(NSEvent* e) {
+  pthread_once(&gFlickOnce, flick_init);
+  if (!gFlickEnabled) return 0;
+  if ([e keyCode] != gFlickKeyCode) return 0;
+  NSEventModifierFlags main = NSEventModifierFlagShift | NSEventModifierFlagControl |
+                              NSEventModifierFlagOption | NSEventModifierFlagCommand;
+  NSEventModifierFlags f = [e modifierFlags] & main;
+  return f == (gFlickMods & main);
+}
+
+// Main thread only (called from the local NSEvent monitor inside -[NSApp run]).
+static void flick_toggle(void) {
+  int next = !atomic_load(&gFlickTakeover);
+  atomic_store(&gFlickTakeover, next);
+  // The shim's own present sink: order the guest window back in when macOS re-composites, out when
+  // the direct scanout owns the display. The frame present path follows gpuwin_takeover_active().
+  if (gWin) {
+    if (next) { if (gWin.isVisible) [gWin orderOut:nil]; }
+    else      { if (!gWin.isVisible) [gWin makeKeyAndOrderFront:nil]; }
+  }
+  int prc = rdgpu_scanout_set_online(next ? 0 : 1);   // online=0 -> Linux owns, 1 -> macOS owns
+  fprintf(stderr, "[flick] TOGGLE -> takeover %s; scanout online=%d rc=%d\n",
+          next ? "ON (Linux owns display(s))" : "OFF (macOS re-composites)",
+          next ? 0 : 1, prc);
+}
+
+// RDNATIVE_FLICK_SELFTEST=1 posts the configured flick combo through the REAL input path
+// (NSApp postEvent -> local monitor -> ev_handle -> flick_matches) after a short delay, so a
+// headless run can prove the combo is captured and the takeover toggles — the "[flick] TOGGLE"
+// log line — without a physical keyboard. Mirrors ev_selftest_fire's "travel the real path" rule.
+static void flick_selftest_fire(void) { @autoreleasepool {
+  pthread_once(&gFlickOnce, flick_init);
+  if (!gWin || !gFlickEnabled) return;
+  NSTimeInterval t = [[NSProcessInfo processInfo] systemUptime];
+  NSInteger wn = [gWin windowNumber];
+  NSEvent* e = [NSEvent keyEventWithType:NSEventTypeKeyDown
+                                location:NSZeroPoint
+                           modifierFlags:gFlickMods
+                               timestamp:t
+                            windowNumber:wn
+                                 context:nil
+                              characters:@" "
+               charactersIgnoringModifiers:@" "
+                                 isARepeat:NO
+                                keyCode:gFlickKeyCode];
+  if (e) [NSApp postEvent:e atStart:NO];
+  NSEvent* u = [NSEvent keyEventWithType:NSEventTypeKeyUp
+                                location:NSZeroPoint
+                           modifierFlags:gFlickMods
+                               timestamp:t
+                            windowNumber:wn
+                                 context:nil
+                              characters:@" "
+               charactersIgnoringModifiers:@" "
+                                 isARepeat:NO
+                                keyCode:gFlickKeyCode];
+  if (u) [NSApp postEvent:u atStart:NO];
+  fprintf(stderr, "[flick] self-test: posted combo keyCode=0x%x mods=0x%lx\n",
+          (unsigned)gFlickKeyCode, (unsigned long)gFlickMods);
+}}
+
+static void flick_selftest_arm(void) {
+  static int armed;
+  if (armed) return;
+  const char* e = getenv("RDNATIVE_FLICK_SELFTEST");
+  if (!e || !*e || *e == '0') return;
+  armed = 1;
+  double delay = 2.5;
+  const char* d = getenv("RDNATIVE_FLICK_SELFTEST_DELAY");
+  if (d && *d) { double v = atof(d); if (v > 0) delay = v; }
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
+                 dispatch_get_main_queue(), ^{ flick_selftest_fire(); });
+}
+
 // Drawable size as last published by main, so the GL path can check it without touching the
 // layer from another thread.
 static _Atomic(unsigned long)     gDrawableW, gDrawableH;
@@ -221,6 +415,44 @@ static int fit_display_enabled(void) {
 }
 static int dynamic_regions_enabled(void) {
   return split_output_enabled() && getenv("RDNATIVE_REGION_LIST_PATH") != NULL;
+}
+
+// ---------------------------------------------------------------- windowed cursor capture
+// gpuwin_cursor() and ev_local_xy() both derive the guest pointer from the mac mouse's GLOBAL
+// screen point (+[NSEvent mouseLocation] / an NSEvent's own location). In a normal windowed run
+// the Linux desktop lives ONLY inside our window, so when the mac mouse roams onto another
+// display both would map the Linux pointer off-window — the "cursor went to the other screen"
+// bug. In windowed mode we clip the guest pointer to the framebuffer rect [0,w)x[0,h) so it
+// stays inside the window's content rect.
+//
+// Kiosk/takeover (RDNATIVE_KIOSK=1, or RDNATIVE_MODE=takeover) deliberately presents the Linux
+// cursor across the whole display, so capture is OFF there; RDNATIVE_MODE=windowed forces it on.
+static int cursor_capture_enabled(void) {
+  static int v = -1;
+  if (v < 0) {
+    const char* m = getenv("RDNATIVE_MODE");
+    if (m && strcmp(m, "takeover") == 0) v = 0;
+    else if (m && strcmp(m, "windowed") == 0) v = 1;
+    else v = kiosk_enabled() ? 0 : 1;       // default: windowed unless kiosk takeover
+    fprintf(stderr, "[cursor] windowed capture %s\n",
+            v ? "ON (Linux pointer clipped to window rect)"
+              : "OFF (takeover/kiosk: pointer maps across displays)");
+  }
+  return v;
+}
+
+// The dynamic-region research mode has its own multi-window coordinate model (and a -1,-1
+// "not over any region" sentinel in gpuwin_cursor); leave its coordinates untouched.
+static int windowed_cursor_capture(void) {
+  return cursor_capture_enabled() && !dynamic_regions_enabled();
+}
+
+// Clamp window-local guest coordinates into [0,w)x[0,h). Only used under windowed capture.
+static void clip_to_rect_d(double* x, double* y, int w, int h) {
+  if (w <= 0) w = 1;
+  if (h <= 0) h = 1;
+  if (*x < 0) *x = 0; else if (*x >= (double)w) *x = (double)w - 1;
+  if (*y < 0) *y = 0; else if (*y >= (double)h) *y = (double)h - 1;
 }
 // The coordinator atomically renames both publications, so watch their containing
 // directories rather than an inode that disappears on every update. Vnode events
@@ -561,6 +793,19 @@ static void menu_shortcut(uint32_t key) {
 - (void)selectAllItems:(id)sender { (void)sender; menu_shortcut(30); }
 @end
 static RDMenuTarget* gMenuTarget;
+// RDGPU_SCANOUT=1 takeover: the direct-scanout service owns the displays, not the AppKit
+// window. A user dragging (or resizing) the leftover guest window across displays fires
+// windowDidMove/windowDidResize, whose publish_rect()/layout_native_child() walk the window's
+// screen and feed a display-reconfigure straight into the present path the scanout is driving —
+// that reconfigure is what crashes WindowServer. Under takeover the move is a no-op: log once
+// and ignore it. (The present path's own publish_rect() in ensure_ready_on_main is unaffected,
+// so the guest cursor rect keeps updating from the real frame, not the window geometry.)
+static void takeover_ignore_window_geometry(void) {
+  static int said;
+  if (!said) { said = 1;
+    fprintf(stderr, "[scanout] takeover active: ignoring window move/resize "
+                    "(displays are owned by the scanout, not the window)\n"); }
+}
 @interface RDGpuWindowDelegate : NSObject <NSWindowDelegate>
 @end
 @implementation RDGpuWindowDelegate
@@ -571,6 +816,7 @@ static RDMenuTarget* gMenuTarget;
 }
 - (void)windowDidResize:(NSNotification*)n {
   (void)n;
+  if (gpuwin_takeover_active()) { takeover_ignore_window_geometry(); return; }
   if (gSettingContentSize || !gWin) return;
   NSSize s = gWin.contentView.bounds.size;
   if (s.width < 1 || s.height < 1) return;
@@ -585,7 +831,9 @@ static RDMenuTarget* gMenuTarget;
   layout_native_child();
 }
 - (void)windowDidMove:(NSNotification*)n {
-  (void)n; publish_rect(); layout_native_child();
+  (void)n;
+  if (gpuwin_takeover_active()) { takeover_ignore_window_geometry(); return; }
+  publish_rect(); layout_native_child();
 }
 @end
 
@@ -817,6 +1065,16 @@ static NSScreen* hotplug_target_screen(void) {
     else return s;                                  // first external panel
   }
   return builtin ?: NSScreen.mainScreen;
+}
+
+// C-visible getter used by rdgpu_native_output.m so the Wayland wl_output advertisement mirrors
+// the display the primary guest window actually sits on. Falls back to the main screen while the
+// window has not been created yet (center_on_builtin() will place it there). Safe to read from
+// any thread: NSScreen geometry is backed by thread-safe CGDisplay queries and gWin is a
+// write-once pointer.
+NSScreen* rdgpu_primary_screen(void) {
+  NSScreen* s = gWin ? gWin.screen : nil;
+  return s ?: NSScreen.mainScreen;
 }
 
 // ---------------------------------------------------------------- display hotplug
@@ -1307,7 +1565,7 @@ static long open_on_main(NSUInteger w, NSUInteger h) {
     }
     (void)fr;
     size_layer(w, h);
-    if (dynamic_regions_enabled()) [gWin orderOut:nil];
+    if (dynamic_regions_enabled() || rdgpu_scanout_enabled()) [gWin orderOut:nil];
     else [gWin makeKeyAndOrderFront:nil];
     [NSApp activateIgnoringOtherApps:YES];
     return 0;
@@ -1478,8 +1736,13 @@ static long open_on_main(NSUInteger w, NSUInteger h) {
   ev_install_monitor();
   ev_selftest_arm();
   ev_selftest_mouse_arm();
+  flick_selftest_arm();
 
-  if (dynamic_regions_enabled()) [gWin orderOut:nil];
+  // RDGPU_SCANOUT=1 takeover: the composed frame goes straight to the Dock's direct-scanout
+  // service (present_iosurface), so the mac window that would otherwise show it as "Wayland-1"
+  // is ordered out. The window + CAMetalLayer still exist and keep producing drawables — the
+  // present path reads drawable.texture.iosurface — it is just never made visible on screen.
+  if (dynamic_regions_enabled() || rdgpu_scanout_enabled()) [gWin orderOut:nil];
   else [gWin makeKeyAndOrderFront:nil];
   if (gNativeChild) {
     [gNativeChild makeKeyAndOrderFront:nil];
@@ -1820,13 +2083,13 @@ static long present_source(id<MTLTexture> src, id<MTLCommandQueue> q, int may_bl
   // gpuwin_present_fmt's CPU-staging texture has no IOSurface (`src.iosurface == nil`); that arm
   // keeps the old drawable fallback unchanged. On any failure (no IOSurface at all, the OSAX not
   // installed, or the service not reachable) it falls through to presentDrawable unchanged.
-  if (rdgpu_scanout_enabled()) {
+  if (gpuwin_takeover_active()) {
     IOSurfaceRef scanSurface = src.iosurface ? src.iosurface : drawable.texture.iosurface;
     if (scanSurface) {
       // WindowServer fallback: still present via the CAMetalLayer so the display shows the
-      // composited frame even when the direct scanout present doesn't land (the trampoline is
-      // only driven by the CA idle loop, which is not always running). The direct handoff below
-      // remains best-effort.
+      // composited frame even when the direct scanout present doesn't land. The direct handoff
+      // below remains best-effort; server19 flips `scanSurface` straight to the external
+      // SLCADisplay (role 0) via present_iosurface, with WindowServer's own present stubbed out.
       int hz = atomic_load(&gRefreshHz);
       if (hz > 0 && !novsync())
         [cb presentDrawable:drawable afterMinimumDuration:1.0 / (double)hz];
@@ -1844,6 +2107,11 @@ static long present_source(id<MTLTexture> src, id<MTLCommandQueue> q, int may_bl
       dispatch_semaphore_signal(inflight);   // the presented handler we skip would have released it
       if (feedbackSequence) rd_feedback_finish(0, feedbackSequence);
       int sr = rdgpu_scanout_present(scanSurface, RDGPU_SCANOUT_ROLE_PRIMARY);
+      static unsigned primaryScanoutFrames;
+      if (++primaryScanoutFrames <= 3 || primaryScanoutFrames % 100 == 0)
+        fprintf(stderr, "[rdgpu-scanout] primary handoff frame=%u id=%u %zux%zu rc=%d\n",
+                primaryScanoutFrames, (unsigned)IOSurfaceGetID(scanSurface),
+                IOSurfaceGetWidth(scanSurface), IOSurfaceGetHeight(scanSurface), sr);
       return (sr == 0) ? 0 : sr;
     }
     static int saidNoSurf;
@@ -1968,7 +2236,10 @@ long gpuwin_present(const uint8_t* rgba, uint64_t w, uint64_t h) {
   return gpuwin_present_fmt(rgba, w, h, /*bgra=*/0);
 }
 
-long gpuwin_present_fmt(const uint8_t* rgba, uint64_t w, uint64_t h, int bgra) {
+// Shared present body for the desktop path (gpuwin_present_fmt) and the text-console path
+// (gpuwin_present_console). The console calls this DIRECTLY so its frames do not trip the
+// "a desktop frame arrived" switch in gpuwin_present_fmt -> vt_graphics_frame().
+static long present_fb(const uint8_t* rgba, uint64_t w, uint64_t h, int bgra) {
   if (!rgba || w == 0 || h == 0 || w > 16384 || h > 16384) return -22;
   refresh_dynamic_regions((NSUInteger)w, (NSUInteger)h);
   refresh_split_width((NSUInteger)w, (NSUInteger)h);
@@ -2026,6 +2297,163 @@ long gpuwin_present_fmt(const uint8_t* rgba, uint64_t w, uint64_t h, int bgra) {
   return 0;
 }
 
+long gpuwin_present_fmt(const uint8_t* rgba, uint64_t w, uint64_t h, int bgra) {
+  // A desktop (X11/Wayland) frame means the GUI console owns the screen and the keyboard from
+  // here on; the text consoles yield until Ctrl+Alt+F1..F6 switches back.
+  vt_graphics_frame();
+  return present_fb(rgba, w, h, bgra);
+}
+
+// The text-console present path. Presenting a console frame must NOT mark the GUI active, so it
+// bypasses gpuwin_present_fmt's vt_graphics_frame() call and goes straight to the shared body.
+long gpuwin_present_console(const uint8_t* rgba, uint64_t w, uint64_t h, int bgra) {
+  return present_fb(rgba, w, h, bgra);
+}
+
+// Register the console present hook with vt.c. Called once from shim.c's main (GUI build only);
+// the CLI build has no Metal present path, so this is simply never linked in.
+void gpuwin_register_console_present(void) {
+  vt_set_present_fn(&gpuwin_present_console);
+}
+
+// ---------------------------------------------------------------- per-CRTC present
+// Native DRM-master mode presents TWO outputs: CRTC 1 (external DP) goes to the primary Metal
+// window (the existing gpuwin_present_fmt path), CRTC 2 (builtin eDP) goes to a second
+// borderless NSWindow on the non-primary display. The second path is a CPU CGImage upload —
+// the same shape secondary_window.m's rd_secondary_present uses for detached outputs — so the
+// eDP frame is not dropped when the nested-Wayland surface that used to carry it is retired.
+static NSWindow* gSecondaryWin;
+static NSWindow* secondary_output_window(uint64_t w, uint64_t h) {  // must be on main
+  if (gSecondaryWin &&
+      gSecondaryWin.contentView.bounds.size.width == (CGFloat)w &&
+      gSecondaryWin.contentView.bounds.size.height == (CGFloat)h)
+    return gSecondaryWin;
+  NSScreen* primary = gWin ? gWin.screen : NSScreen.mainScreen;
+  NSScreen* target = nil;
+  for (NSScreen* s in NSScreen.screens) {
+    NSNumber* n = s.deviceDescription[@"NSScreenNumber"];
+    if (n && CGDisplayIsActive((CGDirectDisplayID)n.unsignedIntValue) && s != primary) {
+      target = s; break;
+    }
+  }
+  if (!target) target = primary ?: NSScreen.mainScreen;
+  if (!gSecondaryWin) {
+    gSecondaryWin = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, (CGFloat)w, (CGFloat)h)
+        styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:NO];
+    if (!gSecondaryWin) return nil;
+    gSecondaryWin.releasedWhenClosed = NO;
+    gSecondaryWin.contentView.wantsLayer = YES;
+    gSecondaryWin.contentView.layer.contentsGravity = kCAGravityResize;
+    gSecondaryWin.level = kiosk_window_level();
+  }
+  [gSecondaryWin setContentSize:NSMakeSize((CGFloat)w, (CGFloat)h)];
+  NSRect f = target.frame;
+  [gSecondaryWin setFrameOrigin:NSMakePoint(NSMidX(f) - (CGFloat)w / 2, NSMidY(f) - (CGFloat)h / 2)];
+  [gSecondaryWin orderFrontRegardless];
+  NSNumber* disp = target.deviceDescription[@"NSScreenNumber"];
+  static unsigned last_disp;
+  if (disp.unsignedIntValue != last_disp) {
+    last_disp = disp.unsignedIntValue;
+    fprintf(stderr, "[drm-present] secondary output on host display %u (%zux%zu)\n",
+            last_disp, (size_t)w, (size_t)h);
+  }
+  return gSecondaryWin;
+}
+
+static long present_secondary_fb(const uint8_t* bgra, uint64_t w, uint64_t h) {
+  if (!bgra || !w || !h || w > 16384 || h > 16384) return -22;
+  __block long rc = 0;
+  run_on_main(^{ @autoreleasepool {
+    NSWindow* win = secondary_output_window(w, h);
+    if (!win) { rc = -19; return; }
+    NSData* copy = [NSData dataWithBytes:bgra length:(NSUInteger)(w * h * 4)];
+    CGDataProviderRef provider = CGDataProviderCreateWithCFData((__bridge CFDataRef)copy);
+    if (!provider) { rc = -19; return; }
+    CGColorSpaceRef color = CGColorSpaceCreateDeviceRGB();
+    CGImageRef image = CGImageCreate((size_t)w, (size_t)h, 8, 32, (size_t)w * 4, color,
+                                     kCGBitmapByteOrder32Little | kCGImageAlphaNoneSkipFirst,
+                                     provider, NULL, false, kCGRenderingIntentDefault);
+    CGColorSpaceRelease(color);
+    CGDataProviderRelease(provider);
+    if (!image) { rc = -19; return; }
+    win.contentView.layer.contents = (__bridge id)image;
+    CGImageRelease(image);
+  }});
+  return rc;
+}
+
+// Strong override of drmasahi.c's weak per-CRTC hook. CRTC 1 = primary, CRTC 2 = secondary.
+long gpuwin_present_crtc(const uint8_t* px, uint64_t w, uint64_t h, int bgra, uint32_t crtc_id) {
+  // RDGPU_SCANOUT=1 takeover: this hook is ONLY reached from drmasahi.c's DRM flip present
+  // (drm_present_fb) — the native DRM-master compositor has just flipped its GBM framebuffer.
+  // Log it distinctly so a headless run can prove the flip is what feeds the direct-scanout
+  // handoff below (gpuwin_present_fmt -> present_source -> rdgpu_scanout_present), not the
+  // retired nested-Wayland wlsrv path.
+  if (gpuwin_takeover_active()) {
+    static unsigned drmFlipScanoutFrames;
+    if (++drmFlipScanoutFrames <= 3 || drmFlipScanoutFrames % 100 == 0)
+      fprintf(stderr, "[drm-flip->scanout] crtc=%u frame=%u %ux%u bgra=%d (DRM flip routed to "
+                      "direct scanout)\n",
+              crtc_id, drmFlipScanoutFrames, (unsigned)w, (unsigned)h, bgra);
+  }
+  if (crtc_id == 2) return present_secondary_fb(px, w, h);   // BGRA (drm_present_fb passes bgra=1)
+  return gpuwin_present_fmt(px, w, h, bgra);
+}
+
+// ---------------------------------------------------------------- evdev input pump
+// Native-DRM mode has no outer wl_seat; libinput reads /dev/input/event*. This thread drains the
+// same NSEvent queue that used to feed wlsrv's wl_seat and writes input_event records into the
+// synthetic evdev nodes (evdev.c). It only consumes events once the DRM master is active so it
+// never races wlsrv's own pump_input() in the nested-Wayland path.
+static atomic_int gEvdevStop;
+static void* evdev_pump_thread(void* arg) {
+  (void)arg;
+  int last_x = 0, last_y = 0;
+  while (!atomic_load(&gEvdevStop)) {
+    if (drm_master_active()) {
+      struct gpuwin_event e;
+      while (gpuwin_next_event(&e)) {
+        switch (e.type) {
+        case GPUWIN_EV_KEY:
+          evdev_inject(EVDEV_DEV_KBD, EVDEV_EV_KEY, e.code, (int32_t)e.state);
+          evdev_syn(EVDEV_DEV_KBD);
+          break;
+        case GPUWIN_EV_BUTTON:
+          evdev_inject(EVDEV_DEV_PTR, EVDEV_EV_KEY, e.code, (int32_t)e.state);
+          evdev_syn(EVDEV_DEV_PTR);
+          break;
+        case GPUWIN_EV_MOTION:
+          evdev_inject(EVDEV_DEV_PTR, EVDEV_EV_REL, EVDEV_REL_X, (int32_t)(e.x - last_x));
+          evdev_inject(EVDEV_DEV_PTR, EVDEV_EV_REL, EVDEV_REL_Y, (int32_t)(e.y - last_y));
+          evdev_syn(EVDEV_DEV_PTR);
+          last_x = e.x; last_y = e.y;
+          break;
+        case GPUWIN_EV_SCROLL:
+          if (e.y) evdev_inject(EVDEV_DEV_PTR, EVDEV_EV_REL, EVDEV_REL_WHEEL, e.y);
+          if (e.x) evdev_inject(EVDEV_DEV_PTR, EVDEV_EV_REL, EVDEV_REL_HWHEEL, e.x);
+          evdev_syn(EVDEV_DEV_PTR);
+          break;
+        default: break;
+        }
+      }
+    }
+    usleep(1000);
+  }
+  return NULL;
+}
+
+void gpuwin_start_evdev_pump(void) {
+  static int started;
+  if (started) return;
+  started = 1;
+  // Announce the windowed cursor-capture policy once at startup (deterministic, so the log is
+  // not gated on the first mouse move). Same convention as the fake-cursor path: anything that
+  // changes where the Linux pointer lands must say so on stderr.
+  (void)cursor_capture_enabled();
+  pthread_t t;
+  if (pthread_create(&t, NULL, evdev_pump_thread, NULL) == 0) pthread_detach(t);
+}
+
 // ---------------------------------------------------------------- gpuwin_present_texture
 // Zero-copy present for the GL bridge: `mtl_texture` is the id<MTLTexture> glbridge just
 // finished rendering into, so it goes straight to the drawable with a GPU blit — no readback,
@@ -2039,6 +2467,7 @@ long gpuwin_present_fmt(const uint8_t* rgba, uint64_t w, uint64_t h, int bgra) {
 long gpuwin_present_texture(void* mtl_texture, void* mtl_queue, uint64_t w, uint64_t h) {
   id<MTLTexture> tex = (__bridge id<MTLTexture>)mtl_texture;
   if (!tex || w == 0 || h == 0 || w > 16384 || h > 16384) return -22;
+  vt_graphics_frame();
   refresh_dynamic_regions((NSUInteger)w, (NSUInteger)h);
   refresh_split_width((NSUInteger)w, (NSUInteger)h);
   // NOT IMPLEMENTED ON THE CA PATH, and this is a real gap rather than an oversight: the GL
@@ -2192,6 +2621,51 @@ static uint32_t ev_mods(NSEventModifierFlags f) {
   return m;
 }
 
+// Ctrl+Alt+F1..F6 (and F7 for the GUI), Alt+Left/Right — Linux VT switching. Returns 1 and
+// performs the switch when the event matches, 0 otherwise. `ev` is already the evdev keycode.
+static int vt_hotkey(uint32_t ev, uint32_t mods, int down) {
+  if (!down) return 0;
+  if ((mods & (GPUWIN_MOD_CTRL | GPUWIN_MOD_ALT)) != (GPUWIN_MOD_CTRL | GPUWIN_MOD_ALT)) return 0;
+  if (ev >= 59 && ev <= 65) {              // F1..F7 -> console 1..7 (7 = GUI)
+    vt_switch_to((int)(ev - 59 + 1));
+    return 1;
+  }
+  if (ev == 105) {                         // Alt+Left  -> previous
+    int a = vt_active();
+    vt_switch_to(a <= 1 ? VT_GRAPHICS : a - 1);
+    return 1;
+  }
+  if (ev == 106) {                         // Alt+Right -> next
+    int a = vt_active();
+    vt_switch_to(a >= VT_GRAPHICS ? 1 : a + 1);
+    return 1;
+  }
+  return 0;
+}
+
+// Translate a key event into bytes for the active text console's pty master. The pty's line
+// discipline (termios canonical mode) does the echo/edit/signal work; we only map keys to bytes.
+static void vt_route_key(NSEvent* e, uint16_t ev) {
+  switch (ev) {
+  case 28:  vt_feed_key("\r", 1); return;      // Return
+  case 15:  vt_feed_key("\t", 1); return;      // Tab
+  case 1:   vt_feed_key("\x1b", 1); return;    // Escape
+  case 14:  vt_feed_key("\x7f", 1); return;    // Backspace -> DEL (Linux VERASE)
+  case 103: vt_feed_key("\x1b[A", 3); return;  // Up
+  case 108: vt_feed_key("\x1b[B", 3); return;  // Down
+  case 105: vt_feed_key("\x1b[D", 3); return;  // Left
+  case 106: vt_feed_key("\x1b[C", 3); return;  // Right
+  default:
+    if (ev < 2 || ev > 57) return;             // not a typeable key (F-keys, modifiers, ...)
+    NSString* c = [e characters];
+    if (c && c.length) {
+      const char* u = [c UTF8String];
+      if (u && *u) vt_feed_key(u, strlen(u));
+    }
+    return;
+  }
+}
+
 // Window-local, top-left origin — the same convention gpuwin_cursor() reports.
 //
 // Use the EVENT's own location, not +[NSEvent mouseLocation]: the latter is wherever the cursor
@@ -2235,6 +2709,11 @@ static void ev_local_xy(NSEvent* e, int32_t* ox, int32_t* oy) {
         host_crop_snapshot(atomic_load(&gFbW), atomic_load(&gFbH));
     lx += crop.x; ly += crop.y;
   }
+  // Windowed capture: pin the guest pointer inside the window even while the mac mouse sits on
+  // another display. Without this, a motion event aimed off-window becomes a giant relative delta
+  // in the evdev pump and libinput walks the cursor out of the framebuffer.
+  if (windowed_cursor_capture())
+    clip_to_rect_d(&lx, &ly, atomic_load(&gFbW), atomic_load(&gFbH));
   if (lx < -32768) lx = -32768; else if (lx > 32767) lx = 32767;
   if (ly < -32768) ly = -32768; else if (ly > 32767) ly = 32767;
   *ox = (int32_t)lx; *oy = (int32_t)ly;
@@ -2265,10 +2744,27 @@ static void ev_handle(NSEvent* e) {
   case NSEventTypeKeyDown:
   case NSEventTypeKeyUp: {
     unsigned short vk = [e keyCode];
+    int down = ([e type] == NSEventTypeKeyDown);
+    // The flick (takeover toggle) is intercepted before the guest sees it — it is a host control,
+    // not a keystroke for Linux. It fires on key-down only (so auto-repeat can't double-toggle)
+    // and swallows the matching key-up so Linux never sees a lone release. Checked BEFORE the
+    // evdev mapping so the combo works for any physical key, mapped or not.
+    if (gFlickSwallowKeyUp) {
+      if (!down && vk == gFlickSwallowKeyUp) { gFlickSwallowKeyUp = 0; return; }
+      gFlickSwallowKeyUp = 0;
+    }
+    if (down && flick_matches(e)) { gFlickSwallowKeyUp = vk; flick_toggle(); return; }
     uint16_t ev = vk < 128 ? kVK2EVDEV[vk] : 0;
     if (!ev) return;
+    // VT hotkeys (Ctrl+Alt+F1..F7, Alt+Left/Right) are intercepted before the guest sees them.
+    if (vt_hotkey(ev, g.mods, down)) return;
+    // On a text console, keystrokes go to the pty master, not the GUI event ring.
+    if (vt_text_input_active()) {
+      if (down) vt_route_key(e, ev);
+      return;
+    }
     g.type = GPUWIN_EV_KEY; g.code = ev;
-    g.state = ([e type] == NSEventTypeKeyDown) ? 1 : 0;
+    g.state = down ? 1 : 0;
     ev_push(&g);
     return;
   }
@@ -2276,6 +2772,7 @@ static void ev_handle(NSEvent* e) {
     // Cocoa reports modifiers as a state change, Wayland wants press/release. Diff the mask.
     NSEventModifierFlags now = [e modifierFlags], was = gPrevFlags;
     gPrevFlags = now;
+    if (vt_text_input_active()) return;   // a text console needs no modifier key events
     static const struct { NSEventModifierFlags f; uint16_t ev; } kMod[] = {
       { NSEventModifierFlagShift, 42 }, { NSEventModifierFlagControl, 29 },
       { NSEventModifierFlagOption, 56 }, { NSEventModifierFlagCommand, 125 },
@@ -2888,6 +3385,11 @@ void gpuwin_cursor(int* x, int* y) {
     struct RDHostCrop crop = host_crop_snapshot(fbw, fbh);
     lx += crop.x; ly += crop.y;
   }
+  // Windowed capture: keep the Linux pointer inside the window when the mac mouse roams onto
+  // another display. This is the deliberate exception to the "do not clamp" rule below; the
+  // takeover/kiosk path skips it and keeps the full signed-16-bit mapping.
+  if (windowed_cursor_capture())
+    clip_to_rect_d(&lx, &ly, fbw, fbh);
   if (cursor_debug_enabled() && cursor_debug_due())
     fprintf(stderr, "[cursor] primary mouse=(%.1f,%.1f) rect=(%.0f,%.0f %.0fx%.0f) "
             "scale=%.2f fbw/rw=%.2f guest=(%.1f,%.1f)\n",

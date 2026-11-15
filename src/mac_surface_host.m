@@ -84,6 +84,42 @@ int rd_mac_launch_bundle(const char *spec, char *out_name, size_t onsz) {
     }
 }
 
+// Find the largest on-screen window owned by `pid` and return its CGWindowID
+// (0 if the app has no on-screen window yet). Used to feed the WindowServer
+// surface resolver (no capture). Shared with rd_mac_capture_window below.
+uint32_t rd_mac_find_window_id(pid_t pid) {
+    if (pid <= 0) return 0;
+    CFArrayRef wins = CGWindowListCopyWindowInfo(
+        kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
+    if (!wins) return 0;
+    CGWindowID target = 0;
+    int tw = 0, th = 0;
+    CFIndex n = CFArrayGetCount(wins);
+    for (CFIndex i = 0; i < n; i++) {
+        CFDictionaryRef d = (CFDictionaryRef)CFArrayGetValueAtIndex(wins, i);
+        CFNumberRef opid = CFDictionaryGetValue(d, kCGWindowOwnerPID);
+        long long op = 0;
+        if (opid) CFNumberGetValue(opid, kCFNumberLongLongType, &op);
+        if (op != (long long)pid) continue;
+        CFDictionaryRef bnd = CFDictionaryGetValue(d, kCGWindowBounds);
+        int w = 0, h = 0;
+        if (bnd) {
+            CFNumberRef bw = CFDictionaryGetValue(bnd, CFSTR("Width"));
+            CFNumberRef bh = CFDictionaryGetValue(bnd, CFSTR("Height"));
+            long long lw = 0, lh = 0;
+            if (bw) CFNumberGetValue(bw, kCFNumberLongLongType, &lw);
+            if (bh) CFNumberGetValue(bh, kCFNumberLongLongType, &lh);
+            w = (int)lw; h = (int)lh;
+        }
+        CFNumberRef wn = CFDictionaryGetValue(d, kCGWindowNumber);
+        long long cw = 0;
+        if (wn) CFNumberGetValue(wn, kCFNumberLongLongType, &cw);
+        if (cw > 0 && w * h > tw * th) { target = (CGWindowID)cw; tw = w; th = h; }
+    }
+    CFRelease(wins);
+    return target;
+}
+
 // Best-effort capture of the first on-screen window owned by `pid`.
 // Returns a malloc'd BGRA buffer (caller frees), writing *out_w/*out_h/*out_stride.
 // Requires Screen Recording TCC for a FOREIGN app's window; returns NULL when the

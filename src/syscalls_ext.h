@@ -7,6 +7,11 @@ extern "C" {
 
 void syscalls_ext_set_root(const char* root);
 
+// cgroup v2 (/sys/fs/cgroup) synthesis lives in syscalls.c; do_statx needs these to fake the
+// statx of the in-memory cgroup dirs/files. cgroup_path_kind: 0 not-cgroup, 1 dir, 2 leaf file.
+int cgroup_path_kind(const char* g);
+const char* cgroup_file_content(const char* g, char* buf, size_t cap);
+
 // Same ABI as linux_syscall(): negative LINUX errno on failure.
 // Returns -38 (-ENOSYS) for anything genuinely unimplemented.
 long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, unsigned long a2,

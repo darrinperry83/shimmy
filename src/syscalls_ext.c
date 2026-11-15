@@ -1,3 +1,4 @@
+#include "guest_ownership.h"
 // syscalls_ext.c — extended/rare Linux aarch64 syscalls (the FALLBACK tier).
 //
 // linux_syscall() (syscalls.c) owns the hot core set and tail-calls us for everything else.
@@ -22,6 +23,7 @@ void fx_note(const char* fmt, ...);
 #include "drmasahi.h"
 #include "v4l2cam.h"
 #include "snd_alsa.h"
+#include "evdev.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,6 +47,7 @@ void fx_note(const char* fmt, ...);
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <sys/sem.h>
+#include <sys/msg.h>
 #include <sys/uio.h>
 #include <sys/wait.h>
 #include <mach/mach.h>
@@ -57,6 +60,11 @@ void fx_note(const char* fmt, ...);
 #include "syscalls_ext.h"
 #include "signalfd_shim.h"
 #include "timerfd_shim.h"
+#include "pidfd_shim.h"
+#include <sys/socket.h>
+#include <sys/un.h>
+
+extern void net_fd_closed(int fd);   // net.c — drop fd from every epoll/kqueue
 
 // ---------------------------------------------------------------------------
 // Linux constants (the guest's values — do NOT use the host headers' versions)
@@ -108,10 +116,20 @@ void fx_note(const char* fmt, ...);
 #define LX_PR_GET_SECCOMP      21
 #define LX_PR_SET_SECCOMP      22
 #define LX_PR_CAPBSET_READ     23
+#define LX_PR_CAPBSET_DROP     24
+#define LX_PR_GET_SECUREBITS   27
+#define LX_PR_SET_SECUREBITS   28
 #define LX_PR_SET_TIMERSLACK   29
 #define LX_PR_GET_TIMERSLACK   30
 #define LX_PR_SET_NO_NEW_PRIVS 38
 #define LX_PR_GET_NO_NEW_PRIVS 39
+#define LX_PR_CAP_AMBIENT      47
+#define LX_PR_SET_THP_DISABLE  41
+#define LX_PR_GET_THP_DISABLE  42
+#define LX_PR_SET_MDWE         65
+#define LX_PR_GET_MDWE         66
+#define LX_PR_SET_MEMORY_MERGE 67
+#define LX_PR_GET_MEMORY_MERGE 68
 #define LX_PR_SET_VMA          0x53564d41
 #define LX_PR_SET_PTRACER      0x59616d61
 
@@ -125,6 +143,8 @@ void fx_note(const char* fmt, ...);
 #define LX_WEXITED      0x00000004
 #define LX_WCONTINUED   0x00000008
 #define LX_WNOWAIT      0x01000000
+
+#define LX_P_PIDFD      3
 
 #define LX_FALLOC_KEEP_SIZE   0x01
 #define LX_FALLOC_PUNCH_HOLE  0x02
@@ -247,6 +267,57 @@ static void lx_shmid_put(struct lx_shmid64_ds* d, const struct shmid_ds* s) {
   d->shm_cpid      = (int)s->shm_cpid;
   d->shm_lpid      = (int)s->shm_lpid;
   d->shm_nattch    = (unsigned long long)(unsigned short)s->shm_nattch;  // macOS: short
+}
+
+// Linux aarch64 `struct msqid64_ds` (asm-generic/msgbuf.h) and the ipc64_perm it embeds.
+// Same translation story as shmid64_ds above: Darwin's msqid_ds orders cbytes/qnum/qbytes/
+// lspid/lrpid BEFORE the timestamps and pads differently, so msgctl(IPC_STAT) must be filled
+// field-by-field. Offsets are pinned by static asserts, not trusted to compiler padding.
+struct lx_msqid64_ds {
+  struct lx_ipc64_perm msg_perm;
+  long long            msg_stime, msg_rtime, msg_ctime;
+  unsigned long long   msg_cbytes, msg_qnum, msg_qbytes;
+  int                  msg_lspid, msg_lrpid;
+  unsigned long long   __unused4, __unused5;
+};
+_Static_assert(sizeof(struct lx_msqid64_ds)  == 120, "linux msqid64_ds is 120 bytes");
+_Static_assert(offsetof(struct lx_msqid64_ds, msg_stime)  == 48, "msg_stime at 48");
+_Static_assert(offsetof(struct lx_msqid64_ds, msg_cbytes)  == 72, "msg_cbytes at 72");
+_Static_assert(offsetof(struct lx_msqid64_ds, msg_qnum)    == 80, "msg_qnum at 80");
+_Static_assert(offsetof(struct lx_msqid64_ds, msg_qbytes)  == 88, "msg_qbytes at 88");
+_Static_assert(offsetof(struct lx_msqid64_ds, msg_lspid)   == 96, "msg_lspid at 96");
+_Static_assert(offsetof(struct lx_msqid64_ds, msg_lrpid)   == 100, "msg_lrpid at 100");
+
+// Field-by-field by NAME. Darwin's msqid_ds and Linux's msqid64_ds agree on nothing past msg_perm.
+static void lx_msqid_put(struct lx_msqid64_ds* d, const struct msqid_ds* s) {
+  memset(d, 0, sizeof *d);
+  d->msg_perm.key  = (int)s->msg_perm._key;
+  d->msg_perm.uid  = (unsigned)s->msg_perm.uid;
+  d->msg_perm.gid  = (unsigned)s->msg_perm.gid;
+  d->msg_perm.cuid = (unsigned)s->msg_perm.cuid;
+  d->msg_perm.cgid = (unsigned)s->msg_perm.cgid;
+  d->msg_perm.mode = (unsigned)s->msg_perm.mode;
+  d->msg_perm.seq  = (unsigned short)s->msg_perm._seq;
+  d->msg_stime     = (long long)s->msg_stime;
+  d->msg_rtime     = (long long)s->msg_rtime;
+  d->msg_ctime     = (long long)s->msg_ctime;
+  d->msg_cbytes    = (unsigned long long)s->msg_cbytes;
+  d->msg_qnum      = (unsigned long long)s->msg_qnum;
+  d->msg_qbytes    = (unsigned long long)s->msg_qbytes;
+  d->msg_lspid     = (int)s->msg_lspid;
+  d->msg_lrpid     = (int)s->msg_lrpid;
+}
+
+// IPC_SET direction: Linux honors only msg_perm.{uid,gid,mode} and msg_qbytes, which is also the
+// subset Darwin honors, so those are the only fields that need to survive the trip back.
+static void lx_msqid_get(struct msqid_ds* d, const struct lx_msqid64_ds* s) {
+  memset(d, 0, sizeof *d);
+  d->msg_perm.uid  = (uid_t)s->msg_perm.uid;
+  d->msg_perm.gid  = (gid_t)s->msg_perm.gid;
+  d->msg_perm.cuid = (uid_t)s->msg_perm.cuid;
+  d->msg_perm.cgid = (gid_t)s->msg_perm.cgid;
+  d->msg_perm.mode = (mode_t)(s->msg_perm.mode & 0xffff);
+  d->msg_qbytes    = (msglen_t)s->msg_qbytes;
 }
 
 // ---------------------------------------------------------------------------
@@ -375,6 +446,9 @@ _Static_assert(offsetof(struct lx_statx, stx_dev_major) == 136, "statx ABI");
 #define LX_STATX_BLOCKS      0x0400U
 #define LX_STATX_BASIC_STATS 0x07ffU
 #define LX_STATX_BTIME       0x0800U
+#define LX_STATX_MNT_ID      0x1000U
+#define LX_STATX_MNT_ID_UNIQUE 0x4000U
+#define LX_STATX_ATTR_MOUNT_ROOT 0x2000U
 
 static void statx_ts(struct lx_statx_timestamp* d, const struct timespec* s) {
   d->tv_sec = (long long)s->tv_sec; d->tv_nsec = (unsigned)s->tv_nsec; d->__reserved = 0;
@@ -385,6 +459,34 @@ static long do_statx(int lx_dirfd, const char* gpath, int lxflags, unsigned mask
   if (!sx) return -LX_EFAULT;
   struct stat st;
   int r;
+
+  // cgroup v2 dirs/files are synthesized in-memory (syscalls.c); the host fstatat would ENOENT,
+  // so answer the statx from the in-memory tree. Absolute paths only (systemd always uses them
+  // for /sys/fs/cgroup); a relative/dirfd cgroup path falls through to the host (ENOENT).
+  if (gpath && gpath[0] == '/') {
+    int kind = cgroup_path_kind(gpath);
+    if (kind) {
+      memset(sx, 0, sizeof *sx);
+      sx->stx_mask       = LX_STATX_BASIC_STATS | LX_STATX_BTIME | LX_STATX_MNT_ID | LX_STATX_MNT_ID_UNIQUE;
+      sx->stx_blksize    = 4096;
+      sx->stx_attributes = 0;
+      sx->stx_nlink      = (kind == 1) ? 2 : 1;
+      sx->stx_uid        = 0;
+      sx->stx_gid        = 0;
+      sx->stx_mode       = (kind == 1) ? (S_IFDIR | 0755) : (S_IFREG | 0644);
+      sx->stx_ino        = (kind == 1) ? 2 : 1;
+      sx->stx_blocks     = 0;
+      if (kind == 2) {
+        char cbuf[2048];
+        const char* c = cgroup_file_content(gpath, cbuf, sizeof cbuf);
+        sx->stx_size = c ? (unsigned long long)strlen(c) : 0;
+      }
+      sx->stx_attributes_mask = LX_STATX_ATTR_MOUNT_ROOT;
+      sx->stx_rdev_major = 0; sx->stx_rdev_minor = 0;
+      sx->stx_dev_major  = 0; sx->stx_dev_minor  = 0;
+      return 0;
+    }
+  }
 
   if ((lxflags & LX_AT_EMPTY_PATH) && (!gpath || !gpath[0])) {
     int fd = (lx_dirfd == LX_AT_FDCWD) ? AT_FDCWD : lx_dirfd;
@@ -402,17 +504,23 @@ static long do_statx(int lx_dirfd, const char* gpath, int lxflags, unsigned mask
   // We always fill the full basic set plus btime, regardless of what was requested; stx_mask
   // reports what is actually valid (that is what the kernel does too).
   (void)mask;
-  sx->stx_mask       = LX_STATX_BASIC_STATS | LX_STATX_BTIME;
+  sx->stx_mask       = LX_STATX_BASIC_STATS | LX_STATX_BTIME | LX_STATX_MNT_ID | LX_STATX_MNT_ID_UNIQUE;
+  sx->stx_mnt_id     = (unsigned long long)st.st_dev;   // one shim fs == one "mount"
   sx->stx_blksize    = (unsigned)st.st_blksize;
   sx->stx_attributes = 0;
   sx->stx_nlink      = (unsigned)st.st_nlink;
   sx->stx_uid        = (unsigned)(g_uid0 ? 0 : st.st_uid);
   sx->stx_gid        = (unsigned)(g_uid0 ? 0 : st.st_gid);
+  if (g_uid0 && guest_ownership_get(&st, &sx->stx_uid, &sx->stx_gid)<0) return eret();
   sx->stx_mode       = (unsigned short)st.st_mode;   // S_IF* values match Linux exactly
   sx->stx_ino        = (unsigned long long)st.st_ino;
   sx->stx_size       = (unsigned long long)st.st_size;
   sx->stx_blocks     = (unsigned long long)st.st_blocks;
-  sx->stx_attributes_mask = 0;
+  // Report that we UNDERSTAND the mount-root attribute, and that this file is NOT a mount root
+  // (the shim has no real mounts). systemd's fd_is_mount_point() reads this to decide "/proc is not
+  // a mount point" and proceeds to mount it; without the bit it falls through to a mount-id
+  // comparison that has no parent to compare against and fails (EUNATCH) before any mount happens.
+  sx->stx_attributes_mask = LX_STATX_ATTR_MOUNT_ROOT;
   statx_ts(&sx->stx_atime, &st.st_atimespec);
   statx_ts(&sx->stx_btime, &st.st_birthtimespec);
   statx_ts(&sx->stx_ctime, &st.st_ctimespec);
@@ -498,6 +606,10 @@ static long do_memfd_create(const char* name, unsigned flags) {
 static char g_procname[16] = "guest";
 static int  g_pdeathsig;
 static int  g_dumpable = 1;
+static int  g_securebits;
+static int  g_thp_disable;
+static unsigned g_mdwe;
+static int  g_memory_merge;
 static unsigned long g_timerslack = 50000;
 
 static long do_prctl(int opt, unsigned long a1, unsigned long a2,
@@ -529,15 +641,34 @@ static long do_prctl(int opt, unsigned long a1, unsigned long a2,
     case LX_PR_GET_DUMPABLE:   return g_dumpable;
     case LX_PR_SET_KEEPCAPS:   return 0;
     case LX_PR_GET_KEEPCAPS:   return 0;
+    case LX_PR_SET_SECUREBITS: g_securebits = (int)a1; return 0;
+    case LX_PR_GET_SECUREBITS: return g_securebits;
     case LX_PR_SET_NO_NEW_PRIVS: return 0;
     case LX_PR_GET_NO_NEW_PRIVS: return 0;
     case LX_PR_CAPBSET_READ:   return 0;
+    case LX_PR_CAPBSET_DROP:   return 0; // CapBnd is already empty; dropping remains idempotent.
     case LX_PR_SET_TIMERSLACK: g_timerslack = a1 ? a1 : g_timerslack; return 0;
     case LX_PR_GET_TIMERSLACK: return (long)g_timerslack;
     case LX_PR_SET_VMA:        return 0;         // anon-vma naming: purely cosmetic
     case LX_PR_SET_PTRACER:    return 0;
     case LX_PR_GET_SECCOMP:    return 0;
     case LX_PR_SET_SECCOMP:    return -LX_EINVAL;  // no filtering here; Linux also EINVALs
+    // PR_CAP_AMBIENT (47): raise/lower/clear ambient capabilities. The shim does not enforce
+    // capabilities (uid is already virtualized), so accept RAISE/LOWER/CLEAR_ALL. systemd's
+    // exec_context_apply_ambient() calls PR_CAP_AMBIENT_RAISE for every unit and aborted the
+    // service ("Failed to apply the starting ambient set: Invalid argument") when this EINVAL'd.
+    case LX_PR_CAP_AMBIENT:    return 0;
+    // Securebits / THP / MDWE / memory-merge are security/hint toggles the shim does not enforce
+    // (uid is already virtualized, no MDWE hardening, THP/merge are host policy). Accept the SET
+    // and round-trip the GET so systemd's exec_context_apply() does not abort every unit.
+    // MEASURED: systemd-executor exits EXIT_SECUREBITS (213) when PR_SET_SECUREBITS EINVALs, which
+    // is exactly why PID 1 spawned 11 executors and then stalled with no service ever started.
+    case LX_PR_SET_THP_DISABLE:  g_thp_disable = (int)a1; return 0;
+    case LX_PR_GET_THP_DISABLE:  return g_thp_disable;
+    case LX_PR_SET_MDWE:         g_mdwe = (unsigned)a1; return 0;
+    case LX_PR_GET_MDWE:         return (long)g_mdwe;
+    case LX_PR_SET_MEMORY_MERGE: g_memory_merge = (int)a1; return 0;
+    case LX_PR_GET_MEMORY_MERGE: return g_memory_merge;
     default:                   return -LX_EINVAL;
   }
 }
@@ -618,10 +749,12 @@ static long do_dup3(int oldfd, int newfd, int flags) {
             getpid(), oldfd, newfd, flags);
   if (drm_owns_fd(oldfd) && newfd >= 0) drm_register_fd(newfd);
   if (snd_owns_fd(oldfd) && newfd >= 0) snd_dup_fd(oldfd, newfd);
+  if (evdev_owns_fd(oldfd) && newfd >= 0) evdev_register_fd(newfd, evdev_device_of_fd(oldfd));
   if (oldfd == newfd) return -LX_EINVAL;         // this is the whole point of dup3 vs dup2
   if (flags & ~LX_O_CLOEXEC) return -LX_EINVAL;
   if (fcntl(oldfd, F_GETFD) < 0) return eret();  // validate before clobbering newfd
   if (dup2(oldfd, newfd) < 0) return eret();
+  if (pidfd_shim_pid(oldfd) > 0) pidfd_shim_register(newfd, pidfd_shim_pid(oldfd));
   if (flags & LX_O_CLOEXEC) fcntl(newfd, F_SETFD, fcntl(newfd, F_GETFD) | FD_CLOEXEC);
   return newfd;
 }
@@ -657,28 +790,45 @@ static long do_fallocate(int fd, int mode, long long off, long long len) {
   return 0;
 }
 
-// A bounce-buffer copy used by sendfile / splice / copy_file_range.
+// A bounce-buffer copy used by sendfile / splice / copy_file_range. `nonblock` mirrors Linux
+// SPLICE_F_NONBLOCK: the source read must return -EAGAIN rather than block (journald splices its
+// stream sockets this way, and a blocking read parked the journald main loop forever).
 static long bounce_copy(int in_fd, long long* in_off, int out_fd, long long* out_off,
-                        size_t count) {
+                        size_t count, int nonblock) {
   char buf[65536];
   size_t done = 0;
+  int saved_fl = -1;
+  if (nonblock) {
+    saved_fl = fcntl(in_fd, F_GETFL);
+    if (saved_fl >= 0 && !(saved_fl & O_NONBLOCK)) fcntl(in_fd, F_SETFL, saved_fl | O_NONBLOCK);
+  }
   while (done < count) {
     size_t want = count - done; if (want > sizeof buf) want = sizeof buf;
     ssize_t got = in_off ? pread(in_fd, buf, want, (off_t)(*in_off + (long long)done))
                          : read(in_fd, buf, want);
-    if (got < 0) return done ? (long)done : eret();
+    if (got < 0) {
+      long e = eret();
+      if (nonblock && (errno == EAGAIN || errno == EWOULDBLOCK) && done == 0) {
+        if (saved_fl >= 0) fcntl(in_fd, F_SETFL, saved_fl);
+        return -LX_EAGAIN;
+      }
+      if (saved_fl >= 0) fcntl(in_fd, F_SETFL, saved_fl);
+      return done ? (long)done : e;
+    }
     if (got == 0) break;
     ssize_t put = 0;
     while (put < got) {
       ssize_t w = out_off ? pwrite(out_fd, buf + put, (size_t)(got - put),
                                    (off_t)(*out_off + (long long)done + put))
                           : write(out_fd, buf + put, (size_t)(got - put));
-      if (w <= 0) return (done + (size_t)put) ? (long)(done + (size_t)put) : eret();
+      if (w <= 0) { if (saved_fl >= 0) fcntl(in_fd, F_SETFL, saved_fl);
+                    return (done + (size_t)put) ? (long)(done + (size_t)put) : eret(); }
       put += w;
     }
     done += (size_t)got;
     if (got < (ssize_t)want) break;
   }
+  if (saved_fl >= 0) fcntl(in_fd, F_SETFL, saved_fl);
   if (in_off)  *in_off  += (long long)done;
   if (out_off) *out_off += (long long)done;
   return (long)done;
@@ -743,8 +893,10 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     int r = dup((int)a0);
     // A dup of the DRM render node is still the render node. gbm dups the fd, and without this
     // the copy reported /dev/null's device numbers and Mesa went looking for /sys/dev/char/0:12290.
+    if (r >= 0 && pidfd_shim_pid((int)a0) > 0) pidfd_shim_register(r, pidfd_shim_pid((int)a0));
     if (r >= 0 && drm_owns_fd((int)a0)) drm_register_fd(r);
     if (r >= 0 && snd_owns_fd((int)a0)) snd_dup_fd((int)a0, r);
+    if (r >= 0 && evdev_owns_fd((int)a0)) evdev_register_fd(r, evdev_device_of_fd((int)a0));
     return r < 0 ? eret() : r;
   }
   case 24: return do_dup3((int)a0, (int)a1, (int)a2);          // dup3
@@ -759,8 +911,12 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (pipe(fds) != 0) return eret();
     // The write end is deliberately KEPT OPEN (and never written to). Closing it would make the
     // read end instantly readable-at-EOF, and glib treats that as fatal: "inotify unexpectedly
-    // hit eof". Holding it open makes the fd simply quiet forever, which is what we want.
-    (void)fds[1];
+    // hit eof". Holding it open makes the fd simply quiet forever, which is what we want. It must
+    // ALSO be reserved: udevd's worker spawn (posix_spawn) does close_range(3,~0U) in the vfork'd
+    // child, and an unreserved write end gets closed there, making udevd's inotify read end EOF ->
+    // a spurious IN_* wake -> udevd reloads its rules dirs in a 100% CPU loop.
+    fds[0] = shim_fd_reserve(fds[0]);   // read end: the vfork child's close_range() must skip it too
+    shim_fd_reserve(fds[1]);
     if (a0 & LX_O_NONBLOCK_) fcntl(fds[0], F_SETFL, O_NONBLOCK);
     if (a0 & LX_O_CLOEXEC_)  fcntl(fds[0], F_SETFD, FD_CLOEXEC);
     return fds[0];
@@ -796,8 +952,17 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (e < 0) return e;
     return ok0(symlinkat((const char*)a0, hdirfd, host));
   }
-  case 39: return -LX_EPERM;                                   // umount2
-  case 40: return -LX_EPERM;                                   // mount
+  case 39: return 0;                                            // umount2: nothing is ever really mounted
+  // mount(): the shim has no real mounts. /proc, /sys, /dev, /run, /dev/shm, /dev/pts and the
+  // cgroupfs are all synthesized in-process (getdents64 + leaf files), so the boot mounts systemd
+  // performs are no-ops that must SUCCEED. systemd treats an EPERM here as "early API filesystems
+  // failed" and freezes the whole boot, so accepting the mount (and leaving the synthetic tree in
+  // place) is the correct, honest answer: the files are already there.
+  case 40: {
+    // mount(source, target, fstype, mountflags, data)
+    (void)a0; (void)a1; (void)a2; (void)a3; (void)a4;
+    return 0;                                   // no-op: the synthetic tree already serves the mount
+  }
   case 41: return -LX_EPERM;                                   // pivot_root
   case 42: return -LX_ENOSYS;                                  // nfsservctl
   case 45:                                                     // truncate
@@ -815,14 +980,32 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (e < 0) return e;
     return ok0(fchmodat(hdirfd, host, (mode_t)a2, 0));
   case 54:                                                     // fchownat
-    if (g_uid0) return 0;                                      // RDUID0=1: ownership is a no-op
+    if (g_uid0) {
+      struct stat st;
+      if ((int)a4 & ~(LX_AT_EMPTY_PATH | LX_AT_SYMLINK_NOFOLLOW)) return -LX_EINVAL;
+      if ((a4 & LX_AT_EMPTY_PATH) && (!a1 || !((const char*)a1)[0])) {
+        if ((int)a0 == LX_AT_FDCWD) { if (stat(".", &st)<0) return eret(); }
+        else if (fstat((int)a0, &st)<0) return eret();
+      } else {
+        e=resolve_at_nf((int)a0,(const char*)a1,host,sizeof host,&hdirfd,
+                       ((int)a4 & LX_AT_SYMLINK_NOFOLLOW)!=0);
+        if(e<0)return e;
+        if(fstatat(hdirfd,host,&st,host_at_flags((int)a4))<0)return eret();
+      }
+      return ok0(guest_ownership_set(&st,(uint32_t)a2,(uint32_t)a3));
+    }
     if ((a4 & LX_AT_EMPTY_PATH) && (!a1 || !((const char*)a1)[0]))
       return ok0(fchown((int)a0, (uid_t)a2, (gid_t)a3));       // "chown the dirfd itself"
     e = resolve_at_nf((int)a0, (const char*)a1, host, sizeof host, &hdirfd,
                       ((int)a4 & LX_AT_SYMLINK_NOFOLLOW) != 0);
     if (e < 0) return e;
     return ok0(fchownat(hdirfd, host, (uid_t)a2, (gid_t)a3, host_at_flags((int)a4)));
-  case 55: return g_uid0 ? 0 : ok0(fchown((int)a0, (uid_t)a1, (gid_t)a2)); // fchown
+  case 55: // fchown
+    if (g_uid0) {
+      struct stat st; if(fstat((int)a0,&st)<0)return eret();
+      return ok0(guest_ownership_set(&st,(uint32_t)a1,(uint32_t)a2));
+    }
+    return ok0(fchown((int)a0,(uid_t)a1,(gid_t)a2));
   case 58: return -LX_EPERM;                                   // vhangup
   case 59: return do_pipe2((int*)a0, (int)a1);                 // pipe2 (net.c normally owns this)
   case 60: return -LX_EPERM;                                   // quotactl
@@ -839,7 +1022,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   case 71: {                                                   // sendfile(out, in, off*, count)
     long long off, *offp = 0;
     if (a2) { off = *(long long*)a2; offp = &off; }
-    long r = bounce_copy((int)a1, offp, (int)a0, 0, (size_t)a3);
+    long r = bounce_copy((int)a1, offp, (int)a0, 0, (size_t)a3, 0);
     if (r >= 0 && a2) *(long long*)a2 = off;
     return r;
   }
@@ -849,7 +1032,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     long long ioff, ooff, *ip = 0, *op = 0;
     if (a1) { ioff = *(long long*)a1; ip = &ioff; }
     if (a3) { ooff = *(long long*)a3; op = &ooff; }
-    long r = bounce_copy((int)a0, ip, (int)a2, op, (size_t)a4);
+    long r = bounce_copy((int)a0, ip, (int)a2, op, (size_t)a4, (int)(a5 & 0x2));
     if (r >= 0 && a1) *(long long*)a1 = ioff;
     if (r >= 0 && a3) *(long long*)a3 = ooff;
     return r;
@@ -877,9 +1060,9 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   }
   case 89: return -LX_EPERM;                                   // acct
   case 90: {                                                   // capget: report "no capabilities"
-    // Linux negotiates the capability ABI with a NULL data pointer. libcap-ng
-    // begins with version 0 and needs EINVAL plus the supported version in the
-    // header before it can perform a real capability query.
+    // Linux uses a NULL data pointer to negotiate the capability ABI version.
+    // libcap-ng initializes with version 0 and expects EINVAL plus the current
+    // version written back; a bare success leaves its state uninitialized.
     if (!a0) return -LX_EFAULT;
     uint32_t* header = (uint32_t*)a0;
     const uint32_t current = 0x20080522U; // _LINUX_CAPABILITY_VERSION_3
@@ -890,10 +1073,10 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
       return -LX_EINVAL;
     }
     if (!a1) return 0;
-    memset((void*)a1, 0, nwords * 12);
+    memset((void*)a1, 0, nwords * 12); // __user_cap_data_struct entries
     return 0;
   }
-  case 91: return -LX_EPERM;                                   // capset
+  case 91: return g_uid0 ? 0 : -LX_EPERM;                       // capset: no-op under RDUID0
   case 92: return 0;                                           // personality: accept, ignore
 
   // ===== 95..106: process =================================================
@@ -905,7 +1088,10 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (lopt & LX_WCONTINUED) hopt |= WCONTINUED;
     if (lopt & LX_WNOWAIT)    hopt |= WNOWAIT;
     siginfo_t si; memset(&si, 0, sizeof si);
-    if (waitid((idtype_t)a0, (id_t)a1, &si, hopt) != 0) return eret();
+    // waitid(P_PIDFD, pidfd, ...): macOS has no pidfd idtype; resolve the pid from the registry.
+    if ((int)a0 == LX_P_PIDFD) {
+      if (pidfd_shim_waitid((int)a1, (id_t)a1, &si, hopt) != 0) return eret();
+    } else if (waitid((idtype_t)a0, (id_t)a1, &si, hopt) != 0) return eret();
     if (a2) {                                                  // Linux siginfo layout, by hand
       unsigned char* u = (unsigned char*)a2;
       memset(u, 0, 128);
@@ -1038,11 +1224,12 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   case 142: return -LX_EPERM;                                  // reboot
 
   // ===== 143..162: credentials, names ======================================
-  case 143: return ok0(setregid((gid_t)a0, (gid_t)a1));
-  case 144: return ok0(setgid((gid_t)a0));
-  case 145: return ok0(setreuid((uid_t)a0, (uid_t)a1));
-  case 146: return ok0(setuid((uid_t)a0));
+  case 143: return g_uid0 ? 0 : ok0(setregid((gid_t)a0, (gid_t)a1));
+  case 144: return g_uid0 ? 0 : ok0(setgid((gid_t)a0));
+  case 145: return g_uid0 ? 0 : ok0(setreuid((uid_t)a0, (uid_t)a1));
+  case 146: return g_uid0 ? 0 : ok0(setuid((uid_t)a0));
   case 147: {                                                  // setresuid (no macOS equivalent)
+    if (g_uid0) return 0;
     uid_t r = (uid_t)a0, ef = (uid_t)a1;
     if ((int)a0 == -1 && (int)a1 == -1) return 0;
     if (setreuid((int)a0 == -1 ? (uid_t)-1 : r, (int)a1 == -1 ? (uid_t)-1 : ef) != 0) return eret();
@@ -1056,6 +1243,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (a2) *(unsigned*)a2 = g_uid0 ? 0 : geteuid();
     return 0;
   case 149: {                                                  // setresgid
+    if (g_uid0) return 0;
     if ((int)a0 == -1 && (int)a1 == -1) return 0;
     if (setregid((int)a0 == -1 ? (gid_t)-1 : (gid_t)a0,
                  (int)a1 == -1 ? (gid_t)-1 : (gid_t)a1) != 0) return eret();
@@ -1096,10 +1284,20 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     pid_t r = setsid(); return r < 0 ? eret() : r;
   }
   case 158: {                                                  // getgroups (gid_t is u32 on both)
+    // RDUID0=1: the host process is uid 501 and its group list is the HOST's; the guest is uid 0 and
+    // expects the root group. Report a synthetic single supplementary group (gid 0) so systemd's
+    // executor can "determine supplementary groups" for SupplementaryGroups=/Group= units.
+    if (g_uid0) {
+      int sz = (int)a0;
+      if (sz < 0) return -LX_EINVAL;
+      if (sz == 0) return 1;                 // query count
+      if (a1) ((gid_t*)a1)[0] = 0;
+      return 1;
+    }
     int n = getgroups((int)a0, (gid_t*)a1);
     return n < 0 ? eret() : n;
   }
-  case 159: return ok0(setgroups((int)a0, (const gid_t*)a1));  // setgroups
+  case 159: return g_uid0 ? 0 : ok0(setgroups((int)a0, (const gid_t*)a1));  // setgroups
   case 161: case 162: return -LX_EPERM;                        // sethostname/setdomainname
   case 163: {                                                  // getrlimit
     int hr = host_rlimit((int)a0);
@@ -1139,10 +1337,44 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return 0;
 
   // ===== 180..197: SysV IPC / POSIX mqueues ================================
-  // mqueues and message queues stay unimplemented; nothing has asked for them.
+  // POSIX mqueues (mq_open/...) have NO macOS equivalent (Darwin implements SysV IPC and POSIX
+  // shm, but not POSIX mq). They stay a clean -ENOSYS on purpose: the honest milestone here is
+  // the SysV message-queue forwarding below plus /dev/shm for POSIX shm_open. A program that
+  // hard-requires mq gets an unambiguous ENOSYS to react to, not a half-correct emulation.
   case 180: case 181: case 182: case 183: case 184: case 185:  // mq_*
-  case 186: case 187: case 188: case 189:                      // msg*
     return -LX_ENOSYS;
+
+  // SysV message queues are FORWARDED to the host, exactly like shm/sem below. macOS implements
+  // msgget/msgsnd/msgrcv/msgctl natively, the four signatures match Linux 1:1, struct msgbuf's
+  // leading `long mtype` is identical on both, and guest pointers ARE host pointers. IPC_NOWAIT
+  // and MSG_NOERROR share their values, and msgctl's IPC_RMID/IPC_SET/IPC_STAT are 0/1/2 on both.
+  case 186: { int r = msgget((key_t)a0, (int)a1); return r < 0 ? eret() : r; }   // msgget
+  case 189: { int r = msgsnd((int)a0, (const void*)a1, (size_t)a2, (int)a3);     // msgsnd
+              return r < 0 ? eret() : 0; }
+  case 188: { ssize_t r = msgrcv((int)a0, (void*)a1, (size_t)a2, (long)a3, (int)a4);  // msgrcv
+              return r < 0 ? eret() : (long)r; }
+  case 187: {                                                  // msgctl(msqid, cmd, buf)
+    // IPC_STAT/IPC_SET must translate the struct, not pass it through: Linux msqid64_ds and
+    // Darwin msqid_ds disagree on field order (Darwin puts cbytes/qnum/qbytes/lspid/lrpid BEFORE
+    // the timestamps and pads differently), so a raw forward reports qbytes/qnum out of the
+    // middle of the reserved words. See lx_msqid_put / lx_msqid_get.
+    if ((int)a1 == IPC_RMID) { int r = msgctl((int)a0, IPC_RMID, 0); return r < 0 ? eret() : 0; }
+    if ((int)a1 == IPC_SET) {
+      if (!a2) return -LX_EFAULT;
+      struct msqid_ds hs;
+      lx_msqid_get(&hs, (const struct lx_msqid64_ds*)a2);
+      int r = msgctl((int)a0, IPC_SET, &hs);
+      return r < 0 ? eret() : 0;
+    }
+    if ((int)a1 == IPC_STAT) {
+      if (!a2) return -LX_EFAULT;
+      struct msqid_ds hs;
+      if (msgctl((int)a0, IPC_STAT, &hs) < 0) return eret();
+      lx_msqid_put((struct lx_msqid64_ds*)a2, &hs);
+      return 0;
+    }
+    return -LX_ENOSYS;                          // IPC_INFO/MSG_INFO/MSG_STAT: nothing asks
+  }
 
   // SysV shared memory and semaphores are FORWARDED to the host. macOS implements both natively
   // (verified: semget -> 131083, shmget -> 131073, shmat -> 0x1008b4000), so stubbing these to
@@ -1228,8 +1460,14 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     }
     { int r = semctl((int)a0, (int)a1, mcmd); return r < 0 ? eret() : r; }
   }
-  case 192:                                                    // semtimedop
-    return -LX_ENOSYS;
+  case 192: {                                                  // semtimedop -> semop
+    // macOS has no semtimedop. The timeout is only a real-time upper bound; mapping to a plain
+    // blocking semop is exact for a NULL or effectively-infinite timeout (the common case) and
+    // the honest approximation otherwise — strictly better than the -ENOSYS it replaced.
+    // struct sembuf is identical on both systems, so the guest's sops array passes through.
+    int r = semop((int)a0, (struct sembuf*)a1, (size_t)a2);
+    return r < 0 ? eret() : 0;
+  }
 
   // ===== 213..241: memory ==================================================
   case 213: return 0;                                          // readahead: advisory, ignore
@@ -1311,7 +1549,26 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return r;
   }
   case 262: case 263: return -LX_EPERM;                         // fanotify_init/mark
-  case 264: case 265: return -LX_EOPNOTSUPP;                    // name_to_handle_at/open_by_handle_at
+  case 264: {                                                  // name_to_handle_at(dfd, path, handle, mount_id, flags)
+    // Returns an opaque filesystem handle + a mount id for a path. systemd's is_idmapping_supported()
+    // probes this to decide whether a directory sits on an idmapped mount; EOPNOTSUPP made the probe
+    // fail and took down the RUNTIME_DIRECTORY step ("Failed to set up special execution directory in
+    // /run: No such file or directory"). The shim has no real mount topology, so return an empty handle
+    // and the host device number as the mount id; existence is checked so ENOENT still propagates.
+    char host[PATH_MAX]; int hdirfd = -100;
+    long e = resolve_at((int)a0, (const char*)a1, host, sizeof host, &hdirfd);
+    if (e < 0) return e;
+    struct stat st;
+    if (fstatat(hdirfd, host, &st, 0) < 0) return eret();
+    if (a2) {
+      struct { unsigned int handle_bytes; int handle_type; }* fh = (void*)a2;
+      fh->handle_bytes = 0;                                   // empty handle: nothing to store
+      fh->handle_type = 0;
+    }
+    if (a3) *(int*)a3 = (int)st.st_dev;
+    return 0;
+  }
+  case 265: return -LX_EOPNOTSUPP;                            // open_by_handle_at (no stored handles)
   case 266: return -LX_EPERM;                                   // clock_adjtime
   case 267: sync(); return 0;                                   // syncfs
   case 268: return -LX_EPERM;                                   // setns
@@ -1375,7 +1632,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     long long ioff, ooff, *ip = 0, *op = 0;
     if (a1) { ioff = *(long long*)a1; ip = &ioff; }
     if (a3) { ooff = *(long long*)a3; op = &ooff; }
-    long r = bounce_copy((int)a0, ip, (int)a2, op, (size_t)a4);
+    long r = bounce_copy((int)a0, ip, (int)a2, op, (size_t)a4, 0);
     if (r >= 0 && a1) *(long long*)a1 = ioff;
     if (r >= 0 && a3) *(long long*)a3 = ooff;
     return r;
@@ -1438,12 +1695,47 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     int r = poll((struct pollfd*)a0, (nfds_t)a1, ms);           // Linux POLL* values match
     return r < 0 ? eret() : r;
   }
-  case 424: return -LX_ENOSYS;                                  // pidfd_send_signal
+  case 424: {                                                   // pidfd_send_signal(pidfd, sig, info, flags)
+    (void)a2; (void)a3;
+    int hsig = host_signo((int)a1);
+    if (hsig <= 0) return hsig == 0 ? 0 : -LX_EINVAL;
+    return ok0(pidfd_shim_send_signal((int)a0, hsig));
+  }
   case 425: case 426: case 427: return -LX_ENOSYS;              // io_uring_*
-  case 428: case 429: case 430: case 431: case 432: case 433:
-    return -LX_EPERM;                                           // new mount API
-  case 434: return -LX_ENOSYS;                                  // pidfd_open
-  case 435: return -LX_ENOSYS;                                  // clone3 (musl falls back to clone)
+  case 428: case 432: {                                       // open_tree / fsmount -> a real dir fd
+    // fsmount's result is fd_reopen(mfd, O_DIRECTORY)'d by systemd's credential setup, so it must
+    // be a real directory. Return the host /tmp dir fd.
+    int fd = open("/tmp", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    return fd >= 0 ? fd : eret();
+  }
+  case 430: case 433: {                                       // fsopen / fspick -> unconnected DGRAM
+    // libmount's mnt_context_read_mesgs() does `while (read(fd,...) != -1)` and loops forever on
+    // EOF (0); an unconnected socket makes read() return -1 immediately. MEASURED: on macOS a
+    // BLOCKING unconnected DGRAM read() does NOT return -1 — it blocks forever, so /usr/bin/mount
+    // (tmp.mount's fsopen path) hung in read() and the boot stalled. Make it O_NONBLOCK so read()
+    // returns EAGAIN at once and libmount's loop breaks.
+    int fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+    if (fd >= 0) { fcntl(fd, F_SETFD, FD_CLOEXEC); fcntl(fd, F_SETFL, O_NONBLOCK); }
+    return fd >= 0 ? fd : eret();
+  }
+  case 429: return 0;                                           // move_mount: no-op success
+  case 431: return 0;                                           // fsconfig: no-op success
+  case 434: return pidfd_open_shim((pid_t)(long)a0, (unsigned int)a1);   // pidfd_open
+  case 435: {                                                   // clone3
+    if (getenv("RDCLONEDBG")) {
+      FILE* cf = fopen("/tmp/rd_clone_dbg.txt", "a");
+      if (cf) {
+        unsigned long flags = a0 ? *(unsigned long*)(uintptr_t)a0 : 0;
+        unsigned long pidfd = a0 ? *(unsigned long*)(uintptr_t)(a0 + 8) : 0;
+        unsigned long chtid = a0 ? *(unsigned long*)(uintptr_t)(a0 + 16) : 0;
+        unsigned long ptid  = a0 ? *(unsigned long*)(uintptr_t)(a0 + 24) : 0;
+        unsigned long stack = a0 ? *(unsigned long*)(uintptr_t)(a0 + 40) : 0;
+        fprintf(cf, "clone3 a0=%#lx size=%#lx flags=%#lx pidfd_field=%#lx child_tid=%#lx parent_tid=%#lx stack=%#lx\n",
+                a0, a1, flags, pidfd, chtid, ptid, stack); fclose(cf);
+      }
+    }
+    return -LX_ENOSYS;                                          // clone3 (glibc may not fall back)
+  }
   case 436: {                                                   // close_range(first, last, flags)
     // This walks the HOST fd table, because the guest has no other one — a guest fd IS a host fd.
     // For close(2) that is harmless: the guest names a single descriptor it believes it owns. For
@@ -1473,11 +1765,13 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
               getpid(), first, last, flags);
     for (unsigned fd = first; fd <= last; fd++) {
       if (shim_fd_reserved((int)fd)) continue;
+      if (pidfd_shim_pid((int)fd) > 0) continue;                  // leak pidfds, like close(2)
       if (flags & 4) {                                          // CLOSE_RANGE_CLOEXEC
         int fl = fcntl((int)fd, F_GETFD);
         if (fl >= 0) fcntl((int)fd, F_SETFD, fl | FD_CLOEXEC);
       } else {
         drm_forget_fd((int)fd);                                 // see the close(2) case for why
+        evdev_forget_fd((int)fd);
         close((int)fd);
       }
     }
@@ -1486,6 +1780,23 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   case 437: return -LX_ENOSYS;                                  // openat2 (glibc falls back)
   case 438: return -LX_ENOSYS;                                  // pidfd_getfd
   case 439: {                                                   // faccessat2(dfd, path, mode, flags)
+    // AT_EMPTY_PATH + "" means "check the file the fd refers to". macOS faccessat() has no
+    // AT_EMPTY_PATH, so resolve the fd's own path (F_GETPATH) and check that. systemd's
+    // pin_callout_binary() does faccessat2(fd, "", X_OK, AT_EMPTY_PATH) on the freshly opened
+    // systemd-executor binary; returning ENOENT here made manager_new() fail with -ENOENT and
+    // froze PID 1 before it could start getty/dbus.
+    if ((int)a3 & LX_AT_EMPTY_PATH) {
+      const char* p = (const char*)a1;
+      if (!p || !p[0]) {
+        int fd = (int)a0;
+        if (fd == LX_AT_FDCWD) return ok0(faccessat(AT_FDCWD, ".", (int)a2, AT_EACCESS));
+        char hp[PATH_MAX];
+        if (fcntl(fd, F_GETPATH, hp) == 0)
+          return ok0(faccessat(AT_FDCWD, hp, (int)a2, 0));
+        // No path (socket/pipe/memfd): the fd is a live open handle, so F_OK/X_OK/W_OK/R_OK pass.
+        return 0;
+      }
+    }
     e = resolve_at_nf((int)a0, (const char*)a1, host, sizeof host, &hdirfd,
                       ((int)a3 & LX_AT_SYMLINK_NOFOLLOW) != 0);
     if (e < 0) return e;
@@ -1495,9 +1806,14 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   }
   case 440: return 0;                                           // process_madvise: advisory
   case 441: return -LX_ENOSYS;                                  // epoll_pwait2 (falls back)
-  case 442: return -LX_EPERM;                                   // mount_setattr
+  case 442: return 0;                                           // mount_setattr: no-op success
   case 443: return -LX_EPERM;                                   // quotactl_fd
   case 452: {                                                   // fchmodat2(dfd, path, mode, flags)
+    // AT_EMPTY_PATH + empty path == "chmod the dirfd itself". systemd's executor uses this while
+    // setting up a service's RuntimeDirectory; the generic resolve below fails ENOENT on an empty
+    // path and the executor then exits 233 (EXIT_RUNTIME_DIRECTORY), failing the unit.
+    if ((a3 & LX_AT_EMPTY_PATH) && (!a1 || !((const char*)a1)[0]))
+      return ok0(fchmod((int)a0, (mode_t)a2));
     e = resolve_at_nf((int)a0, (const char*)a1, host, sizeof host, &hdirfd,
                       ((int)a3 & LX_AT_SYMLINK_NOFOLLOW) != 0);
     if (e < 0) return e;

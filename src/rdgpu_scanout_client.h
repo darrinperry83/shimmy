@@ -48,6 +48,18 @@ int rdgpu_scanout_enabled(void);
 //    -5  no reply within the timeout (RDGPU_SCANOUT_TIMEOUT_MS, default 1000)
 int rdgpu_scanout_present(IOSurfaceRef surface, CGDirectDisplayID display);
 
+// The "flick" control half: tell the scanout payload to un-suppress or re-suppress the takeover
+// by re-setting / clearing the display `online` flag (and stopping / resuming the direct present).
+//
+// `online`: 1 = macOS owns the display(s) — re-set the `online` flag so macOS re-composites and
+//           the direct present stops; 0 = Linux owns them — clear the flag and resume the direct
+//           present. The message is sent for ALL displays (RDGPU_SCANOUT_TOGGLE_ALL).
+//
+// One-way (no reply). Returns 0 on a successful send, or the same negative transport codes as
+// rdgpu_scanout_present (-3 service unreachable, -4 mach_msg send failed). The shim flips its own
+// present sink regardless of this return, so the flick still works when the service is down.
+int rdgpu_scanout_set_online(int online);
+
 #ifdef __cplusplus
 }
 #endif

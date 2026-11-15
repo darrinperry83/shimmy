@@ -23,16 +23,38 @@
 #include "drmasahi.h"
 #include "rdgpu_surface_handoff.h"
 
+#include "rdgpu_native_output.h"
+
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOSurface/IOSurface.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdatomic.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
+
+// Present bridge to the Metal window. Declared + defined WEAK here so the headless builds
+// (shim_cli, shim_wlh) link without window.m; the GUI build's strong definition in window.m
+// overrides this no-op with the real CAMetalLayer present path (the exact call the Wayland
+// path reaches via x11rnd_present_bgra -> gpuwin_present_fmt(..., bgra=1)).
+__attribute__((weak)) long gpuwin_present_fmt(const uint8_t* px, uint64_t w, uint64_t h, int bgra) {
+  (void)px; (void)w; (void)h; (void)bgra;
+  return -19;                                   // no Metal present path in this build
+}
+
+// Per-CRTC present bridge. Declared + defined WEAK so headless builds (shim_cli, shim_wlh)
+// link without window.m; the GUI build's strong definition in window.m overrides this with a
+// route that sends crtc 1 to the primary Metal window and crtc 2 to the secondary output.
+// `crtc_id` is the shim's CRTC object id (1 = external DP, 2 = builtin eDP).
+__attribute__((weak)) long gpuwin_present_crtc(const uint8_t* px, uint64_t w, uint64_t h, int bgra,
+                                               uint32_t crtc_id) {
+  (void)crtc_id;
+  return gpuwin_present_fmt(px, w, h, bgra);   // headless fallback: primary only
+}
 
 #define IOC_NRSHIFT    0
 #define IOC_TYPESHIFT  8
@@ -69,6 +91,13 @@
 #define DRM_NR_MODE_GETPLANE         0xb6
 #define DRM_NR_MODE_ADDFB2           0xb8
 #define DRM_NR_MODE_OBJ_GETPROPERTIES 0xb9
+#define DRM_NR_MODE_SETCRTC          0xa2
+#define DRM_NR_MODE_SETPROPERTY      0xab   // legacy drmModeConnectorSetProperty (DPMS)
+#define DRM_NR_MODE_PAGE_FLIP        0xb0
+#define DRM_NR_MODE_ATOMIC           0xbc
+#define DRM_NR_MODE_CREATEPROPBLOB   0xbd
+#define DRM_NR_MODE_DESTROYPROPBLOB  0xbe
+#define DRM_NR_MODE_OBJ_SETPROPERTY  0xba
 
 // DRM capabilities (drm.h). TIMESTAMP_MONOTONIC is 0x6, ASYNC_PAGE_FLIP is 0x7,
 // CRTC_IN_VBLANK_EVENT is 0x12 (the "0x6 vs 0x7" confusion in the brief is these three).
@@ -89,22 +118,60 @@
 #define DRM_CLIENT_CAP_ATOMIC           3
 
 // Connector/encoder/mode constants used to answer the KMS probes plausibly.
+#define DRM_MODE_CONNECTOR_DisplayPort 10
 #define DRM_MODE_CONNECTOR_eDP    14
 #define DRM_MODE_ENCODER_VIRTUAL  5
 #define DRM_MODE_CONNECTED        1
+#define DRM_MODE_DISCONNECTED     2
 #define DRM_MODE_TYPE_PREFERRED   8
 
-// Property surface (drm_mode.h). The plane exposes one enum property "type"
-// valued DRM_PLANE_TYPE_PRIMARY; CRTC/connector expose none.
+// Property surface (drm_mode.h). One primary plane, one CRTC, one connector, each
+// exposing the standard atomic properties aquamarine discovers by NAME via
+// MODE_OBJ_GETPROPERTIES + MODE_GETPROPERTY and then references in MODE_ATOMIC.
 #define DRM_MODE_OBJECT_CRTC      0xcccccccc
 #define DRM_MODE_OBJECT_CONNECTOR 0xc0c0c0c0
 #define DRM_MODE_OBJECT_PLANE     0xeeeeeeee
 #define DRM_MODE_OBJECT_ANY       0
+#define DRM_MODE_PROP_PENDING     (1 << 0)
+#define DRM_MODE_PROP_RANGE       (1 << 1)
 #define DRM_MODE_PROP_IMMUTABLE   (1 << 2)
 #define DRM_MODE_PROP_ENUM        (1 << 3)
+#define DRM_MODE_PROP_BLOB        (1 << 4)
+#define DRM_MODE_PROP_OBJECT      (DRM_MODE_PROP_TYPE(1))
+#define DRM_MODE_PROP_TYPE(n)     ((n) << 6)
 #define DRM_MODE_PROP_ATOMIC      0x80000000
 #define DRM_PLANE_TYPE_PRIMARY    1
+#define DRM_PLANE_TYPE_CURSOR     2
+#define DRM_PLANE_TYPE_OVERLAY    3
 #define DRM_FORMAT_XRGB8888       0x34325258   // fourcc 'XR24'
+
+// Atomic commit flags (drm_mode.h) and page-flip flags.
+#define DRM_MODE_PAGE_FLIP_EVENT      0x01
+#define DRM_MODE_PAGE_FLIP_ASYNC      0x02
+#define DRM_MODE_ATOMIC_TEST_ONLY     0x0100
+#define DRM_MODE_ATOMIC_NONBLOCK      0x0200
+#define DRM_MODE_ATOMIC_ALLOW_MODESET 0x0400
+
+// DRM events (drm.h).
+#define DRM_EVENT_VBLANK        0x01
+#define DRM_EVENT_FLIP_COMPLETE 0x02
+
+// Property ids (shim-internal global namespace; stable across MODE_OBJ_GETPROPERTIES,
+// MODE_GETPROPERTY and MODE_ATOMIC).
+#define DRM_PROP_TYPE     1    // plane "type" enum (immutable)
+#define DRM_PROP_ACTIVE   2    // crtc "ACTIVE" range
+#define DRM_PROP_MODE_ID  3    // crtc "MODE_ID" blob
+#define DRM_PROP_CRTC_ID  4    // connector+plane "CRTC_ID" object
+#define DRM_PROP_FB_ID    5    // plane "FB_ID" object
+#define DRM_PROP_SRC_X    6    // plane range (16.16)
+#define DRM_PROP_SRC_Y    7
+#define DRM_PROP_SRC_W    8
+#define DRM_PROP_SRC_H    9
+#define DRM_PROP_CRTC_X   10   // plane range (px)
+#define DRM_PROP_CRTC_Y   11
+#define DRM_PROP_CRTC_W   12
+#define DRM_PROP_CRTC_H   13
+#define DRM_PROP_DPMS     14   // connector "DPMS" enum
 
 // struct drm_version, 64-bit layout (offsets verified against drm.h):
 //   0 version_major(i32) 4 version_minor(i32) 8 version_patchlevel(i32) 12 pad
@@ -227,6 +294,45 @@ struct drm_mode_destroy_dumb {
   uint32_t handle;                                                                   // 4
 };
 
+// ---- KMS commit structs (drm_mode.h, 64-bit aarch64 layouts). ----
+// drm_mode_crtc doubles as both MODE_GETCRTC (output) and MODE_SETCRTC (input).
+struct drm_mode_crtc_page_flip {
+  uint32_t crtc_id, fb_id, flags, reserved;                                          // 16
+  uint64_t user_data;                                                                // 8 -> 24
+};
+struct drm_mode_atomic {
+  uint32_t flags, count_objs;                                                        // 8
+  uint64_t objs_ptr, count_props_ptr, props_ptr, prop_values_ptr, reserved, user_data; // 48 -> 56
+};
+struct drm_mode_create_blob {
+  uint64_t data;                                                                     // 8
+  uint32_t length, blob_id;                                                          // 8 -> 16
+};
+struct drm_mode_destroy_blob {
+  uint32_t blob_id;                                                                  // 4
+};
+struct drm_mode_property_enum {
+  uint64_t value;                                                                    // 8
+  char name[32];                                                                     // 32 -> 40
+};
+struct drm_mode_connector_set_property {
+  uint64_t value;                                                                    // 8
+  uint32_t prop_id, connector_id;                                                    // 8 -> 16
+};
+struct drm_mode_obj_set_property {
+  uint64_t value;                                                                    // 8
+  uint32_t prop_id, obj_id, obj_type;                                                // 12 -> 20
+};
+// DRM events delivered via read() on the DRM fd after a page-flip / atomic commit.
+struct drm_event {
+  uint32_t type, length;
+};
+struct drm_event_vblank {
+  struct drm_event base;                                                             // 8
+  uint64_t user_data;                                                                // 8 -> 16
+  uint32_t tv_sec, tv_usec, sequence, crtc_id;                                       // 16 -> 32
+};
+
 // Compile-time guard: if a layout drifts from the Linux UAPI, the build fails
 // instead of silently answering ioctls with a mis-sized struct.
 _Static_assert(sizeof(struct drm_get_cap)         == 16,  "drm_get_cap");
@@ -245,6 +351,15 @@ _Static_assert(sizeof(struct drm_mode_get_plane)  == 32,  "drm_mode_get_plane");
 _Static_assert(sizeof(struct drm_mode_create_dumb) == 32, "drm_mode_create_dumb");
 _Static_assert(sizeof(struct drm_mode_map_dumb)    == 16, "drm_mode_map_dumb");
 _Static_assert(sizeof(struct drm_mode_destroy_dumb) == 4, "drm_mode_destroy_dumb");
+_Static_assert(sizeof(struct drm_mode_crtc_page_flip) == 24, "drm_mode_crtc_page_flip");
+_Static_assert(sizeof(struct drm_mode_atomic)       == 56, "drm_mode_atomic");
+_Static_assert(sizeof(struct drm_mode_create_blob)  == 16, "drm_mode_create_blob");
+_Static_assert(sizeof(struct drm_mode_destroy_blob) == 4,  "drm_mode_destroy_blob");
+_Static_assert(sizeof(struct drm_mode_property_enum) == 40, "drm_mode_property_enum");
+_Static_assert(sizeof(struct drm_mode_connector_set_property) == 16, "drm_mode_connector_set_property");
+_Static_assert(sizeof(struct drm_mode_obj_set_property) == 24, "drm_mode_obj_set_property");
+_Static_assert(sizeof(struct drm_event)        == 8,  "drm_event");
+_Static_assert(sizeof(struct drm_event_vblank) == 32, "drm_event_vblank");
 
 // ---- Asahi UAPI (matches rootfs-arch/usr/include/drm/asahi_drm.h, NEW upstream UAPI) ----
 // The Arch Mesa 26.2.6 asahi binary issues nrs = DRM_COMMAND_BASE(0x40) + id. RDDRM_TRACE=1 is the
@@ -380,12 +495,6 @@ static struct gem_slot* gem_find_by_handle(uint32_t handle) {
     if (g_gem[i].resolved && g_gem[i].handle == handle) return &g_gem[i];
   return NULL;
 }
-static struct gem_slot* gem_find_by_identity(dev_t device, ino_t inode) {
-  for (int i = 0; i < MAX_GEM; i++)
-    if (g_gem[i].resolved && g_gem[i].device == device && g_gem[i].inode == inode)
-      return &g_gem[i];
-  return NULL;
-}
 static void gem_release_slot(struct gem_slot* g) {
   if (!g) return;
   if (g->surface) { CFRelease(g->surface); g->surface = NULL; }
@@ -505,6 +614,56 @@ static void export_forget(uint32_t handle) {
     if (g_export[i].used && g_export[i].handle == handle) g_export[i].used = 0;
 }
 
+// Import a cross-process dma-buf fd as a mappable dumb-BO. The fd carries the shared
+// backing: the exporter's PRIME_HANDLE_TO_FD now returns a dup of its BO's MAP_SHARED
+// anon file (see below), so the pixel bytes travel with the fd across SCM_RIGHTS. We
+// dup the fd so THIS process owns a reference, mmap it MAP_SHARED as the canonical view,
+// and record the (st_dev, st_ino) identity in the export table so MODE_MAP_DUMB /
+// drm_mmap_bo (the guest's EGL import: drmPrimeFDToHandle -> drmModeMapDumb -> mmap) and
+// drm_bo_map_by_fd (the present path) all resolve to the SAME shared pixels. Returns the
+// new handle (>= 0) or a negative errno.
+static int bo_import_shared_fd(int fd, dev_t device, ino_t inode) {
+  struct bo_slot* slot = NULL;
+  for (int i = 0; i < MAX_BO; i++) if (!g_bo[i].used) { slot = &g_bo[i]; break; }
+  if (!slot) return -ENOMEM;
+
+  int dup_fd = fcntl(fd, F_DUPFD_CLOEXEC, 0);
+  if (dup_fd < 0) return -EMFILE;
+
+  struct stat st;
+  if (fstat(dup_fd, &st) || st.st_size <= 0) { close(dup_fd); return -EINVAL; }
+
+  size_t rlen = (size_t)((st.st_size + 4095) & ~(size_t)4095);
+  if (rlen == 0) rlen = 4096;
+  /* The imported fd may be read-only (e.g. a mock-gate carrier fd opened
+   * O_RDONLY by rd_carrier_issue). mmap(PROT_WRITE) on an O_RDONLY fd fails
+   * with EACCES; this function used to map EVERY mmap failure to -ENOMEM, so a
+   * 3440x1440 (19.8 MB) carrier import hard-failed with -12 and broke the
+   * present content path. Fall back to a read-only canonical view so the fd
+   * still imports (valid handle + mmap); the present path only reads this
+   * view (drm_bo_map_by_fd). */
+  void* m = mmap(NULL, rlen, PROT_READ | PROT_WRITE, MAP_SHARED, dup_fd, 0);
+  if (m == MAP_FAILED)
+    m = mmap(NULL, rlen, PROT_READ, MAP_SHARED, dup_fd, 0);
+  if (m == MAP_FAILED) { close(dup_fd); return -ENOMEM; }
+
+  slot->handle = g_next_bo_handle;
+  slot->map = m;
+  slot->backing_fd = dup_fd;
+  slot->size = (size_t)st.st_size;
+  slot->used = 1;
+  /* Two references: one for the returned handle (released by the caller's
+   * GEM_CLOSE) and one for the dup'd fd (slot->backing_fd), mirroring
+   * PRIME_HANDLE_TO_FD's bo_ref() for the exported fd. wlsrv.c GEM_CLOSEs the
+   * handle immediately after PRIME_FD_TO_HANDLE (it keeps only dmabuf_fd for
+   * drm_bo_map_by_fd); with refs==1 that GEM_CLOSE freed the BO and forgot the
+   * export entry, so the later drm_bo_map_by_fd(dmabuf_fd) returned NULL and
+   * the present path dropped the frame. */
+  slot->refs = 2;
+  export_remember(slot->handle, device, inode);
+  return (int)g_next_bo_handle++;
+}
+
 // mmap() on a DRM fd (syscall 222) resolves the GEM fake offset to a FRESH MAP_SHARED
 // alias of the BO's backing file. Returns NULL if the fd/offset does not name one of our
 // BOs. The guest owns the returned mapping (it munmap()s it via the sw winsys), so it must
@@ -540,6 +699,84 @@ void* drm_bo_map_by_fd(int fd, size_t* size) {
   return b->map;
 }
 
+// ---- framebuffer table: fb_id -> backing BO + geometry (for the DRM flip present hook) ----
+// MODE_ADDFB2 wraps a GEM/dumb handle (the BO the sw winsys rendered into) with width, height
+// and stride. The atomic/page-flip commit references only the fb_id, so the present hook resolves
+// fb_id -> handle -> g_bo[] canonical view and pushes those exact pixels to the Metal window.
+#define MAX_FB 64
+struct fb_slot {
+  uint32_t fb_id;
+  uint32_t handle;      // GEM/dumb handle of the backing BO (g_bo[])
+  uint32_t width, height;
+  uint32_t pitch;       // stride in bytes (may exceed width*4 due to 64-byte dumb padding)
+  uint32_t format;      // fourcc (DRM_FORMAT_XRGB8888 == 'XR24')
+  int used;
+};
+static struct fb_slot g_fb[MAX_FB];
+
+static struct fb_slot* fb_find(uint32_t fb_id) {
+  for (int i = 0; i < MAX_FB; i++)
+    if (g_fb[i].used && g_fb[i].fb_id == fb_id) return &g_fb[i];
+  return NULL;
+}
+static void fb_forget(uint32_t fb_id) {
+  struct fb_slot* f = fb_find(fb_id);
+  if (f) memset(f, 0, sizeof *f);
+}
+
+// DRM flip present hook: push the just-committed framebuffer to the Metal window for a given
+// CRTC. Resolves fb_id -> fb_slot -> bo_slot, samples non-black for the trace line, then hands
+// the BGRA bytes to gpuwin_present_crtc(bgra=1, crtc_id) so the primary (crtc 1) and secondary
+// (crtc 2) outputs each present their own frame. XRGB8888 is already B,G,R,X in memory, so no
+// swizzle — only a stride repack when the dumb pitch has padding the staging upload lacks.
+static void drm_present_fb(uint32_t fb_id, uint32_t crtc_id) {
+  struct fb_slot* f = fb_find(fb_id);
+  if (!f || !f->handle) {
+    fprintf(stderr, "DRM_PRESENT crtc=%u fb_id=0x%x -> no framebuffer recorded (skip)\n",
+            crtc_id, fb_id);
+    return;
+  }
+  struct bo_slot* b = bo_find(f->handle);
+  if (!b || !b->map) {
+    fprintf(stderr, "DRM_PRESENT crtc=%u fb_id=0x%x handle=0x%x -> no BO backing (skip)\n",
+            crtc_id, fb_id, f->handle);
+    return;
+  }
+  uint32_t w = f->width, h = f->height;
+  if (!w || !h || w > 16384 || h > 16384) return;
+
+  const uint8_t* px = (const uint8_t*)b->map;
+  size_t tight = (size_t)w * 4;
+
+  // Non-black selfcheck: coarse grid over the whole frame, B/G/R channels (X/alpha is unused).
+  int nonblack = 0;
+  {
+    uint32_t sx = w > 1024 ? 97 : 1;
+    uint32_t sy = h > 1024 ? 97 : 1;
+    for (uint32_t y = 0; y < h && !nonblack; y += sy)
+      for (uint32_t x = 0; x < w && !nonblack; x += sx) {
+        const uint8_t* p = px + (size_t)y * f->pitch + (size_t)x * 4;
+        if (p[0] || p[1] || p[2]) nonblack = 1;
+      }
+  }
+
+  static unsigned frame;
+  unsigned n = ++frame;
+  fprintf(stderr, "DRM_PRESENT crtc=%u frame=%u %ux%u %s pitch=%u\n",
+          crtc_id, n, w, h, nonblack ? "non-black" : "black", f->pitch);
+
+  if (f->pitch == tight) {
+    gpuwin_present_crtc(px, w, h, /*bgra=*/1, crtc_id);   // zero-copy: already tightly packed BGRA
+  } else if (f->pitch >= tight) {
+    uint8_t* tmp = (uint8_t*)malloc(tight * h);
+    if (!tmp) return;
+    for (uint32_t y = 0; y < h; y++)
+      memcpy(tmp + (size_t)y * tight, px + (size_t)y * f->pitch, tight);
+    gpuwin_present_crtc(tmp, w, h, /*bgra=*/1, crtc_id);
+    free(tmp);
+  }
+}
+
 int drm_enabled(void) {
   // Present by default (the rdmetal render node is now the installed default
   // driver, so Hyprland/KWin must see /dev/dri/renderD128 with no env vars).
@@ -547,6 +784,15 @@ int drm_enabled(void) {
   if (g_on < 0) { const char* e = getenv("RDDRM"); g_on = !(e && *e == '0'); }
   return g_on;
 }
+
+// "DRM master active": the guest issued a KMS-master ioctl (SET_CLIENT_CAP with
+// UNIVERSAL_PLANES/ATOMIC, or MODE_GETRESOURCES). Render-only clients (Mesa on
+// renderD128) never do this; aquamarine's native DRM backend does it at init, before
+// its nested-Wayland fallback backend ever connects. wlsrv.c reads this to decide
+// whether to advertise a wl_output (the nested presentation must stay retired when
+// the compositor is already presenting natively as the DRM master).
+static atomic_int g_master_active;
+int drm_master_active(void) { return atomic_load(&g_master_active); }
 static int tracing(void) {
   if (g_trace < 0) { const char* e = getenv("RDDRM_TRACE"); g_trace = (e && *e && *e != '0'); }
   return g_trace;
@@ -629,10 +875,33 @@ static void trace_hex(const char* label, const void* p, unsigned n) {
 //   4 = /device/subsystem   symlink (bus type for drmParseSubsystemType)
 //   5 = /device/uevent      device-level uevent (PCI_SLOT_NAME= for drmParsePciBusInfo)
 //   6 = /device/{vendor,device,subsystem_vendor,subsystem_device}  PCI id files
+//   7 = /sys/class/drm                       (S_IFDIR)  libudev scanGPUs entry
+//   8 = /sys/class/drm/{card0,renderD128}    (S_IFDIR)
+//   9 = /sys/class/drm/<name>/uevent         (S_IFREG)  DRM card uevent
+//  10 = /sys/class/drm/<name>/dev            (S_IFREG)  "226:<minor>"
+//  11 = /sys/class/drm/<name>/subsystem      (S_IFLNK)  -> /sys/class/drm
 int drm_sysfs_kind(const char* path) {
   if (!path) return 0;
   static const char pre[] = "/sys/dev/char/226:";
-  if (strncmp(path, pre, sizeof pre - 1)) return 0;
+  if (strncmp(path, pre, sizeof pre - 1)) {
+    // /sys/class/drm — the libudev enumeration surface for aquamarine's scanGPUs().
+    static const char cls[] = "/sys/class/drm";
+    if (strncmp(path, cls, sizeof cls - 1)) return 0;
+    const char* p = path + sizeof cls - 1;
+    if (*p == 0) return 7;                                   // /sys/class/drm
+    if (*p != '/') return 0;
+    p++;
+    const char* leaf = p;
+    while (*p && *p != '/') p++;
+    int is_card = (p - leaf == 5 && strncmp(leaf, "card0", 5) == 0);
+    int is_rnd  = (p - leaf == 9 && strncmp(leaf, "renderD128", 9) == 0);
+    if (!is_card && !is_rnd) return 0;
+    if (*p == 0) return 8;                                   // /sys/class/drm/<name>
+    if (strcmp(p, "/uevent") == 0)    return 9;
+    if (strcmp(p, "/dev") == 0)       return 10;
+    if (strcmp(p, "/subsystem") == 0) return 11;
+    return 0;
+  }
   const char* p = path + sizeof pre - 1;
   while (*p >= '0' && *p <= '9') p++;                 // skip the minor digits
   if (strcmp(p, "/device/drm") == 0) return 1;
@@ -648,15 +917,46 @@ int drm_sysfs_kind(const char* path) {
   return 0;
 }
 
+// Minor for a /sys/class/drm/<name> path: 0 for card0, 128 for renderD128, -1 otherwise.
+static int drm_class_minor(const char* path) {
+  const char* p = path ? strstr(path, "/sys/class/drm/") : NULL;
+  if (!p) return -1;
+  p += sizeof("/sys/class/drm/") - 1;
+  if (strncmp(p, "card0", 5) == 0) return 0;
+  if (strncmp(p, "renderD128", 9) == 0) return 128;
+  return -1;
+}
+
 // Content served for /sys/dev/char/226:*/uevent. libdrm reads DEVNAME and prepends "/dev/",
 // so the value must be the path relative to /dev ("dri/card0") for the returned name to be an
 // openable devnode (aquamarine reopens it with open(name) in reopenDRMNode()).
 const char* drm_sysfs_uevent(void) { return "DEVNAME=dri/card0\n"; }
 
+// Full DRM uevent body for /sys/class/drm/<name>/uevent (libudev scanGPUs reads this).
+const char* drm_sysfs_uevent_for(const char* path) {
+  int m = drm_class_minor(path);
+  static char b[160];
+  snprintf(b, sizeof b,
+           "MAJOR=226\nMINOR=%d\nDEVNAME=dri/%s\nDEVTYPE=drm_minor\nSUBSYSTEM=drm\n",
+           m, m == 128 ? "renderD128" : "card0");
+  return b;
+}
+
+// dev file body ("226:<minor>") for /sys/class/drm/<name>/dev.
+const char* drm_sysfs_dev_for(const char* path) {
+  int m = drm_class_minor(path);
+  static char b[16];
+  snprintf(b, sizeof b, "226:%d\n", m);
+  return b;
+}
+
 // Target reported for /sys/dev/char/226:*/device/subsystem. libdrm's drmParseSubsystemType
 // readlink()s this and maps the trailing path component to a bus type ("/pci" -> PCI), so the
 // synthetic device enumerates as a PCI GPU. (Apple's AGX is PCIe, matching the "asahi" name.)
 const char* drm_sysfs_link(void) { return "/pci"; }
+
+// Target for /sys/class/drm/<name>/subsystem (libudev subsystem probe -> "drm").
+const char* drm_sysfs_class_link(void) { return "/sys/class/drm"; }
 
 // File body served for the device-level PCI files (kinds 5 and 6). A single PCI slot is all
 // libdrm needs; both card0 and renderD128 report the same bus so drmFoldDuplicatedDevices merges
@@ -678,25 +978,242 @@ const char* drm_sysfs_pci_content(const char* path) {
 void drm_fake_stat(unsigned int* mode, unsigned long* rdev, const char* path) {
   int k = drm_sysfs_kind(path);
   if (k == 1) { *mode = 0020000u; *rdev = ((unsigned long)DRM_MAJOR << 8); return; } // S_IFCHR
-  if (k == 2 || k == 5 || k == 6) { *mode = 0100000u; *rdev = 0; return; }           // S_IFREG
-  if (k == 3) { *mode = 0040000u; *rdev = 0; return; }                               // S_IFDIR
-  if (k == 4) { *mode = 0120000u; *rdev = 0; return; }                               // S_IFLNK
+  if (k == 2 || k == 5 || k == 6 || k == 9 || k == 10) { *mode = 0100000u; *rdev = 0; return; } // S_IFREG
+  if (k == 3 || k == 7 || k == 8) { *mode = 0040000u; *rdev = 0; return; }                    // S_IFDIR
+  if (k == 4 || k == 11) { *mode = 0120000u; *rdev = 0; return; }                             // S_IFLNK
   int render = path && strstr(path, "renderD") != NULL;
   *mode = (*mode & 0777u) | 0020000u;                       // S_IFCHR
   *rdev = ((unsigned long)DRM_MAJOR << 8) | (render ? 128u : 0u);
 }
 
-// The single plausible output: a 1920x1080@60 preferred mode, written into a
-// caller-provided struct drm_mode_modeinfo slot (MODE_GETCONNECTOR modes_ptr).
-static void fill_modeinfo(struct drm_mode_modeinfo* m) {
+// A preferred mode at an arbitrary native size (reduced-blanking timings). The shim
+// never drives a real CRTC, so the exact blanking is cosmetic; aquamarine only needs
+// hdisplay/vdisplay/vrefresh to be the real display's native pixels so it modesets
+// the guest output at full resolution.
+static void fill_mode_wh(struct drm_mode_modeinfo* m, uint16_t hd, uint16_t vd,
+                         uint32_t refresh, const char* name) {
   memset(m, 0, sizeof *m);
-  m->clock       = 148500;                    // kHz
-  m->hdisplay    = 1920; m->hsync_start = 2008; m->hsync_end = 2052; m->htotal = 2200; m->hskew = 0;
-  m->vdisplay    = 1080; m->vsync_start = 1084; m->vsync_end = 1089; m->vtotal = 1125; m->vscan = 0;
-  m->vrefresh    = 60;
+  uint16_t htotal = (uint16_t)(hd + 80);
+  uint16_t vtotal = (uint16_t)(vd + 46);
+  m->clock       = (uint32_t)((uint64_t)htotal * (uint64_t)vtotal * refresh / 1000);
+  m->hdisplay    = hd; m->hsync_start = (uint16_t)(hd + 16); m->hsync_end = (uint16_t)(hd + 48);
+  m->htotal      = htotal; m->hskew = 0;
+  m->vdisplay    = vd; m->vsync_start = (uint16_t)(vd + 3); m->vsync_end = (uint16_t)(vd + 9);
+  m->vtotal      = vtotal; m->vscan = 0;
+  m->vrefresh    = refresh;
   m->flags       = 0;
   m->type        = DRM_MODE_TYPE_PREFERRED;
-  memcpy(m->name, "1920x1080", sizeof("1920x1080"));
+  snprintf(m->name, sizeof m->name, "%s", name);
+}
+
+// The two physical displays the DRM node advertises:
+//   connector 1 = external 3440x1440 (DisplayPort)
+//   connector 2 = builtin  3600x2338 (eDP, Retina panel)
+// The CLI has no AppKit output inventory. Its weak symbol is absent, so retain
+// the historical diagnostic mode there. The GUI uses actual connected display
+// geometry; an unplugged external connector has no advertised mode.
+extern int rdgpu_drm_connector_output(uint32_t, uint32_t*, uint32_t*) __attribute__((weak_import));
+static int fill_mode_for_connector(uint32_t connector_id, struct drm_mode_modeinfo* m) {
+  uint32_t width = 0, height = 0;
+  if (rdgpu_drm_connector_output) {
+    if (rdgpu_drm_connector_output(connector_id, &width, &height) != 0) return -1;
+  } else if (connector_id == 2) {
+    width = 3600; height = 2338;
+  } else {
+    width = 3440; height = 1440;
+  }
+  if (!width || !height || width > UINT16_MAX - 80 || height > UINT16_MAX - 46) return -1;
+  char name[32];
+  snprintf(name, sizeof name, "%ux%u", width, height);
+  fill_mode_wh(m, (uint16_t)width, (uint16_t)height, 60, name);
+  return 0;
+}
+
+// ---- KMS state (one CRTC, one connector, one primary plane, id 1 each) -------------
+// The compositor's DRM backend does two kinds of commit: a MODESET (MODE_SETCRTC, or
+// MODE_ATOMIC with ALLOW_MODESET + a MODE_ID blob) and a FLIP (MODE_PAGE_FLIP, or
+// MODE_ATOMIC with a new FB_ID + PAGE_FLIP_EVENT). This tracks both so MODE_GETCRTC
+// and MODE_OBJ_GETPROPERTIES report the current state honestly.
+struct crtc_state {
+  uint32_t fb_id;
+  int32_t x, y;
+  int mode_valid;
+  uint32_t active;                       // CRTC ACTIVE property
+  uint32_t mode_blob;                    // CRTC MODE_ID property (blob id, 0 = none)
+  struct drm_mode_modeinfo mode;
+};
+static struct crtc_state g_crtc;
+// Second display (builtin). Discovery advertises TWO CRTC/connector/encoder/plane
+// sets (external + builtin); the state for the second lives beside the first so the
+// single-display commit handlers keep their g_crtc/g_connector/g_plane references
+// unchanged while the discovery ioctls index by object id.
+static struct crtc_state g_crtc2;
+
+struct plane_state {
+  uint32_t fb_id;
+  uint32_t crtc_id;
+  uint64_t src_x, src_y, src_w, src_h;   // 16.16 fixed
+  uint64_t crtc_x, crtc_y, crtc_w, crtc_h;
+};
+static struct plane_state g_plane = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+static struct plane_state g_plane2 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+struct connector_state {
+  uint32_t crtc_id;
+  uint32_t dpms;                         // DRM_MODE_DPMS_*
+};
+static struct connector_state g_connector;
+static struct connector_state g_connector2;
+
+// Per-object state accessors. Object ids 1 and 2 map to the primary (external) and
+// secondary (builtin) CRTC/connector/plane respectively.
+static struct crtc_state* crtc_by_id(uint32_t id)       { return id == 2 ? &g_crtc2 : &g_crtc; }
+static struct plane_state* plane_by_id(uint32_t id)     { return id == 2 ? &g_plane2 : &g_plane; }
+static struct connector_state* connector_by_id(uint32_t id) { return id == 2 ? &g_connector2 : &g_connector; }
+
+// Property blobs (MODE_ID modeinfo, and anything else the compositor creates).
+// drmModeCreatePropertyBlob stores arbitrary bytes keyed by a monotonic id; the atomic
+// commit references MODE_ID by that id, and getCurrentMode() reads it back via
+// MODE_GETPROPBLOB.
+#define MAX_BLOBS 64
+struct blob_slot {
+  uint32_t id;
+  uint32_t len;
+  unsigned char data[128];
+  int used;
+};
+static struct blob_slot g_blobs[MAX_BLOBS];
+static uint32_t g_next_blob = 1;
+
+static struct blob_slot* blob_find(uint32_t id) {
+  for (int i = 0; i < MAX_BLOBS; i++)
+    if (g_blobs[i].used && g_blobs[i].id == id) return &g_blobs[i];
+  return NULL;
+}
+static uint32_t blob_create(const void* data, uint32_t len) {
+  if (!data || !len || len > sizeof(((struct blob_slot*)0)->data)) return 0;
+  struct blob_slot* s = NULL;
+  for (int i = 0; i < MAX_BLOBS; i++) if (!g_blobs[i].used) { s = &g_blobs[i]; break; }
+  if (!s) return 0;
+  memset(s, 0, sizeof *s);
+  s->id = g_next_blob++; if (!g_next_blob) g_next_blob = 1;
+  s->len = len;
+  memcpy(s->data, data, len);
+  s->used = 1;
+  return s->id;
+}
+static void blob_destroy(uint32_t id) {
+  struct blob_slot* s = blob_find(id);
+  if (s) memset(s, 0, sizeof *s);
+}
+
+// Page-flip / atomic-completion events. The shim never waits for a real vblank; a flip
+// is "complete" immediately, so we write a DRM_EVENT_FLIP_COMPLETE into the event pipe on
+// every commit carrying DRM_MODE_PAGE_FLIP_EVENT. Every DRM fd handed to the guest is a
+// dup of g_ev_read_fd, so read()/poll() on it behave like a real DRM fd: readable only
+// while an event is pending, and read() returns the event bytes. aquamarine's async
+// commit thread consumes these via drmHandleEvent().
+static int g_ev_read_fd = -1, g_ev_write_fd = -1;
+static int g_flip_seq;
+
+// Create the event pipe lazily and hand the guest a dup of the read end.
+int drm_open_fd(void) {
+  if (g_ev_read_fd < 0) {
+    int p[2];
+    if (pipe(p) != 0) return -1;
+    g_ev_read_fd = p[0]; g_ev_write_fd = p[1];
+    fcntl(g_ev_read_fd, F_SETFD, FD_CLOEXEC);
+    fcntl(g_ev_write_fd, F_SETFD, FD_CLOEXEC);
+  }
+  return fcntl(g_ev_read_fd, F_DUPFD_CLOEXEC, 0);
+}
+
+static void event_enqueue(uint64_t user_data, uint32_t crtc_id) {
+  if (g_ev_write_fd < 0) return;
+  struct drm_event_vblank e;
+  memset(&e, 0, sizeof e);
+  e.base.type   = DRM_EVENT_FLIP_COMPLETE;
+  e.base.length = sizeof e;
+  e.user_data   = user_data;
+  e.tv_sec      = 0; e.tv_usec = 0;
+  e.sequence    = (uint32_t)++g_flip_seq;
+  e.crtc_id     = crtc_id ? crtc_id : 1;
+  // Best-effort: a full pipe (the compositor stopped draining) is not fatal.
+  ssize_t r = write(g_ev_write_fd, &e, sizeof e);
+  (void)r;
+}
+
+// Property table: name, flags, and (for enum props) the enum values. aquamarine matches
+// by NAME (Props.cpp scanProperties), so the id assignment only needs to be internally
+// consistent between MODE_OBJ_GETPROPERTIES, MODE_GETPROPERTY and MODE_ATOMIC.
+struct prop_enum { uint64_t value; const char* name; };
+struct prop_def {
+  uint32_t id;
+  const char* name;
+  uint32_t flags;
+  const struct prop_enum* enums;
+  int num_enums;
+};
+static const struct prop_enum kPlaneTypeEnums[] = {
+  { DRM_PLANE_TYPE_OVERLAY, "Overlay" }, { DRM_PLANE_TYPE_PRIMARY, "Primary" },
+  { DRM_PLANE_TYPE_CURSOR, "Cursor" },
+};
+static const struct prop_enum kDpmsEnums[] = {
+  { 0, "On" }, { 1, "Standby" }, { 2, "Suspend" }, { 3, "Off" },
+};
+static const struct prop_def kProps[] = {
+  { DRM_PROP_TYPE,    "type",    DRM_MODE_PROP_ENUM | DRM_MODE_PROP_IMMUTABLE | DRM_MODE_PROP_ATOMIC, kPlaneTypeEnums, 3 },
+  { DRM_PROP_ACTIVE,  "ACTIVE",  DRM_MODE_PROP_RANGE | DRM_MODE_PROP_ATOMIC, NULL, 0 },
+  { DRM_PROP_MODE_ID, "MODE_ID", DRM_MODE_PROP_BLOB  | DRM_MODE_PROP_ATOMIC, NULL, 0 },
+  { DRM_PROP_CRTC_ID, "CRTC_ID", DRM_MODE_PROP_OBJECT | DRM_MODE_PROP_ATOMIC, NULL, 0 },
+  { DRM_PROP_FB_ID,   "FB_ID",   DRM_MODE_PROP_OBJECT | DRM_MODE_PROP_ATOMIC, NULL, 0 },
+  { DRM_PROP_SRC_X,   "SRC_X",   DRM_MODE_PROP_RANGE | DRM_MODE_PROP_ATOMIC, NULL, 0 },
+  { DRM_PROP_SRC_Y,   "SRC_Y",   DRM_MODE_PROP_RANGE | DRM_MODE_PROP_ATOMIC, NULL, 0 },
+  { DRM_PROP_SRC_W,   "SRC_W",   DRM_MODE_PROP_RANGE | DRM_MODE_PROP_ATOMIC, NULL, 0 },
+  { DRM_PROP_SRC_H,   "SRC_H",   DRM_MODE_PROP_RANGE | DRM_MODE_PROP_ATOMIC, NULL, 0 },
+  { DRM_PROP_CRTC_X,  "CRTC_X",  DRM_MODE_PROP_RANGE | DRM_MODE_PROP_ATOMIC, NULL, 0 },
+  { DRM_PROP_CRTC_Y,  "CRTC_Y",  DRM_MODE_PROP_RANGE | DRM_MODE_PROP_ATOMIC, NULL, 0 },
+  { DRM_PROP_CRTC_W,  "CRTC_W",  DRM_MODE_PROP_RANGE | DRM_MODE_PROP_ATOMIC, NULL, 0 },
+  { DRM_PROP_CRTC_H,  "CRTC_H",  DRM_MODE_PROP_RANGE | DRM_MODE_PROP_ATOMIC, NULL, 0 },
+  { DRM_PROP_DPMS,    "DPMS",    DRM_MODE_PROP_ENUM | DRM_MODE_PROP_ATOMIC, kDpmsEnums, 4 },
+};
+#define NUM_PROPS (sizeof kProps / sizeof kProps[0])
+
+static const struct prop_def* prop_find_by_id(uint32_t id) {
+  for (size_t i = 0; i < NUM_PROPS; i++) if (kProps[i].id == id) return &kProps[i];
+  return NULL;
+}
+
+// Per-object property attachment (which prop ids each object exposes, in order).
+static const uint32_t kCrtcProps[]    = { DRM_PROP_ACTIVE, DRM_PROP_MODE_ID };
+static const uint32_t kConnectorProps[] = { DRM_PROP_CRTC_ID, DRM_PROP_DPMS };
+static const uint32_t kPlaneProps[]   = { DRM_PROP_TYPE, DRM_PROP_FB_ID, DRM_PROP_CRTC_ID,
+                                          DRM_PROP_SRC_X, DRM_PROP_SRC_Y, DRM_PROP_SRC_W, DRM_PROP_SRC_H,
+                                          DRM_PROP_CRTC_X, DRM_PROP_CRTC_Y, DRM_PROP_CRTC_W, DRM_PROP_CRTC_H };
+
+// Current value of a property on a given object (for MODE_OBJ_GETPROPERTIES and
+// MODE_GETCONNECTOR). `obj_id` selects the CRTC/connector/plane (1 or 2).
+static uint64_t prop_value(uint32_t obj_type, uint32_t obj_id, uint32_t prop_id) {
+  struct crtc_state* cr = crtc_by_id(obj_id);
+  struct plane_state* pl = plane_by_id(obj_id);
+  struct connector_state* cn = connector_by_id(obj_id);
+  switch (prop_id) {
+    case DRM_PROP_TYPE:    return DRM_PLANE_TYPE_PRIMARY;
+    case DRM_PROP_ACTIVE:  return cr->active;
+    case DRM_PROP_MODE_ID: return cr->mode_blob;
+    case DRM_PROP_CRTC_ID: return (obj_type == DRM_MODE_OBJECT_CONNECTOR) ? cn->crtc_id : pl->crtc_id;
+    case DRM_PROP_FB_ID:   return pl->fb_id;
+    case DRM_PROP_SRC_X:   return pl->src_x;
+    case DRM_PROP_SRC_Y:   return pl->src_y;
+    case DRM_PROP_SRC_W:   return pl->src_w;
+    case DRM_PROP_SRC_H:   return pl->src_h;
+    case DRM_PROP_CRTC_X:  return pl->crtc_x;
+    case DRM_PROP_CRTC_Y:  return pl->crtc_y;
+    case DRM_PROP_CRTC_W:  return pl->crtc_w;
+    case DRM_PROP_CRTC_H:  return pl->crtc_h;
+    case DRM_PROP_DPMS:    return cn->dpms;
+    default:               return 0;
+  }
 }
 
 long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
@@ -941,31 +1458,26 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
 
   // PRIME_HANDLE_TO_FD: gbm_bo_get_fd_for_plane() exports a created BO as a dma-buf fd. The BO's
   // host backing is already the rendered frame (the guest runs in-process), so the fd returned
-  // here is a virtual dma-buf carrier: an unlinked temp file sized to the BO, carrying identity
-  // only (fstat(st_dev, st_ino)), like rdgpu_virtual_carrier.c. The identity is recorded against
-  // the BO handle; the compositor reads the actual pixels through drm_bo_map_by_fd().
+  // here IS the BO's MAP_SHARED anon backing file (b->backing_fd), dup'd so the receiver owns a
+  // reference. This makes the pixel bytes travel WITH the fd across SCM_RIGHTS: a DIFFERENT
+  // process (kwin importing plasmashell's buffer) can mmap the received fd and read the exact
+  // frame, instead of resolving an identity-only carrier it has no backing for. The (st_dev,
+  // st_ino) identity of that backing is recorded against the handle, so the in-process importer
+  // (export_find) and the present path (drm_bo_map_by_fd) still resolve it unchanged.
   if (type == DRM_TYPE && nr == DRM_NR_PRIME_HANDLE_TO_FD && arg) {
     struct drm_prime_handle* ph = (struct drm_prime_handle*)arg;
     ph->fd = -1;
     struct bo_slot* b = bo_find(ph->handle);
-    if (!b) {
+    if (!b || b->backing_fd < 0) {
       if (tracing())
         fprintf(stderr, "[drm] PRIME_HANDLE_TO_FD handle=0x%x -> -EINVAL (unknown)\n", ph->handle);
       return -22;
     }
-    char tmpl[] = "/tmp/rdmetal-dmabuf-XXXXXX";
-    int fd = mkstemp(tmpl);
-    if (fd < 0) return -12;
-    unlink(tmpl);
-    size_t rlen = ((size_t)b->size + 4095) & ~(size_t)4095;
-    if (rlen == 0) rlen = 4096;
-    if (ftruncate(fd, (off_t)rlen)) { close(fd); return -12; }
-    struct stat st;
-    if (fstat(fd, &st) || st.st_dev == 0 || st.st_ino == 0) { close(fd); return -12; }
     // Honor DRM_CLOEXEC (the caller requested it): the SCM_RIGHTS receiver re-marks it anyway.
-    int cfd = fcntl(fd, F_DUPFD_CLOEXEC, 0);
-    close(fd);
+    int cfd = fcntl(b->backing_fd, F_DUPFD_CLOEXEC, 0);
     if (cfd < 0) return -12;
+    struct stat st;
+    if (fstat(cfd, &st) || st.st_dev == 0 || st.st_ino == 0) { close(cfd); return -12; }
     export_remember(b->handle, st.st_dev, st.st_ino);
     // The exported dmabuf fd holds a reference to the BO: standard dmabuf semantics — the fd
     // keeps the buffer alive even after the creator's MODE_DESTROY_DUMB. Without this, KWin's
@@ -980,21 +1492,26 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
   }
 
   // PRIME_FD_TO_HANDLE: the compositor's dma-buf import path (wlsrv.c) resolves a transferred
-  // guest dmabuf fd into an opaque GEM handle. Two cases: (1) the fd is one of OUR
-  // PRIME_HANDLE_TO_FD carriers (in-process round-trip, the common Hyprland GBM path) — then the
-  // handle is minted directly and no handoff is needed; (2) the fd is a cross-process carrier
-  // from shim_cli, resolved to the real IOSurfaceRef through the mach-port handoff and stored in
-  // a gem slot. If no surface is available the handle is still minted as a synthetic token.
+  // guest dmabuf fd into an opaque GEM handle. Two cases: (1) the fd's (st_dev, st_ino) is
+  // already recorded in g_export[] — an in-process "own export" round-trip OR a repeated import
+  // of a cross-process fd we already admitted — return the recorded handle (the sw winsys's
+  // find_and_ref by handle reuses the SAME BO); (2) a fresh cross-process fd carries the
+  // exporter's shared backing (PRIME_HANDLE_TO_FD returns the BO's MAP_SHARED anon file), so we
+  // import it as a mappable dumb-BO. The guest's EGL then does drmModeMapDumb + mmap, which now
+  // succeed (no -EINVAL -> null deref in rdmetal_dri.so), and the present path reads the pixels.
+  // The mach-port IOSurface handoff stays for the Metal/scanout path (wlsrv.c mac_surface_*,
+  // rdgpu_handoff_resolve_fd directly) — it is not needed for a CPU (softpipe) dumb buffer.
   if (type == DRM_TYPE && nr == DRM_NR_PRIME_FD_TO_HANDLE && arg) {
     struct drm_prime_handle* ph = (struct drm_prime_handle*)arg;
-    static uint32_t g_next_handle = 1;
 
     struct stat st;
     int have_id = !fstat(ph->fd, &st) && st.st_dev && st.st_ino;
-    if (have_id && export_find(st.st_dev, st.st_ino)) {
-      // Own export: the backing BO is already in this process. Return the ORIGINAL
-      // handle (not a fresh minted one) so the sw winsys's import (find_and_ref by
-      // handle) reuses the SAME BO and softpipe renders into the SAME host backing.
+    if (!have_id) return -EINVAL;          // cannot import an fd with no stable identity
+
+    if (export_find(st.st_dev, st.st_ino)) {
+      // Own export or repeated import: the backing BO is already in this process. Return
+      // the ORIGINAL handle (not a fresh minted one) so the sw winsys's import (find_and_ref
+      // by handle) reuses the SAME BO and softpipe reads the SAME host backing.
       struct export_slot* e = export_find(st.st_dev, st.st_ino);
       struct bo_slot* b = bo_find(e->handle);
       ph->handle = e->handle;
@@ -1002,48 +1519,18 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
       fprintf(stderr, "DRM_IMPORT_PRIME fd=%d -> handle=0x%x (own export)\n", ph->fd, ph->handle);
       return 0;
     }
-    if (have_id) {
-      // A repeated import of the same carrier fd returns the same handle (dedup by
-      // st_dev/st_ino, the stable identity across dup/SCM_RIGHTS).
-      struct gem_slot* existing = gem_find_by_identity(st.st_dev, st.st_ino);
-      if (existing) {
-        ph->handle = existing->handle;
-        fprintf(stderr, "DRM_IMPORT_IOSURFACE fd=%d handle=%u resolved=%d id=%u\n",
-                ph->fd, ph->handle, existing->resolved,
-                existing->surface ? IOSurfaceGetID(existing->surface) : 0u);
-        return 0;
-      }
+
+    // Fresh cross-process import: map the shared backing the fd carries.
+    int h = bo_import_shared_fd(ph->fd, st.st_dev, st.st_ino);
+    if (h < 0) {
+      fprintf(stderr, "DRM_IMPORT_CROSS_PROCESS fd=%d dev=%d ino=%llu import_failed=%d\n",
+              ph->fd, (int)st.st_dev, (unsigned long long)st.st_ino, h);
+      return h;
     }
-
-    // Resolve the backing IOSurface through the mach-port handoff. The export side
-    // (shim_cli mock_fd_export) published the send-right via IOSurfaceCreateMachPort keyed by
-    // the carrier's (st_dev, st_ino); rdgpu_handoff_resolve_fd() redeems it with
-    // IOSurfaceLookupFromMachPort() and returns a +1 reference the gem slot owns. In-process
-    // publish->resolve also lands here via the handoff's process-local table.
-    IOSurfaceRef surface = rdgpu_handoff_resolve_fd(ph->fd);
-
-    ph->handle = g_next_handle++;
-    struct gem_slot* slot = NULL;
-    for (int i = 0; i < MAX_GEM; i++)
-      if (!g_gem[i].resolved) { slot = &g_gem[i]; break; }
-    if (slot) {
-      slot->handle = ph->handle;
-      slot->fd = ph->fd;
-      slot->device = have_id ? st.st_dev : 0;
-      slot->inode = have_id ? st.st_ino : 0;
-      slot->surface = surface;   // NULL on failure; +1 reference otherwise
-      slot->resolved = 1;
-    } else if (surface) {
-      CFRelease(surface);         // no slot to store it
-      surface = NULL;
-    }
-
-    fprintf(stderr, "DRM_IMPORT shim PRIME_FD_TO_HANDLE fd=%d -> handle=%u\n", ph->fd, ph->handle);
-    fprintf(stderr, "DRM_IMPORT_IOSURFACE fd=%d handle=%u resolved=%d id=%u\n",
-            ph->fd, ph->handle, surface != NULL,
-            surface ? IOSurfaceGetID(surface) : 0u);
-    if (tracing())
-      fprintf(stderr, "[drm] PRIME_FD_TO_HANDLE fd=%d -> handle=%u\n", ph->fd, ph->handle);
+    ph->handle = (uint32_t)h;
+    fprintf(stderr, "DRM_IMPORT_CROSS_PROCESS fd=%d dev=%d ino=%llu -> handle=0x%x size=%zu\n",
+            ph->fd, (int)st.st_dev, (unsigned long long)st.st_ino, ph->handle,
+            bo_find(ph->handle) ? bo_find(ph->handle)->size : (size_t)0);
     return 0;
   }
 
@@ -1108,6 +1595,7 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
     struct drm_set_client_cap* sc = (struct drm_set_client_cap*)arg;
     int ok = (sc->capability == DRM_CLIENT_CAP_UNIVERSAL_PLANES ||
               sc->capability == DRM_CLIENT_CAP_ATOMIC);
+    if (ok) atomic_store(&g_master_active, 1);   // KMS master is negotiating the atomic path
     if (tracing())
       fprintf(stderr, "[drm] SET_CLIENT_CAP cap=%llu value=%llu -> %s\n",
               (unsigned long long)sc->capability, (unsigned long long)sc->value,
@@ -1115,48 +1603,53 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
     return ok ? 0 : -22;
   }
 
-  // MODE_GETRESOURCES: one fb/CRTC/connector/encoder. The kernel two-call
-  // protocol: first call has NULL id pointers (counts only), the second has
+  // MODE_GETRESOURCES: TWO CRTCs/connectors/encoders (external + builtin). The kernel
+  // two-call protocol: first call has NULL id pointers (counts only), the second has
   // arrays we fill. Answering both with the same counts keeps it idempotent.
   if (type == DRM_TYPE && nr == DRM_NR_MODE_GETRESOURCES && arg) {
     struct drm_mode_card_res* r = (struct drm_mode_card_res*)arg;
     r->count_fbs = 1;
-    r->count_crtcs = 1;
-    r->count_connectors = 1;
-    r->count_encoders = 1;
+    r->count_crtcs = 2;
+    r->count_connectors = 2;
+    r->count_encoders = 2;
     r->min_width = 1; r->max_width = 16384;
     r->min_height = 1; r->max_height = 16384;
-    if (r->fb_id_ptr)        *(uint32_t*)(uintptr_t)r->fb_id_ptr = 1;
-    if (r->crtc_id_ptr)      *(uint32_t*)(uintptr_t)r->crtc_id_ptr = 1;
-    if (r->connector_id_ptr) *(uint32_t*)(uintptr_t)r->connector_id_ptr = 1;
-    if (r->encoder_id_ptr)   *(uint32_t*)(uintptr_t)r->encoder_id_ptr = 1;
+    if (r->fb_id_ptr)        { ((uint32_t*)(uintptr_t)r->fb_id_ptr)[0] = 1; }
+    if (r->crtc_id_ptr)      { ((uint32_t*)(uintptr_t)r->crtc_id_ptr)[0] = 1; ((uint32_t*)(uintptr_t)r->crtc_id_ptr)[1] = 2; }
+    if (r->connector_id_ptr) { ((uint32_t*)(uintptr_t)r->connector_id_ptr)[0] = 1; ((uint32_t*)(uintptr_t)r->connector_id_ptr)[1] = 2; }
+    if (r->encoder_id_ptr)   { ((uint32_t*)(uintptr_t)r->encoder_id_ptr)[0] = 1; ((uint32_t*)(uintptr_t)r->encoder_id_ptr)[1] = 2; }
+    atomic_store(&g_master_active, 1);
     if (tracing())
       fprintf(stderr, "[drm] MODE_GETRESOURCES fbs=%u crtcs=%u connectors=%u encoders=%u\n",
               r->count_fbs, r->count_crtcs, r->count_connectors, r->count_encoders);
     return 0;
   }
 
-  // MODE_GETCRTC: a CRTC with no active mode yet (mode_valid=0).
+  // MODE_GETCRTC: report the current CRTC state (mode_valid=0 until the first modeset).
   if (type == DRM_TYPE && nr == DRM_NR_MODE_GETCRTC && arg) {
     struct drm_mode_get_crtc* c = (struct drm_mode_get_crtc*)arg;
+    struct crtc_state* cr = crtc_by_id(c->crtc_id);
     c->set_connectors_ptr = 0;
     c->count_connectors = 0;
-    c->fb_id = 0;
-    c->x = 0; c->y = 0;
+    c->fb_id = cr->fb_id;
+    c->x = cr->x; c->y = cr->y;
     c->gamma_size = 0;
-    c->mode_valid = 0;
-    memset(&c->mode, 0, sizeof c->mode);
+    c->mode_valid = cr->mode_valid;
+    c->mode = cr->mode_valid ? cr->mode : (struct drm_mode_modeinfo){0};
     if (tracing())
-      fprintf(stderr, "[drm] MODE_GETCRTC crtc_id=%u (no active mode)\n", c->crtc_id);
+      fprintf(stderr, "[drm] MODE_GETCRTC crtc_id=%u mode_valid=%u fb_id=%u%s\n",
+              c->crtc_id, c->mode_valid, c->fb_id,
+              c->mode_valid ? "" : " (no active mode)");
     return 0;
   }
 
-  // MODE_GETENCODER: one virtual encoder wired to crtc 1.
+  // MODE_GETENCODER: two virtual encoders, one per CRTC.
   if (type == DRM_TYPE && nr == DRM_NR_MODE_GETENCODER && arg) {
     struct drm_mode_get_encoder* e = (struct drm_mode_get_encoder*)arg;
+    uint32_t crtc = (e->encoder_id == 2) ? 2 : 1;
     e->encoder_type = DRM_MODE_ENCODER_VIRTUAL;
-    e->crtc_id = 1;
-    e->possible_crtcs = 1;   // bit 0 -> crtc 1
+    e->crtc_id = crtc;
+    e->possible_crtcs = (crtc == 2) ? 2 : 1;   // bit0 -> crtc1, bit1 -> crtc2
     e->possible_clones = 0;
     if (tracing())
       fprintf(stderr, "[drm] MODE_GETENCODER encoder_id=%u type=VIRTUAL crtc_id=%u\n",
@@ -1164,33 +1657,49 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
     return 0;
   }
 
-  // MODE_GETCONNECTOR: one connected eDP connector with one 1920x1080 mode.
+  // MODE_GETCONNECTOR: the external DP and builtin eDP each expose their
+  // current host dimensions. An absent display remains a disconnected object.
   if (type == DRM_TYPE && nr == DRM_NR_MODE_GETCONNECTOR && arg) {
     struct drm_mode_get_connector* c = (struct drm_mode_get_connector*)arg;
-    c->encoder_id = 1;
-    c->connector_type = DRM_MODE_CONNECTOR_eDP;
+    uint32_t cid = c->connector_id;
+    int is_builtin = (cid == 2);
+    struct drm_mode_modeinfo mode;
+    int connected = fill_mode_for_connector(cid, &mode) == 0;
+    c->encoder_id = is_builtin ? 2 : 1;
+    c->connector_type = is_builtin ? DRM_MODE_CONNECTOR_eDP : DRM_MODE_CONNECTOR_DisplayPort;
     c->connector_type_id = 1;
-    c->connection = DRM_MODE_CONNECTED;
-    c->mm_width = 340; c->mm_height = 190;
+    c->connection = connected ? DRM_MODE_CONNECTED : DRM_MODE_DISCONNECTED;
+    c->mm_width = is_builtin ? 300 : 800; c->mm_height = is_builtin ? 200 : 340;
     c->subpixel = 0;
     c->pad = 0;
-    c->count_modes = 1;
-    c->count_props = 0;
+    c->count_modes = connected ? 1 : 0;
+    c->count_props = (uint32_t)(sizeof kConnectorProps / sizeof kConnectorProps[0]);
     c->count_encoders = 1;
-    if (c->encoders_ptr) *(uint32_t*)(uintptr_t)c->encoders_ptr = 1;
-    if (c->modes_ptr)    fill_modeinfo((struct drm_mode_modeinfo*)(uintptr_t)c->modes_ptr);
-    // count_props == 0, so props_ptr/prop_values_ptr stay untouched.
+    if (c->encoders_ptr) *(uint32_t*)(uintptr_t)c->encoders_ptr = is_builtin ? 2 : 1;
+    if (c->modes_ptr && connected)
+      *(struct drm_mode_modeinfo*)(uintptr_t)c->modes_ptr = mode;
+    if (c->props_ptr)
+      for (uint32_t i = 0; i < c->count_props; i++)
+        ((uint32_t*)(uintptr_t)c->props_ptr)[i] = kConnectorProps[i];
+    if (c->prop_values_ptr)
+      for (uint32_t i = 0; i < c->count_props; i++)
+        ((uint64_t*)(uintptr_t)c->prop_values_ptr)[i] =
+          prop_value(DRM_MODE_OBJECT_CONNECTOR, cid, kConnectorProps[i]);
     if (tracing())
-      fprintf(stderr, "[drm] MODE_GETCONNECTOR connector_id=%u type=eDP connection=%u modes=%u encoders=%u\n",
-              c->connector_id, c->connection, c->count_modes, c->count_encoders);
+      fprintf(stderr, "[drm] MODE_GETCONNECTOR connector_id=%u type=%s connection=%u modes=%u encoders=%u props=%u\n",
+              c->connector_id, is_builtin ? "eDP" : "DP", c->connection,
+              c->count_modes, c->count_encoders, c->count_props);
     return 0;
   }
 
-  // MODE_GETPLANERESOURCES: one primary plane.
+  // MODE_GETPLANERESOURCES: two primary planes (one per CRTC).
   if (type == DRM_TYPE && nr == DRM_NR_MODE_GETPLANERESOURCES && arg) {
     struct drm_mode_get_plane_res* p = (struct drm_mode_get_plane_res*)arg;
-    p->count_planes = 1;
-    if (p->plane_id_ptr) *(uint32_t*)(uintptr_t)p->plane_id_ptr = 1;
+    p->count_planes = 2;
+    if (p->plane_id_ptr) {
+      ((uint32_t*)(uintptr_t)p->plane_id_ptr)[0] = 1;
+      ((uint32_t*)(uintptr_t)p->plane_id_ptr)[1] = 2;
+    }
     if (tracing())
       fprintf(stderr, "[drm] MODE_GETPLANERESOURCES planes=%u\n", p->count_planes);
     return 0;
@@ -1198,28 +1707,47 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
 
   // MODE_ADDFB2 / MODE_RMFB: mint and accept fb ids (the reference fixture has
   // these; ADDFB2 is exercised by aquamarine's buffer path after checkFeatures).
+  // ADDFB2 also records fb_id -> {handle, geometry, stride} so the flip present
+  // hook can resolve the commit's fb_id back to the dumb buffer's host pixels.
   if (type == DRM_TYPE && nr == DRM_NR_MODE_ADDFB2 && arg) {
     struct drm_mode_fb_cmd2* fb = (struct drm_mode_fb_cmd2*)arg;
+    uint32_t old_id = fb->fb_id;
     fb->fb_id = g_next_fb++;
     if (g_next_fb == 0) g_next_fb = 1;
+    struct fb_slot* f = NULL;
+    for (int i = 0; i < MAX_FB; i++) if (!g_fb[i].used) { f = &g_fb[i]; break; }
+    if (f) {
+      f->fb_id  = fb->fb_id;
+      f->handle = fb->handles[0];
+      f->width  = fb->width;
+      f->height = fb->height;
+      f->pitch  = fb->pitches[0] ? fb->pitches[0] : fb->width * 4;
+      f->format = fb->pixel_format;
+      f->used   = 1;
+    }
     if (tracing())
-      fprintf(stderr, "[drm] MODE_ADDFB2 -> fb_id=%u\n", fb->fb_id);
+      fprintf(stderr, "[drm] MODE_ADDFB2 fb_id=%u (was %u) handle=0x%x %ux%u pitch=%u fmt=0x%x\n",
+              fb->fb_id, old_id, fb->handles[0], fb->width, fb->height,
+              f ? f->pitch : 0, fb->pixel_format);
     return 0;
   }
 
   if (type == DRM_TYPE && nr == DRM_NR_MODE_RMFB && arg) {
+    uint32_t fb_id = *(uint32_t*)arg;
     if (tracing())
-      fprintf(stderr, "[drm] MODE_RMFB fb_id=%u\n", *(uint32_t*)arg);
+      fprintf(stderr, "[drm] MODE_RMFB fb_id=%u\n", fb_id);
+    fb_forget(fb_id);
     return 0;
   }
 
-  // MODE_GETPLANE: one primary plane (id 1) compatible with crtc 1, exposing
-  // the XRGB8888 format the ADDFB2 path accepts.
+  // MODE_GETPLANE: two primary planes (id 1/2), one per CRTC, exposing the
+  // XRGB8888 format the ADDFB2 path accepts.
   if (type == DRM_TYPE && nr == DRM_NR_MODE_GETPLANE && arg) {
     struct drm_mode_get_plane* pl = (struct drm_mode_get_plane*)arg;
-    pl->crtc_id = 1;
-    pl->fb_id = 0;
-    pl->possible_crtcs = 1;          // bit 0 -> crtc 1
+    uint32_t crtc = (pl->plane_id == 2) ? 2 : 1;
+    pl->crtc_id = crtc;
+    pl->fb_id = plane_by_id(pl->plane_id)->fb_id;
+    pl->possible_crtcs = (crtc == 2) ? 2 : 1;   // bit0 -> crtc1, bit1 -> crtc2
     pl->gamma_size = 0;
     pl->count_format_types = 1;
     if (pl->format_type_ptr)
@@ -1230,49 +1758,263 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
     return 0;
   }
 
-  // MODE_OBJ_GETPROPERTIES: only the plane carries a property — "type" (id 1)
-  // valued DRM_PLANE_TYPE_PRIMARY. This is what lets SDRMPlane::init() resolve
-  // the plane type via getDRMProp(); CRTC/connector report zero properties,
-  // which scanProperties() accepts (non-NULL empty object).
+  // MODE_OBJ_GETPROPERTIES: return each object's attached properties + current values.
   if (type == DRM_TYPE && nr == DRM_NR_MODE_OBJ_GETPROPERTIES && arg) {
     struct drm_mode_obj_get_properties* o = (struct drm_mode_obj_get_properties*)arg;
-    int is_plane = (o->obj_type == DRM_MODE_OBJECT_PLANE) ||
-                   (o->obj_type == DRM_MODE_OBJECT_ANY);
-    o->count_props = is_plane ? 1 : 0;
-    if (is_plane) {
-      if (o->props_ptr)       *(uint32_t*)(uintptr_t)o->props_ptr = 1;
-      if (o->prop_values_ptr) *(uint64_t*)(uintptr_t)o->prop_values_ptr = DRM_PLANE_TYPE_PRIMARY;
-    }
+    const uint32_t* props = NULL;
+    uint32_t n = 0;
+    if (o->obj_type == DRM_MODE_OBJECT_CRTC)      { props = kCrtcProps;      n = (uint32_t)(sizeof kCrtcProps / sizeof kCrtcProps[0]); }
+    else if (o->obj_type == DRM_MODE_OBJECT_CONNECTOR) { props = kConnectorProps; n = (uint32_t)(sizeof kConnectorProps / sizeof kConnectorProps[0]); }
+    else if (o->obj_type == DRM_MODE_OBJECT_PLANE || o->obj_type == DRM_MODE_OBJECT_ANY) { props = kPlaneProps; n = (uint32_t)(sizeof kPlaneProps / sizeof kPlaneProps[0]); }
+    o->count_props = n;
+    if (o->props_ptr)
+      for (uint32_t i = 0; i < n; i++) ((uint32_t*)(uintptr_t)o->props_ptr)[i] = props[i];
+    if (o->prop_values_ptr)
+      for (uint32_t i = 0; i < n; i++)
+        ((uint64_t*)(uintptr_t)o->prop_values_ptr)[i] = prop_value(o->obj_type, o->obj_id, props[i]);
     if (tracing())
       fprintf(stderr, "[drm] MODE_OBJ_GETPROPERTIES obj_id=%u obj_type=0x%x count=%u\n",
               o->obj_id, o->obj_type, o->count_props);
     return 0;
   }
 
-  // MODE_GETPROPERTY: property 1 is the plane "type" enum; nothing else exists.
+  // MODE_GETPROPERTY: name/flags/values/enums for a property (the atomic property model).
   if (type == DRM_TYPE && nr == DRM_NR_MODE_GETPROPERTY && arg) {
     struct drm_mode_get_property* p = (struct drm_mode_get_property*)arg;
-    if (p->prop_id == 1) {
-      p->flags = DRM_MODE_PROP_ENUM | DRM_MODE_PROP_IMMUTABLE | DRM_MODE_PROP_ATOMIC;
-      memcpy(p->name, "type", sizeof("type"));
-      p->count_values = 0;
-      p->count_enum_blobs = 0;
-      if (tracing())
-        fprintf(stderr, "[drm] MODE_GETPROPERTY prop_id=1 -> \"type\"\n");
-      return 0;
+    const struct prop_def* d = prop_find_by_id(p->prop_id);
+    if (!d) {
+      if (tracing()) fprintf(stderr, "[drm] MODE_GETPROPERTY prop_id=%u -> -EINVAL\n", p->prop_id);
+      return -22;
+    }
+    p->flags = d->flags;
+    memset(p->name, 0, sizeof p->name);
+    memcpy(p->name, d->name, strlen(d->name));
+    p->count_values = 0;
+    p->count_enum_blobs = 0;
+    if (d->flags & DRM_MODE_PROP_RANGE) {
+      p->count_values = 2;
+      if (p->values_ptr) {
+        ((uint64_t*)(uintptr_t)p->values_ptr)[0] = 0;
+        ((uint64_t*)(uintptr_t)p->values_ptr)[1] = UINT64_MAX;
+      }
+    } else if (d->flags & DRM_MODE_PROP_ENUM) {
+      p->count_enum_blobs = d->num_enums;
+      if (p->enum_blob_ptr) {
+        struct drm_mode_property_enum* e = (struct drm_mode_property_enum*)(uintptr_t)p->enum_blob_ptr;
+        for (int i = 0; i < d->num_enums; i++) {
+          e[i].value = d->enums[i].value;
+          memset(e[i].name, 0, sizeof e[i].name);
+          memcpy(e[i].name, d->enums[i].name, strlen(d->enums[i].name));
+        }
+      }
     }
     if (tracing())
-      fprintf(stderr, "[drm] MODE_GETPROPERTY prop_id=%u -> -EINVAL\n", p->prop_id);
-    return -22;
+      fprintf(stderr, "[drm] MODE_GETPROPERTY prop_id=%u -> \"%s\" flags=0x%x enums=%u values=%u\n",
+              p->prop_id, d->name, d->flags, p->count_enum_blobs, p->count_values);
+    return 0;
   }
 
-  // MODE_GETPROPBLOB: no property blobs are exposed (IN_FORMATS/EDID/mode_id all
-  // absent), so any query is answered with an empty blob.
+  // MODE_GETPROPBLOB: return stored blob bytes (MODE_ID modeinfo, IN_FORMATS, EDID).
   if (type == DRM_TYPE && nr == DRM_NR_MODE_GETPROPBLOB && arg) {
     struct drm_mode_get_blob* b = (struct drm_mode_get_blob*)arg;
-    b->length = 0;
+    struct blob_slot* s = blob_find(b->blob_id);
+    b->length = s ? s->len : 0;
+    if (s && b->data && b->length)
+      memcpy((void*)(uintptr_t)b->data, s->data, s->len);
     if (tracing())
-      fprintf(stderr, "[drm] MODE_GETPROPBLOB blob_id=%u -> empty\n", b->blob_id);
+      fprintf(stderr, "[drm] MODE_GETPROPBLOB blob_id=%u -> %u bytes%s\n",
+              b->blob_id, b->length, s ? "" : " (unknown)");
+    return 0;
+  }
+
+  // ---- KMS commit path: legacy (MODE_SETCRTC + MODE_PAGE_FLIP) and atomic (MODE_ATOMIC) ----
+
+  // MODE_CREATEPROPBLOB: store arbitrary bytes (usually a drm_mode_modeinfo) and return
+  // a blob id. The atomic commit references the MODE_ID blob by this id.
+  if (type == DRM_TYPE && nr == DRM_NR_MODE_CREATEPROPBLOB && arg) {
+    struct drm_mode_create_blob* cb = (struct drm_mode_create_blob*)arg;
+    cb->blob_id = blob_create((const void*)(uintptr_t)cb->data, cb->length);
+    if (tracing())
+      fprintf(stderr, "[drm] MODE_CREATEPROPBLOB len=%u -> blob_id=%u%s\n",
+              cb->length, cb->blob_id, cb->blob_id ? "" : " (-ENOMEM)");
+    return cb->blob_id ? 0 : -12;
+  }
+
+  if (type == DRM_TYPE && nr == DRM_NR_MODE_DESTROYPROPBLOB && arg) {
+    struct drm_mode_destroy_blob* db = (struct drm_mode_destroy_blob*)arg;
+    if (tracing()) fprintf(stderr, "[drm] MODE_DESTROYPROPBLOB blob_id=%u\n", db->blob_id);
+    blob_destroy(db->blob_id);
+    return 0;
+  }
+
+  // MODE_SETCRTC (legacy modeset): drmModeSetCrtc(fd, crtc, fb, x, y, connectors, n, mode).
+  // The struct is drm_mode_crtc with the mode + connectors as INPUT; fb_id == 0xFFFFFFFF
+  // disables scanout.
+  if (type == DRM_TYPE && nr == DRM_NR_MODE_SETCRTC && arg) {
+    struct drm_mode_get_crtc* c = (struct drm_mode_get_crtc*)arg;
+    int disable = (c->fb_id == 0 || c->fb_id == 0xFFFFFFFFu);
+    uint32_t crtc = c->crtc_id ? c->crtc_id : 1;
+    struct crtc_state* cr = crtc_by_id(crtc);
+    struct plane_state* pl = plane_by_id(crtc);
+    struct connector_state* cn = connector_by_id(crtc);
+    cr->fb_id = disable ? 0 : c->fb_id;
+    cr->x = c->x; cr->y = c->y;
+    pl->fb_id = cr->fb_id;
+    pl->crtc_id = disable ? 0 : crtc;
+    cn->crtc_id = disable ? 0 : crtc;
+    if (!disable && c->mode.clock) { cr->mode = c->mode; cr->mode_valid = 1; }
+    else if (disable) { cr->mode_valid = 0; memset(&cr->mode, 0, sizeof cr->mode); }
+    if (tracing())
+      fprintf(stderr, "[drm] MODE_SETCRTC crtc_id=%u fb_id=0x%x x=%u y=%u connectors=%u %s "
+              "mode=%ux%u@%u -> %s\n",
+              c->crtc_id, c->fb_id, c->x, c->y, c->count_connectors,
+              disable ? "DISABLE" : "ENABLE", cr->mode_valid ? cr->mode.hdisplay : 0,
+              cr->mode_valid ? cr->mode.vdisplay : 0, cr->mode_valid ? cr->mode.vrefresh : 0,
+              "ok");
+    return 0;
+  }
+
+  // MODE_SETPROPERTY (legacy drmModeConnectorSetProperty, e.g. DPMS): accept + record.
+  if (type == DRM_TYPE && nr == DRM_NR_MODE_SETPROPERTY && arg) {
+    struct drm_mode_connector_set_property* s = (struct drm_mode_connector_set_property*)arg;
+    if (s->prop_id == DRM_PROP_DPMS) g_connector.dpms = (uint32_t)s->value;
+    if (tracing())
+      fprintf(stderr, "[drm] MODE_SETPROPERTY connector=%u prop=%u value=%llu -> ok\n",
+              s->connector_id, s->prop_id, (unsigned long long)s->value);
+    return 0;
+  }
+
+  // MODE_OBJ_SETPROPERTY (drmModeObjectSetProperty): accept + record.
+  if (type == DRM_TYPE && nr == DRM_NR_MODE_OBJ_SETPROPERTY && arg) {
+    struct drm_mode_obj_set_property* s = (struct drm_mode_obj_set_property*)arg;
+    if (s->prop_id == DRM_PROP_DPMS) g_connector.dpms = (uint32_t)s->value;
+    if (tracing())
+      fprintf(stderr, "[drm] MODE_OBJ_SETPROPERTY obj=%u type=0x%x prop=%u value=%llu -> ok\n",
+              s->obj_id, s->obj_type, s->prop_id, (unsigned long long)s->value);
+    return 0;
+  }
+
+  // MODE_PAGE_FLIP (legacy flip): drmModePageFlip(fd, crtc, fb, flags, user_data).
+  if (type == DRM_TYPE && nr == DRM_NR_MODE_PAGE_FLIP && arg) {
+    struct drm_mode_crtc_page_flip* pf = (struct drm_mode_crtc_page_flip*)arg;
+    uint32_t crtc = pf->crtc_id ? pf->crtc_id : 1;
+    struct crtc_state* cr = crtc_by_id(crtc);
+    struct plane_state* pl = plane_by_id(crtc);
+    cr->fb_id = pf->fb_id;
+    pl->fb_id = pf->fb_id;
+    pl->crtc_id = crtc;
+    if (pf->flags & DRM_MODE_PAGE_FLIP_EVENT) event_enqueue(pf->user_data, crtc);
+    if (pf->fb_id) drm_present_fb(pf->fb_id, crtc);
+    if (tracing())
+      fprintf(stderr, "[drm] MODE_PAGE_FLIP crtc_id=%u fb_id=0x%x flags=0x%x user_data=0x%llx%s\n",
+              pf->crtc_id, pf->fb_id, pf->flags, (unsigned long long)pf->user_data,
+              (pf->flags & DRM_MODE_PAGE_FLIP_EVENT) ? " (event queued)" : "");
+    return 0;
+  }
+
+  // MODE_ATOMIC: atomic commit. Parse the (objs, props, prop_values) arrays and apply
+  // each property by id. This is the north-star path: ALLOW_MODESET carries the MODE_ID
+  // blob, and a page-flip carries a fresh FB_ID + PAGE_FLIP_EVENT.
+  if (type == DRM_TYPE && nr == DRM_NR_MODE_ATOMIC && arg) {
+    struct drm_mode_atomic* a = (struct drm_mode_atomic*)arg;
+    uint32_t mode_blob = 0;
+    int is_modeset = (a->flags & DRM_MODE_ATOMIC_ALLOW_MODESET) != 0;
+    int test_only  = (a->flags & DRM_MODE_ATOMIC_TEST_ONLY) != 0;
+
+    // The object ids the commit touches (crtc/plane/connector all live in the id-1/id-2
+    // namespace: id 1 = external DP CRTC+plane+connector, id 2 = builtin eDP). We read
+    // objs_ptr so each property routes to its OWN object's state instead of the primary.
+    uint32_t* objs = (uint32_t*)(uintptr_t)a->objs_ptr;
+    uint32_t* cnts = (uint32_t*)(uintptr_t)a->count_props_ptr;
+    uint32_t* props = (uint32_t*)(uintptr_t)a->props_ptr;
+    uint64_t* vals = (uint64_t*)(uintptr_t)a->prop_values_ptr;
+
+    // Per-plane flips to present after the commit: flip_fb[id-1], resolved to flip_crtc[id-1].
+    uint32_t flip_fb[2]   = {0, 0};
+    uint32_t flip_crtc[2] = {0, 0};
+
+    uint32_t off = 0;
+    for (uint32_t i = 0; i < a->count_objs; i++) {
+      uint32_t obj_id = objs ? objs[i] : 0;
+      if (obj_id != 1 && obj_id != 2) obj_id = 1;      // never index out of range
+      uint32_t n = cnts ? cnts[i] : 0;
+
+      // Classify the object by the properties it carries (the id namespace is shared across
+      // CRTC/plane/connector, so the props are the only disambiguator). Only plane vs connector
+      // matters for routing CRTC_ID; ACTIVE/MODE_ID and the SRC/CRTC rect props are unambiguous.
+      int is_plane = 0, is_conn = 0;
+      for (uint32_t j = 0; j < n; j++) {
+        uint32_t pid = props ? props[off + j] : 0;
+        if (pid == DRM_PROP_FB_ID || pid == DRM_PROP_TYPE ||
+            (pid >= DRM_PROP_SRC_X && pid <= DRM_PROP_CRTC_H)) is_plane = 1;
+        else if (pid == DRM_PROP_DPMS) is_conn = 1;
+      }
+
+      struct crtc_state* cr = crtc_by_id(obj_id);
+      struct plane_state* pl = plane_by_id(obj_id);
+      struct connector_state* cn = connector_by_id(obj_id);
+
+      for (uint32_t j = 0; j < n; j++) {
+        uint32_t pid = props ? props[off + j] : 0;
+        uint64_t val = vals ? vals[off + j] : 0;
+        switch (pid) {
+          case DRM_PROP_ACTIVE:  cr->active = (uint32_t)val; break;
+          case DRM_PROP_MODE_ID:
+            cr->mode_blob = (uint32_t)val;
+            if (val) {
+              struct blob_slot* s = blob_find((uint32_t)val);
+              if (s && s->len >= sizeof(struct drm_mode_modeinfo)) {
+                memcpy(&cr->mode, s->data, sizeof(struct drm_mode_modeinfo));
+                cr->mode_valid = 1;
+                mode_blob = (uint32_t)val;
+              }
+            } else { cr->mode_valid = 0; memset(&cr->mode, 0, sizeof cr->mode); }
+            break;
+          case DRM_PROP_CRTC_ID:
+            if (is_conn) cn->crtc_id = (uint32_t)val;
+            if (is_plane) pl->crtc_id = (uint32_t)val;
+            break;
+          case DRM_PROP_FB_ID:
+            pl->fb_id = (uint32_t)val;
+            cr->fb_id = (uint32_t)val;
+            if (obj_id >= 1 && obj_id <= 2) flip_fb[obj_id - 1] = (uint32_t)val;
+            break;
+          case DRM_PROP_SRC_X:   pl->src_x = val; break;
+          case DRM_PROP_SRC_Y:   pl->src_y = val; break;
+          case DRM_PROP_SRC_W:   pl->src_w = val; break;
+          case DRM_PROP_SRC_H:   pl->src_h = val; break;
+          case DRM_PROP_CRTC_X:  pl->crtc_x = val; break;
+          case DRM_PROP_CRTC_Y:  pl->crtc_y = val; break;
+          case DRM_PROP_CRTC_W:  pl->crtc_w = val; break;
+          case DRM_PROP_CRTC_H:  pl->crtc_h = val; break;
+          case DRM_PROP_DPMS:    cn->dpms = (uint32_t)val; break;
+          default: break;                    // IN_FENCE_FD / OUT_FENCE_PTR / GAMMA etc: ignore
+        }
+      }
+      off += n;
+    }
+
+    // Present each plane's newly-committed framebuffer to its CRTC. Plane N scans out to
+    // CRTC N (the plane's CRTC_ID property when set), so both outputs present their frame.
+    uint32_t event_crtc = 0;
+    if (!test_only) {
+      for (int pi = 0; pi < 2; pi++) {
+        if (!flip_fb[pi]) continue;
+        struct plane_state* pl = plane_by_id(pi + 1);
+        uint32_t crtc = pl->crtc_id ? pl->crtc_id : (uint32_t)(pi + 1);
+        flip_crtc[pi] = crtc;
+        if (!event_crtc) event_crtc = crtc;
+        drm_present_fb(flip_fb[pi], crtc);
+      }
+    }
+    if (!test_only && (a->flags & DRM_MODE_PAGE_FLIP_EVENT))
+      event_enqueue(a->user_data, event_crtc);
+    if (tracing())
+      fprintf(stderr, "[drm] MODE_ATOMIC flags=0x%x objs=%u%s%s%s fb_id=0x%x/0x%x mode_blob=%u "
+              "crtc=%u/%u -> ok\n",
+              a->flags, a->count_objs, is_modeset ? " MODESET" : "", test_only ? " TEST" : "",
+              (a->flags & DRM_MODE_PAGE_FLIP_EVENT) ? " FLIP" : "", flip_fb[0], flip_fb[1],
+              mode_blob, flip_crtc[0], flip_crtc[1]);
     return 0;
   }
 

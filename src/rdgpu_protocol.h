@@ -74,4 +74,29 @@ typedef struct {
     int32_t           result;   // return code of CoreDisplay_Display_PresentIOSurface
 } rdgpu_reply_t;
 
+// ---------------------------------------------------------------------------
+// The "flick" — toggle takeover suppression (shim -> payload).
+//
+// The shim's configurable key combo (RDNATIVE_FLICK_KEY) flips between "Linux owns
+// the display(s)" (the payload cleared the per-display `online` flag and flips the
+// direct present) and "macOS owns them" (the flag is re-set and macOS re-composites).
+// This one-way control message tells the payload which state to enter; the shim flips
+// its own present sink (direct scanout vs. CAMetalLayer) independently of this message,
+// so the toggle still works when the service is unreachable.
+#define RDGPU_MSG_ID_TOGGLE      0x52445003u   // 'RDP\x03'
+#define RDGPU_SCANOUT_TOGGLE_ALL 0xffffffffu   // display_index sentinel: every display
+
+// One "set takeover suppression" request (one-way; no reply).
+//   header        — msgh_remote_port = the service send-right; msgh_local_port = MACH_PORT_NULL.
+//   online        — 1 = macOS owns the display(s): re-set the `online` flag and stop the direct
+//                   present so macOS re-composites. 0 = Linux owns them: clear the flag and
+//                   resume the direct present.
+//   display_index — per-display ROLE (RDGPU_SCANOUT_ROLE_PRIMARY/SECONDARY), or
+//                   RDGPU_SCANOUT_TOGGLE_ALL to apply to every display.
+typedef struct {
+    mach_msg_header_t header;
+    uint32_t          online;         // 1 = re-set online flag (macOS owns), 0 = clear (Linux owns)
+    uint32_t          display_index;  // per-display ROLE, or RDGPU_SCANOUT_TOGGLE_ALL
+} rdgpu_toggle_msg_t;
+
 #endif // RDGPU_PROTOCOL_H

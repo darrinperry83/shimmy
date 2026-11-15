@@ -27,7 +27,7 @@ CFLAGS="-arch arm64 -O2 -Wall -Wno-unused-parameter -I$SRC"
 srcsha() { cat "$SRC"/*.c "$SRC"/*.h "$SRC"/*.m third_party/*.m third_party/*.mm third_party/*.h third_party/spirv-cross/*.h third_party/spirv-cross/*.hpp build.sh 2>/dev/null | shasum -a256 | cut -d' ' -f1; }
 stamp()  { printf '%s %s\n' "$(srcsha)" "$(shasum -a256 "$1" | cut -d' ' -f1)" > "build/$1.srcsha"; }
 
-CORE="gmem.c guest_range_ledger.c elfload.c syscalls.c syscalls_ext.c signalfd_shim.c timerfd_shim.c bootstrap.c net.c vdso.c fastcall.c hostcall_scoped.c drmasahi.c rdgpu_surface_handoff.c v4l2cam.c present_feedback.c snd_alsa.c coreaudio_host.c"
+CORE="guest_ownership.c gmem.c guest_range_ledger.c elfload.c syscalls.c syscalls_ext.c signalfd_shim.c timerfd_shim.c pidfd_shim.c bootstrap.c net.c vdso.c fastcall.c hostcall_scoped.c drmasahi.c rdgpu_surface_handoff.c v4l2cam.c present_feedback.c snd_alsa.c coreaudio_host.c console.c vt.c evdev.c"
 RDGPU="rdgpu_guest_syscall.c rdgpu_mock_gate.c rdgpu_virtual_carrier.c"
 
 build_third_party() {
@@ -42,6 +42,8 @@ build_third_party() {
   ( cd build/third_party && clang $CFLAGS -ObjC -I../../third_party -c ../../third_party/rdmetal_resource.m -o rdmetal_resource.o )
   ( cd build/third_party && clang $CFLAGS -ObjC -I../../third_party -c ../../third_party/rdgpu_broker.m -o rdgpu_broker.o )
   ( cd build/third_party && clang $CFLAGS -fobjc-arc -std=c++17 -I../../third_party -I../../third_party/spirv-cross -c ../../third_party/rdgpu_draw_host.mm -o rdgpu_draw_host.o )
+  ( cd build/third_party && clang $CFLAGS -fobjc-arc -ObjC -I../../third_party -c ../../third_party/rdgpu_texture_store.m -o rdgpu_texture_store.o )
+  ( cd build/third_party && clang $CFLAGS -fobjc-arc -ObjC -I../../third_party -c ../../third_party/rdgpu_texture_packet.m -o rdgpu_texture_packet.o )
 }
 
 build_cli() {
@@ -51,13 +53,16 @@ build_cli() {
   for f in $CORE $RDGPU; do
     ( cd build/cli && clang $CFLAGS -DRDGPU_CLIENT -c ../../$SRC/$f -o "${f%.c}.o" )
   done
-  clang -arch arm64 -o shim_cli build/cli/*.o build/third_party/rdgpu_broker.o build/third_party/rdmetal_resource.o build/third_party/rdgpu_draw_host.o build/mach_excServer.c \
+  ( cd build/cli && clang $CFLAGS -DNO_GPU -ObjC -fobjc-arc -I../../third_party -c ../../$SRC/rdgpu_texture_bridge.m -o rdgpu_texture_bridge.o )
+  ( cd build/cli && clang $CFLAGS -DNO_GPU -ObjC -fobjc-arc -c ../../$SRC/rdva_host.m -o rdva_host.o )
+  ( cd build/cli && clang $CFLAGS -c ../../tests/rdgpu_connector_headless.c -o rdgpu_connector_headless.o )
+  clang -arch arm64 -o shim_cli build/cli/*.o build/third_party/*.o build/mach_excServer.c \
     third_party/lib/libspirv-cross-msl.a \
     third_party/lib/libspirv-cross-glsl.a \
     third_party/lib/libspirv-cross-core.a \
     -framework Metal -framework IOSurface -framework Foundation \
     -framework Security -framework CoreFoundation -framework AudioToolbox \
-    -framework AudioUnit -framework CoreAudio -lc++
+    -framework AudioUnit -framework CoreAudio -framework VideoToolbox -framework CoreMedia -framework CoreVideo -lc++
   codesign --force --sign - --entitlements $SRC/ent.plist shim_cli
   stamp shim_cli
   echo "   -> ./shim_cli"
@@ -75,15 +80,15 @@ build_gui() {
   for f in $RDGPU; do
     ( cd build/gui && clang $CFLAGS -DRDGPU_CLIENT -c ../../$SRC/$f -o "${f%.c}.o" )
   done
-  for f in gpu_bridge.m window.m named_clipboard.m secondary_window.m x11srv_render.m glbridge.m capresent.m rdgpu_scanout_client.m mac_surface_host.m; do
-    ( cd build/gui && clang $CFLAGS -ObjC -fobjc-arc -c ../../$SRC/$f -o "${f%.m}.o" )
+  for f in gpu_bridge.m window.m named_clipboard.m secondary_window.m x11srv_render.m glbridge.m capresent.m rdgpu_scanout_client.m mac_surface_host.m rdgpu_native_output.m rdgpu_macsurface_client.m rdgpu_texture_bridge.m rdva_host.m; do
+    ( cd build/gui && clang $CFLAGS -ObjC -fobjc-arc -I../../third_party -c ../../$SRC/$f -o "${f%.m}.o" )
   done
-  clang -arch arm64 -o shim_gui build/gui/*.o build/third_party/rdgpu_broker.o build/third_party/rdmetal_resource.o build/third_party/rdgpu_draw_host.o build/mach_excServer.c \
+  clang -arch arm64 -o shim_gui build/gui/*.o build/third_party/*.o build/mach_excServer.c \
     third_party/lib/libspirv-cross-msl.a \
     third_party/lib/libspirv-cross-glsl.a \
     third_party/lib/libspirv-cross-core.a \
     -framework Metal -framework MetalKit -framework Cocoa -framework QuartzCore -framework CoreGraphics -framework Accelerate -framework IOSurface -framework IOKit -framework CoreServices \
-    -framework AudioToolbox -framework AudioUnit -framework CoreAudio -framework Security -lc++
+    -framework AudioToolbox -framework AudioUnit -framework CoreAudio -framework Security -framework VideoToolbox -framework CoreMedia -framework CoreVideo -lc++
   codesign --force --sign - --entitlements $SRC/ent.plist shim_gui
   stamp shim_gui
   echo "   -> ./shim_gui"
@@ -98,6 +103,8 @@ build_wlh() {
   for f in $CORE wlsrv.c wlhead_stub.c; do
     ( cd build/wlh && clang $CFLAGS -DNO_GPU -DWL_HEADLESS -c ../../$SRC/$f -o "${f%.c}.o" )
   done
+  ( cd build/wlh && clang $CFLAGS -c ../../tests/rdgpu_connector_headless.c -o rdgpu_connector_headless.o )
+  ( cd build/wlh && clang $CFLAGS -ObjC -fobjc-arc -c ../../$SRC/rdva_host.m -o rdva_host.o )
   # capresent.m in the HEADLESS build. S1's REJECT reason 4 and S3's own §2 both said "the CA arm
   # can never be gated headlessly" -- and S3 disproved it against themselves: it was a BUILD CHOICE,
   # not a property of CALayer/IOSurface. A CALayer can be built and IOSurfaces published with no
@@ -106,7 +113,7 @@ build_wlh() {
   ( cd build/wlh && clang $CFLAGS -DNO_GPU -DWL_HEADLESS -ObjC -fobjc-arc -c ../../$SRC/capresent.m -o capresent.o )
   clang -arch arm64 -o shim_wlh build/wlh/*.o build/mach_excServer.c -framework Accelerate \
     -framework IOSurface -framework QuartzCore -framework CoreGraphics -framework Foundation \
-    -framework AudioToolbox -framework AudioUnit -framework CoreAudio
+    -framework AudioToolbox -framework AudioUnit -framework CoreAudio -framework VideoToolbox -framework CoreMedia -framework CoreVideo
   codesign --force --sign - --entitlements $SRC/ent.plist shim_wlh
   stamp shim_wlh
   echo "   -> ./shim_wlh"

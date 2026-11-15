@@ -38,6 +38,7 @@
 #include <sys/ucontext.h>
 #include <pthread/pthread.h>
 #include "elfload.h"
+#include "pidfd_shim.h"
 #include "syscalls.h"
 #include "syscalls_ext.h"
 #include "net.h"
@@ -47,6 +48,14 @@
 #include "fastcall.h"
 #include "guestthread.h"
 #include "execve.h"
+#include "vt.h"
+// PID-1 identity lives in syscalls.c (set from syscalls_set_exe); the fork child clears it because
+// it is a new guest process, not PID 1. Declared here because syscalls.h is a symlink into the
+// shared linux-shim tree that this task must not modify.
+extern void syscalls_set_init(int v);
+extern long syscalls_guest_pid(void);
+extern void syscalls_set_guest_ppid(long ppid);
+extern long syscalls_get_guest_ppid(void);
 #ifndef NO_GPU
 #include "x11srv.h"
 #include "wlsrv.h"
@@ -111,10 +120,10 @@ static long route_syscall(unsigned long nr, unsigned long a0, unsigned long a1, 
 static long route_syscall_fc(unsigned long nr, unsigned long a0, unsigned long a1,
                              unsigned long a2, unsigned long a3, unsigned long a4,
                              unsigned long a5) {
-  if (nr == 220 || nr == 93) {
+  if (nr == 220 || nr == 435 || nr == 93) {
     static int said;
     if (!said) { said = 1;
-      fprintf(stderr, "[fastcall] syscall %lu reached the fast path but must not: clone(220) needs "
+      fprintf(stderr, "[fastcall] syscall %lu reached the fast path but must not: clone(220)/clone3(435) need "
                       "the register file, exit(93) unwinds off the thunk's native stack. Refusing "
                       "(-ENOSYS); the site should have been excluded statically.\n", nr); }
     return -38;                                    // -ENOSYS
@@ -127,6 +136,8 @@ static long route_syscall_fc(unsigned long nr, unsigned long a0, unsigned long a
   if (trace) { fprintf(stderr, "[fc pid=%d] nr=%lu(%#lx,%#lx,%#lx)\n", getpid(), nr, a0, a1, a2); fflush(stderr); }
   long r = route_syscall(nr, a0, a1, a2, a3, a4, a5);
   if (trace) { fprintf(stderr, "[fc pid=%d] nr=%lu -> %ld\n", getpid(), nr, r); fflush(stderr); }
+  if (g_sctrace_fx) fx_note("FC nr=%lu(%#lx,%#lx,%#lx,%#lx,%#lx,%#lx) -> %ld\n",
+                            nr, a0, a1, a2, a3, a4, a5, r);
   return r;
 }
 
@@ -192,13 +203,31 @@ static long route_syscall(unsigned long nr, unsigned long a0, unsigned long a1, 
   if (nr == 93 || nr == 94) gmem_wx_report();
   if (g_sc_enter < 0) g_sc_enter = getenv("RDSCENTER") != 0;
   if (g_sc_enter) {
-    fprintf(stderr, "[sc>] tid=%d nr=%lu(%#lx,%#lx,%#lx)\n", guest_tid(), nr, a0, a1, a2);
+    fprintf(stderr, "[sc>] pid=%d tid=%d nr=%lu(%#lx,%#lx,%#lx)\n", (int)getpid(), guest_tid(), nr, a0, a1, a2);
     fflush(stderr);
+  }
+  // File-based ENTRY trace: the last line before a block is the blocking syscall. Rate-limited.
+  if (getenv("RDEXECDBG")) {
+    static int nsc;
+    if (nsc++ < 200000) {
+      char rp[160] = "?"; char hp[PATH_MAX];
+      if (fcntl((int)a0, F_GETPATH, hp) == 0) snprintf(rp, sizeof rp, "%s", hp);
+      FILE* f = fopen("/tmp/rd_exec_dbg.txt", "a");
+      if (f) { fprintf(f, "pid=%d ENTER nr=%lu a0=%#lx a1=%#lx fd0=%s\n", (int)getpid(), nr, a0, a1, rp); fclose(f); }
+    }
   }
   if (nr == GPU_SYSCALL)          return gpu_hypercall((struct gpu_req*)a0);
   if (nr == HOSTCALL_SYSCALL)     return hostcall((struct hostcall_req*)a0);
-  if (net_owns_syscall(nr))       return net_syscall(nr, a0, a1, a2, a3, a4, a5);
-  return linux_syscall(nr, a0, a1, a2, a3, a4, a5);
+  long r;
+  if (net_owns_syscall(nr))       r = net_syscall(nr, a0, a1, a2, a3, a4, a5);
+  else                            r = linux_syscall(nr, a0, a1, a2, a3, a4, a5);
+  if (getenv("RDEXECDBG") && r == -9)
+    fprintf(stderr, "[ebadf] nr=%lu(%#lx,%#lx,%#lx,%#lx,%#lx,%#lx) -> -9\n",
+            nr, a0, a1, a2, a3, a4, a5);
+  if (getenv("RDENOENTDBG") && r == -2)
+    fprintf(stderr, "[enoent] pid=%d nr=%lu(%#lx,%#lx,%#lx) path='%s'\n",
+            (int)getpid(), nr, a0, a1, a2, (const char*)a1);
+  return r;
 }
 
 // ---------------------------------------------------------------------------
@@ -420,12 +449,36 @@ static int             g_gchild[MAX_GCHILD];
 static int             g_gchild_n;
 static pthread_mutex_t g_gchild_mu = PTHREAD_MUTEX_INITIALIZER;
 
+// A process only records the children IT forked, but systemd's executor forks the actual service
+// process, so PID 1 never records it and would reject the pid in kill()/waitid(). A shared file,
+// keyed by the boot token (RDSHIM_BOOT, set in main and carried across exec), lets every shim
+// process in one guest boot agree on the set of issued pids.
+static char g_child_reg_path[PATH_MAX];
+static int  g_child_reg_inited;
+static void child_reg_init(void) {
+  if (g_child_reg_inited) return;
+  g_child_reg_inited = 1;
+  const char* boot = getenv("RDSHIM_BOOT");
+  if (!boot || !*boot) boot = "0";
+  snprintf(g_child_reg_path, sizeof g_child_reg_path, "/tmp/rdshim-children-%s", boot);
+}
+
 void guest_child_register(int pid) {
   if (pid <= 0) return;
   pthread_mutex_lock(&g_gchild_mu);
   g_gchild[g_gchild_n++ % MAX_GCHILD] = pid;
   if (g_gchild_n > 2 * MAX_GCHILD) g_gchild_n -= MAX_GCHILD;   // keep the counter bounded
   pthread_mutex_unlock(&g_gchild_mu);
+
+  child_reg_init();
+  if (!g_child_reg_path[0]) return;
+  int fd = open(g_child_reg_path, O_WRONLY | O_CREAT | O_APPEND, 0600);
+  if (fd >= 0) {
+    char line[32];
+    int n = snprintf(line, sizeof line, "%d\n", pid);
+    if (n > 0) (void)write(fd, line, (size_t)n);
+    close(fd);
+  }
 }
 
 int guest_child_known(int pid) {
@@ -434,7 +487,19 @@ int guest_child_known(int pid) {
   int found = 0;
   for (int i = 0; i < MAX_GCHILD; i++) if (g_gchild[i] == pid) { found = 1; break; }
   pthread_mutex_unlock(&g_gchild_mu);
-  return found;
+  if (found) return 1;
+
+  child_reg_init();
+  if (!g_child_reg_path[0]) return 0;
+  FILE* f = fopen(g_child_reg_path, "r");
+  if (!f) return 0;
+  char line[64];
+  while (fgets(line, sizeof line, f)) {
+    long v = strtol(line, NULL, 10);
+    if (v == pid) { fclose(f); return 1; }
+  }
+  fclose(f);
+  return 0;
 }
 
 int  guest_is_child(void)   { return t_cur ? t_cur->is_child : 0; }
@@ -486,10 +551,45 @@ static unsigned long ctr_el0_value(void) {
 // the fix had to land twice and only ever landed here, so every busybox applet ran while
 // `cat /bin/cat` could not open an absolute symlink. The old copy also only readlink()ed the FULL
 // path, so it never handled a symlink in a DIRECTORY component.
+static char g_self_path[1024];
+static char g_rootfs_path[1024];
+
 static int guest_host_path(const char* rootfs, const char* gpath, char* out, size_t cap) {
   (void)rootfs;                       // the resolver already holds the root (syscalls_set_root)
   return syscalls_resolve(-100 /*AT_FDCWD*/, gpath && gpath[0] ? gpath : "/", 0,
                           out, cap, 0, 0) < 0 ? -1 : 0;
+}
+
+// execve("/proc/self/fd/N") and execve("/proc/<pid>/fd/N"). systemd 261 execs its pinned
+// systemd-executor binary through an open fd (execveat AT_EMPTY_PATH emulated as a /proc/self/fd
+// path), and the guest's /proc is synthetic — there is no real /proc/self/fd/N file to load. The
+// fd IS the binary, so recover its guest path from F_GETPATH and exec that instead.
+// Returns 1 (out = guest path), 0 (not a proc-fd path), -1 (fd has no recoverable path).
+static int proc_fd_exec_path(const char* gpath, char* out, size_t cap) {
+  if (!gpath || strncmp(gpath, "/proc/", 6) != 0) return 0;
+  const char* p = gpath + 6;
+  if (strncmp(p, "self/fd/", 8) == 0) {
+    p += 8;
+  } else {
+    if (*p < '0' || *p > '9') return 0;
+    while (*p >= '0' && *p <= '9') p++;
+    if (strncmp(p, "/fd/", 4) != 0) return 0;
+    p += 4;
+  }
+  if (*p < '0' || *p > '9') return 0;
+  int fd = 0;
+  while (*p >= '0' && *p <= '9') fd = fd * 10 + (*p - '0'), p++;
+  if (*p) return 0;                                   // not a bare fd number
+  char hp[PATH_MAX];
+  if (fcntl(fd, F_GETPATH, hp) != 0) return -1;       // socket/pipe/anon: nothing to exec
+  char rp[PATH_MAX];
+  if (!realpath(g_rootfs_path, rp)) return -1;
+  size_t rl = strlen(rp);
+  if (strncmp(hp, rp, rl) == 0 && (hp[rl] == '/' || hp[rl] == 0))
+    snprintf(out, cap, "%s", hp[rl] ? hp + rl : "/");
+  else
+    snprintf(out, cap, "%s", hp);                     // outside the rootfs
+  return 1;
 }
 
 // --- execve ---------------------------------------------------------------------------------
@@ -497,8 +597,6 @@ static int guest_host_path(const char* rootfs, const char* gpath, char* out, siz
 // new program. The guest's own environment is handed over verbatim through the host environment,
 // marked with RDGUESTENV so build_guest_env() knows to pass it straight through instead of
 // synthesising the usual defaults.
-static char g_self_path[1024];
-static char g_rootfs_path[1024];
 #define GPATH_ENV_MAX (4096 + 16)   // "RDGUESTCWD=" + a GPATH_MAX guest path
 
 // Private diagnostic for the AT-SPI nested daemon's --print-address 13 pipe.
@@ -514,13 +612,23 @@ static void idle_trace_fd13(const char* phase, const char* path) {
           flags >= 0 ? !!(flags & FD_CLOEXEC) : -1, ok == 0 ? 0 : errno);
 }
 
+static void exec_dbg(const char* msg, const char* a, const char* b);
 long guest_execve(const char* guest_path, char* const* argv, char* const* envp) {
   idle_trace_fd13("before-guest-exec", guest_path);
   if (!g_self_path[0] || !g_rootfs_path[0]) return -38;        // -ENOSYS: never recorded
   // The path must exist in the rootfs, or the exec'd shim just fails later with a worse message.
   char host[2048];
-  guest_host_path(g_rootfs_path, guest_path, host, sizeof host);
-  if (access(host, X_OK) != 0) return -2;                      // -ENOENT
+  char fdpath[2048];
+  const char* exec_guest_path = guest_path;
+  if (proc_fd_exec_path(guest_path, fdpath, sizeof fdpath) > 0)
+    exec_guest_path = fdpath;           // /proc/self/fd/N -> the fd's real binary path
+  exec_dbg("exec-resolve", guest_path, exec_guest_path);
+  guest_host_path(g_rootfs_path, exec_guest_path, host, sizeof host);
+  if (access(host, X_OK) != 0) {
+    if (getenv("RDEXECDBG"))
+      fprintf(stderr, "[exec-fail] '%s' -> '%s': %s\n", guest_path, host, strerror(errno));
+    return -2;                      // -ENOENT
+  }
 
   int gargc = 0; if (argv) while (argv[gargc]) gargc++;
   char** hargv = (char**)calloc((size_t)gargc + 4, sizeof *hargv);
@@ -528,11 +636,26 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
   int n = 0;
   hargv[n++] = g_self_path;
   hargv[n++] = g_rootfs_path;
-  hargv[n++] = (char*)guest_path;
+  hargv[n++] = (char*)exec_guest_path;   // resolved path, not the synthetic /proc/self/fd/N
   for (int i = 1; i < gargc; i++) hargv[n++] = argv[i];        // argv[0] is the program name
   hargv[n] = NULL;
 
   int genvc = 0; if (envp) while (envp[genvc]) genvc++;
+  // RDERRDBG=1: confirm the socket-activation env (LISTEN_FDS/LISTEN_PID/LISTEN_FDNAMES) reaches
+  // the exec'd service, and that fd 3 is the listening socket (userdbd needs exactly 1).
+  if (getenv("RDERRDBG") && (strstr(exec_guest_path, "userdbd") || strstr(exec_guest_path, "udevd"))) {
+    const char* lf = NULL, *lp = NULL, *ln = NULL;
+    for (int i = 0; i < genvc; i++) {
+      if (!strncmp(envp[i], "LISTEN_FDS=", 11)) lf = envp[i];
+      else if (!strncmp(envp[i], "LISTEN_PID=", 11)) lp = envp[i];
+      else if (!strncmp(envp[i], "LISTEN_FDNAMES=", 15)) ln = envp[i];
+    }
+    int f3 = fcntl(3, F_GETFL); int f3fd = fcntl(3, F_GETFD);
+    FILE* f = fopen("/tmp/rd_errno_dbg.txt", "a");
+    if (f) { fprintf(f, "pid=%d EXEC %s env=%s|%s|%s fd3(fl=%d,fd=%d)\n",
+                     (int)getpid(), exec_guest_path, lf?lf:"(no LF)", lp?lp:"(no LP)", ln?ln:"(no LN)",
+                     f3, f3fd); fclose(f); }
+  }
   // Carry the SHIM's own control variables across the exec as well. They are host-side settings
   // read by the new shim itself, not part of the guest environment, so without this an exec'd
   // child is silently untraceable — which is exactly how WebKit's JIT stayed invisible: it runs
@@ -544,7 +667,7 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
     // "RDX18_NOTSD=1 ./shim_gui ... qmlscene" measured the DEFAULT and looked like a null result.
     // (This is about the shim's own MODE. The guest's x18 VALUE deliberately does not survive
     // execve — a new program image gets a new x18 by definition.)
-    "RDVERBOSE", "RDNOVDSO", "RDFASTCALL", "RDPOLLLOG", "RDUID0",
+    "RDVERBOSE", "RDEXECDBG", "RDNOVDSO", "RDFASTCALL", "RDPOLLLOG", "RDUID0", "RDEXECDBG", "RDSCENTER", "RDENOENTDBG", "RDFUTEX", "RDTIMERFD_TRACE", "RDDESERDBG",
     // RDDRM gates the rdmetal DRM render node (drmasahi.c). It MUST ride across execve for the
     // same reason RDSOCKETGROUP does: a compositor launched by startplasma-wayland (kwin_wayland)
     // is a re-exec'd shim, and without the node it reports "Failed to create gbm device for
@@ -573,6 +696,10 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
     // that reverted to the default would make the A/B measure nothing.
     "RDSEQPACKET", "RDCREDLOG", "RDSOCKETGROUP", "RDSHARE",
     "RDNETSOCK",
+    // RDSND gates the synthetic ALSA card. PipeWire and WirePlumber are EXEC'D daemons: the ALSA
+    // monitor runs inside the exec'd wireplumber, and without RDSND riding across execve it sees
+    // no /dev/snd/*, so no sink node is ever auto-created even though the card works top-level.
+    "RDSND", "RDSND_TRACE",
     "RDINPUT_TRACE", "RDX_MEMFD_DIR",
     // RDFUTEX is the futex trace, and the process that hangs is the EXEC'D WebKitWebProcess, so
     // without this the only process traced is the one that is not stuck.
@@ -591,7 +718,10 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
     // eight times over, while the top-level process reports the flag set. Same silent-revert-in-
     // the-child shape as every RDX18_* knob above; glmark2 never caught it because glmark2 does
     // not exec and WebKit always does.
-    "RDHOSTCALL", 0
+    "RDHOSTCALL", "RDVT_ROOT_PID", "RDVT_STATE", "RDSHIM_BOOT", "RDNOTIFYDBG", "RDERRDBG", "RDNETSOCK",
+    // The VT/console knobs ride across exec too, so a forked+exec'd getty (or a re-exec'd main
+    // process after `exec` in a boot script) keeps the same console geometry, trace and dump.
+    "RDVT", "RDVT_TRACE", "RDVT_AUTOSWITCH", "RDCONS_DUMP", "RDCONS_DUMPFILE", "RDCONS_COLS", "RDCONS_ROWS", 0
   };
   int ncarry = 0;
   for (int i = 0; kCarry[i]; i++) if (getenv(kCarry[i])) ncarry++;
@@ -603,11 +733,16 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
   char cwdenv[GPATH_ENV_MAX];
   snprintf(cwdenv, sizeof cwdenv, "RDGUESTCWD=%s", syscalls_get_cwd());
 
-  char** henv = (char**)calloc((size_t)genvc + ncarry + 3, sizeof *henv);
+  // The guest ppid survives execve (a new program image keeps its parent). Carried like the cwd.
+  char ppidenv[64];
+  snprintf(ppidenv, sizeof ppidenv, "RDGUESTPPID=%ld", syscalls_get_guest_ppid());
+
+  char** henv = (char**)calloc((size_t)genvc + ncarry + 4, sizeof *henv);
   if (!henv) { free(hargv); return -12; }
   int m = 0;
   henv[m++] = (char*)"RDGUESTENV=1";
   henv[m++] = cwdenv;
+  henv[m++] = ppidenv;
   for (int i = 0; i < genvc; i++) henv[m++] = envp[i];
   for (int i = 0; kCarry[i]; i++) {
     const char* v = getenv(kCarry[i]);
@@ -627,6 +762,9 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
     // separate host shim and hand the pid to the parent that is blocked waiting for exactly this.
     pid_t np = -1;
     int rc = posix_spawn(&np, g_self_path, NULL, NULL, hargv, henv);
+    if (getenv("RDEXECDBG"))
+      fprintf(stderr, "[exec-spawn] '%s' vfork posix_spawn rc=%d np=%d errno=%d\n",
+              guest_path, rc, (int)np, rc != 0 ? errno : 0);
     if (rc == 0) {
       guest_child_register((int)np);              // the guest may legitimately kill() this pid
       net_note_spawned_child((int)np);            // ...and it is now the peer of our socketpairs
@@ -665,20 +803,39 @@ static long spawn_status_carrier(int status) {
 // but a posix_spawn child's pre-exec window is a handful of syscalls.
 #define FDSNAP_MAX 64
 #define FDSNAP_BASE 300
-struct fdsnap { int orig[FDSNAP_MAX], save[FDSNAP_MAX]; int n; };
+struct fdsnap { int orig[FDSNAP_MAX], save[FDSNAP_MAX]; char cloexec[FDSNAP_MAX]; int n; };
 
 static void fd_snapshot(struct fdsnap* s) {
   s->n = 0;
   for (int fd = 0; fd < FDSNAP_MAX && s->n < FDSNAP_MAX; fd++) {
-    if (fcntl(fd, F_GETFD) < 0) continue;                    // not open
+    int fl = fcntl(fd, F_GETFD);
+    if (fl < 0) continue;                    // not open
     int dup = fcntl(fd, F_DUPFD_CLOEXEC, FDSNAP_BASE);
     if (dup < 0) continue;
-    s->orig[s->n] = fd; s->save[s->n] = dup; s->n++;
+    // The vfork child runs in THIS fd table (it is a thread). systemd's exec_child() calls
+    // close_all_fds()/close_range() in the child to drop every fd it does not intend to hand to
+    // the service, and that MUST NOT destroy these snapshots -- the parent (the executor) needs
+    // them afterwards to restore its own descriptors. Mark them shim-owned so the close(2) and
+    // close_range() handlers refuse vacuously, exactly like the private stderr dup.
+    dup = shim_fd_reserve(dup);
+    s->orig[s->n] = fd; s->save[s->n] = dup; s->cloexec[s->n] = (char)((fl & FD_CLOEXEC) != 0); s->n++;
   }
 }
 static void fd_restore(struct fdsnap* s) {
   for (int i = 0; i < s->n; i++) {
-    if (s->save[i] != s->orig[i]) dup2(s->save[i], s->orig[i]);
+    if (s->save[i] != s->orig[i]) {
+      dup2(s->save[i], s->orig[i]);
+      // dup2() CLEARS FD_CLOEXEC on the target. Preserve the descriptor's original CLOEXEC state,
+      // otherwise the shim-owned pty masters (3-8) and timerfd/signalfd ends lose CLOEXEC after the
+      // first vfork and leak into every subsequent executor -> fdset_new_fill() sees them -> the
+      // service exec loops. This was the fd 11/12/13 non-CLOEXEC leak.
+      fcntl(s->orig[i], F_SETFD, s->cloexec[i] ? FD_CLOEXEC : 0);
+    }
+    shim_fd_unreserve(s->save[i]);
+    if (getenv("RDEXECDBG")) {
+      FILE* f = fopen("/tmp/rd_exec_dbg.txt", "a");
+      if (f) { fprintf(f, "pid=%d FD-RESTORE orig=%d save=%d\n", (int)getpid(), s->orig[i], s->save[i]); fclose(f); }
+    }
     close(s->save[i]);
   }
   s->n = 0;
@@ -720,10 +877,19 @@ void guest_vfork_finish(long host_pid, int status) {
 // --- clone ---------------------------------------------------------------------------------
 #define LX_CLONE_VM       0x00000100
 #define LX_CLONE_THREAD   0x00010000
+#define LX_CLONE_PIDFD    0x00001000
 #define LX_CLONE_SETTLS   0x00080000
 #define LX_CLONE_PARENT_SETTID 0x00100000
 #define LX_CLONE_CHILD_CLEARTID 0x00200000
 #define LX_CLONE_CHILD_SETTID  0x01000000
+// The shim has no kernel namespaces (unshare already returns EPERM), so a clone that asks for one
+// must fail the same way. MEASURED: systemd's is_idmapping_supported() forks with CLONE_NEWUSER
+// (via userns_acquire_self_root) and, because do_clone ignored the flag and forked a plain child,
+// the follow-up write to the unsynthesized /proc/<pid>/uid_map failed ENOENT — which aborted
+// systemd-journald's RuntimeDirectory setup ("Failed at step RUNTIME_DIRECTORY ... No such file").
+// Rejecting it as EPERM makes is_idmapping_supported() answer "no" instead of an error.
+#define LX_CLONE_NEWUSER     0x10000000
+#define LX_CLONE_NS          (0x00020000u|0x02000000u|0x04000000u|0x08000000u|LX_CLONE_NEWUSER|0x20000000u|0x40000000u)
 
 struct child_start {
   unsigned long regs[GUEST_REGS_WORDS];
@@ -856,9 +1022,14 @@ static long do_fork(const arm_thread_state64_t* ts) {
   // state survives, so t_cur's record is what the child's single guest thread inherits.
   unsigned long saved_tpidr = gt_tpidr_get(t_cur);   // the LIVE word, i.e. what a veneer wrote
   unsigned long saved_x18   = gt_x18_get(t_cur);   // the LIVE word, i.e. what the veneers wrote
+  long parent_guest_pid = syscalls_guest_pid();    // child's guest ppid (1 for a direct child of init)
 
   fflush(NULL);                              // do not duplicate buffered output into the child
   pid_t pid = fork();
+  if (getenv("RDCLONEDBG")) {
+    FILE* cf = fopen("/tmp/rd_clone_dbg.txt", "a");
+    if (cf) { fprintf(cf, "do_fork result=%d errno=%d\n", pid, pid < 0 ? errno : 0); fclose(cf); }
+  }
   if (pid < 0) return -11;                   // -EAGAIN
   if (pid > 0) { guest_child_register((int)pid); net_note_spawned_child((int)pid); return pid; }
 
@@ -900,6 +1071,8 @@ static long do_fork(const arm_thread_state64_t* ts) {
   memset(g_gt, 0, sizeof g_gt);
   g_next_tid = 1;
   t_cur = NULL;
+  syscalls_set_init(0);          // a forked child is a new guest process: not PID 1
+  syscalls_set_guest_ppid(parent_guest_pid);   // ...whose parent is the process that forked it
 
   // Before the guest runs again: it may connect to its display on the very next instruction, and
   // the display it inherited belongs to a process that is about to exit.
@@ -1016,12 +1189,72 @@ static void* vfork_trampoline(void* arg) {
 // Serviced in the trap handler because it needs the FULL register file: the child resumes at the
 // instruction after the `svc` with the parent's registers, its own stack, and x0 == 0.
 //   x0 flags, x1 stack, x2 parent_tid, x3 tls, x4 child_tid
+// CLONE_PIDFD repurposes x2 (parent_tid) as the pidfd OUT pointer: the kernel stores a pidfd for
+// the new child there. systemd 261's executor spawn uses clone(CLONE_PIDFD) so it can waitid() on
+// the child without a separate pidfd_open(); if we never write it, systemd reads a garbage fd and
+// waitid(P_PIDFD, garbage) fails EBADF ("Failed to spawn executor: Bad file descriptor").
+static void clone_pidfd_write(unsigned long flags, unsigned long ptid, long child_pid) {
+  if (!(flags & LX_CLONE_PIDFD) || !ptid || child_pid <= 0) return;
+  long pfd = pidfd_open_shim((pid_t)child_pid, 0);
+  if (getenv("RDCLONEDBG")) {
+    FILE* cf = fopen("/tmp/rd_clone_dbg.txt", "a");
+    if (cf) { fprintf(cf, "clone_pidfd flags=%#lx ptid=%#lx child_pid=%ld pfd=%ld\n",
+                       flags, ptid, child_pid, pfd); fclose(cf); }
+  }
+  if (pfd >= 0) *(int*)ptid = (int)pfd;
+}
+
+// clone3(struct clone_args*, size). Same job as clone(), but the arguments arrive in a struct
+// instead of registers, and the pidfd output is args.pidfd (offset 8) rather than parent_tid.
+// systemd 261's pidfd_spawn() (via glibc) calls clone3(CLONE_PIDFD) first and only falls back to
+// clone(CLONE_PIDFD) on ENOSYS — but its waitid() later reads args.pidfd, which we never wrote on
+// the ENOSYS path. Implement clone3 so the pidfd lands in the one place systemd actually reads.
+// CLONE_INTO_CGROUP is accepted and ignored: the shim's cgroups are the in-memory registry, so the
+// child is already "in" its synthetic cgroup.
+static long do_clone(const arm_thread_state64_t* ts);
+static long do_clone3(const arm_thread_state64_t* ts) {
+  unsigned long args_ptr = (unsigned long)ts->__x[0];
+  unsigned long size     = (unsigned long)ts->__x[1];
+  if (!args_ptr || size < 16) return -22;             // -EINVAL (need flags+pidfd at minimum)
+  unsigned long flags      = *(unsigned long*)(uintptr_t)(args_ptr + 0);
+  unsigned long pidfd      = *(unsigned long*)(uintptr_t)(args_ptr + 8);
+  unsigned long child_tid  = *(unsigned long*)(uintptr_t)(args_ptr + 16);
+  unsigned long parent_tid = *(unsigned long*)(uintptr_t)(args_ptr + 24);
+  unsigned long stack      = *(unsigned long*)(uintptr_t)(args_ptr + 40);
+  unsigned long tls        = *(unsigned long*)(uintptr_t)(args_ptr + 56);
+  arm_thread_state64_t synth = *ts;
+  synth.__x[0] = flags;
+  synth.__x[1] = stack;
+  synth.__x[2] = (flags & LX_CLONE_PIDFD) ? pidfd : parent_tid;
+  synth.__x[3] = tls;
+  synth.__x[4] = child_tid;
+  long r = do_clone(&synth);
+  if (getenv("RDCLONEDBG") && (flags & LX_CLONE_PIDFD) && pidfd) {
+    FILE* cf = fopen("/tmp/rd_clone_dbg.txt", "a");
+    if (cf) { fprintf(cf, "clone3_done flags=%#lx pidfd_ptr=%#lx *pidfd=%d r=%ld\n",
+                       flags, pidfd, *(int*)(uintptr_t)pidfd, r); fclose(cf); }
+  }
+  return r;
+}
+
 static long do_clone(const arm_thread_state64_t* ts) {
   unsigned long flags = (unsigned long)ts->__x[0];
   unsigned long stack = (unsigned long)ts->__x[1];
   unsigned long ptid  = (unsigned long)ts->__x[2];
   unsigned long tls   = (unsigned long)ts->__x[3];
   unsigned long ctid  = (unsigned long)ts->__x[4];
+
+  // The shim has no kernel namespaces; see LX_CLONE_NS above. systemd probes for ID-mapping support
+  // by forking a CLONE_NEWUSER child and, if we fake the fork as a plain child, the /proc/<pid>/uid_map
+  // write it then attempts fails ENOENT and aborts the unit's directory setup.
+  if (flags & LX_CLONE_NS) return -1;   // -EPERM
+
+  if (getenv("RDCLONEDBG")) {
+    FILE* cf = fopen("/tmp/rd_clone_dbg.txt", "a");
+    if (cf) { fprintf(cf, "clone flags=%#lx stack=%#lx ptid=%#lx tls=%#lx ctid=%#lx vm=%d thread=%d\n",
+                      flags, stack, ptid, tls, ctid,
+                      (flags & LX_CLONE_VM) != 0, (flags & LX_CLONE_THREAD) != 0); fclose(cf); }
+  }
 
   // No CLONE_VM means fork(): a genuinely separate address space. That sounds impossible here —
   // guest pointers ARE host pointers — but it falls out for free, because a HOST fork() copies
@@ -1031,8 +1264,16 @@ static long do_clone(const arm_thread_state64_t* ts) {
   // The catch is that fork() keeps only the CALLING thread, and we are on the Mach
   // exception-server thread. So the child has no guest thread and no working exception port, and
   // has to rebuild both before it can run a single guest instruction.
-  if (!(flags & LX_CLONE_VM)) return do_fork(ts);
-  if (!(flags & LX_CLONE_THREAD)) return do_vfork(ts, stack);             // posix_spawn/popen
+  if (!(flags & LX_CLONE_VM)) {
+    long cres = do_fork(ts);
+    clone_pidfd_write(flags, ptid, cres);
+    return cres;
+  }
+  if (!(flags & LX_CLONE_THREAD)) {                                       // posix_spawn/popen
+    long cres = do_vfork(ts, stack);
+    clone_pidfd_write(flags, ptid, cres);
+    return cres;
+  }
 
   // Historic: move every veneered x18 site to the trap path before a second guest thread exists.
   //
@@ -1434,6 +1675,11 @@ static void service_brk(arm_thread_state64_t* ts, arm_thread_state64_t* ns, stru
       ns->__pc = ts->__pc + 4;
       return;
     }
+    if (nr == 435) {                                             // clone3: struct args + register file
+      ns->__x[0] = (unsigned long)do_clone3(ts);
+      ns->__pc = ts->__pc + 4;
+      return;
+    }
     // A guest that aborts leaves NO message (measured: the WebKitWebProcess writes nothing to fd 1
     // or 2 before its tgkill(SIGABRT)), so the only way to learn WHO called abort() is the guest's
     // own call chain -- available right here, because the trap handler holds the full register
@@ -1453,6 +1699,26 @@ static void service_brk(arm_thread_state64_t* ts, arm_thread_state64_t* ns, stru
     long r = (g_census == 1 ? route_syscall_census : route_syscall)(
                                nr, ts->__x[0], ts->__x[1], ts->__x[2],
                                ts->__x[3], ts->__x[4], ts->__x[5]);
+    if (r == -17 || r == -36 || r == -22) {   // EEXIST / ENAMETOOLONG / EINVAL — RDERRDBG=1
+      static int g_errdbg = -1;
+      if (g_errdbg < 0) { const char* s = getenv("RDERRDBG"); g_errdbg = (s && *s && *s != '0'); }
+      if (g_errdbg) {
+        char rp[160] = "?"; char hp[PATH_MAX];
+        if (fcntl((int)ts->__x[0], F_GETPATH, hp) == 0) snprintf(rp, sizeof rp, "%s", hp);
+        // For path-taking syscalls, also read the guest path string (a1 or a2) so the
+        // conflicting /dev path is named (udevd's symlinkat EEXIST).
+        char gp[256] = "?";
+        unsigned long gpa = 0;
+        if (nr == 36 || nr == 200 || nr == 201) gpa = ts->__x[2];       // symlinkat/bind/connect linkpath/addr
+        else if (nr == 33 || nr == 34 || nr == 35 || nr == 56 || nr == 188 || nr == 257) gpa = ts->__x[1]; // mknodat/mkdirat/unlinkat/openat path
+        if (gpa && gpa < 0x800000000000ULL) { const char* q = (const char*)gpa; size_t i = 0; while (i < sizeof gp - 1 && q[i]) { gp[i] = q[i]; i++; } gp[i] = 0; }
+        FILE* f = fopen("/tmp/rd_errno_dbg.txt", "a");
+        if (f) { fprintf(f, "pid=%d nr=%llu a0=%#llx a1=%#llx a2=%#llx fd0=%s gp=%s -> %ld\n",
+                         (int)getpid(), (unsigned long long)nr,
+                         (unsigned long long)ts->__x[0], (unsigned long long)ts->__x[1],
+                         (unsigned long long)ts->__x[2], rp, gp, r); fclose(f); }
+      }
+    }
     if (g_verbose) {
       fprintf(stderr, "[sc] nr=%lu(%#llx,%#llx,%#llx) -> %ld (%#lx)\n", nr,
               ts->__x[0], ts->__x[1], ts->__x[2], r, (unsigned long)r);
@@ -1594,7 +1860,7 @@ static void* guest_thread(void* arg) {
 // `LIBGL_ALWAYS_INDIRECT= ./shim_gui ...` is what actually turns the default off.
 extern char** environ;
 
-static const char* kEnvPrefixes[] = { "LIBGL_", "MESA_", "GALLIUM_", "EGL_", "GBM_", 0 };
+static const char* kEnvPrefixes[] = { "LIBGL_", "MESA_", "GALLIUM_", "EGL_", "GBM_", "LIBVA_", "VDPAU_", 0 };
 
 static int env_forwarded(const char* s) {
   for (int i = 0; kEnvPrefixes[i]; i++)
@@ -1624,6 +1890,7 @@ static char** build_guest_env(void) {
     // the SAME rootfs presents 1490 frames over Wayland. Two runs lost to it.
     "WAYLAND_DISPLAY=wayland-0",
     "LIBGL_ALWAYS_INDIRECT=1",   // default: GL over the wire -> our GLX decoder -> Metal
+    "LIBVA_DRIVER_NAME=rdva",    // default: VAAPI decode -> our rdva driver -> VideoToolbox
   };
   const int nbase = (int)(sizeof base / sizeof base[0]);
 
@@ -1724,6 +1991,16 @@ static void reap_stale_unix_prefixes(void) {
     fprintf(stderr, "[shim] reaped %d stale /tmp/rdx-<pid> namespace(s)\n", reaped);
 }
 
+static void exec_dbg(const char* msg, const char* a, const char* b) {
+  if (!getenv("RDEXECDBG")) return;
+  FILE* f = fopen("/tmp/rd_exec_dbg.txt", "a");
+  if (f) {
+    fprintf(f, "pid=%d ppid=%d %s a=%s b=%s\n", (int)getpid(), (int)getppid(),
+            msg, a ? a : "-", b ? b : "-");
+    fclose(f);
+  }
+}
+
 int main(int argc, char** argv) {
   if (argc < 3) { fprintf(stderr, "usage: %s <rootfs> <guest-path> [args...]\n", argv[0]); return 2; }
   g_verbose = getenv("RDVERBOSE") != 0;
@@ -1747,17 +2024,38 @@ int main(int argc, char** argv) {
     if (priv < 0) priv = dup(2);                  // no high slot free: still better than nothing
     if (priv >= 0) {
       fcntl(priv, F_SETFD, FD_CLOEXEC);
-      shim_fd_reserve(priv);
+      priv = shim_fd_reserve(priv);
       FILE* f = fdopen(priv, "w");
       if (f) { setvbuf(f, NULL, _IOLBF, 0); stderr = f; }
       else { shim_fd_unreserve(priv); close(priv); }
     }
   }
   const char* rootfs = argv[1];
+  if (getenv("RDFDDBG")) {
+    struct rlimit rl; getrlimit(RLIMIT_NOFILE, &rl);
+    fprintf(stderr, "[fd] RLIMIT_NOFILE soft=%llu hard=%llu\n",
+            (unsigned long long)rl.rlim_cur, (unsigned long long)rl.rlim_max);
+  }
   snprintf(g_self_path, sizeof g_self_path, "%s", argv[0]);
   snprintf(g_rootfs_path, sizeof g_rootfs_path, "%s", rootfs);
   const char* guestpath = argv[2];          // guest-absolute, e.g. /bin/busybox
   idle_trace_fd13("new-shim-entry", guestpath);
+  {
+    const char* fx = getenv("RDFUTEX"); const char* fxs = getenv("RDFUTEX_SC");
+    char envbuf[128];
+    snprintf(envbuf, sizeof envbuf, "fx=%s fxs=%s", fx?fx:"-", fxs?fxs:"-");
+    exec_dbg("main-entry", guestpath, envbuf);
+    if (getenv("RDEXECDBG") && strstr(guestpath, "systemd-executor")) {
+      char fdb[512]; int off = 0;
+      int chk[] = { 3,4,5,6,7,8,9,10,11,12,13,14,74,77,79,81,82,83,84 };
+      for (unsigned i = 0; i < sizeof chk/sizeof chk[0] && off < (int)sizeof fdb - 40; i++) {
+        int fl = fcntl(chk[i], F_GETFD);
+        struct stat st; int isp = fstat(chk[i], &st) == 0 ? (S_ISFIFO(st.st_mode)?1:S_ISSOCK(st.st_mode)?2:S_ISCHR(st.st_mode)?3:0) : -1;
+        off += snprintf(fdb + off, sizeof fdb - off, "%d:%d/%d ", chk[i], fl, isp);
+      }
+      exec_dbg("exec-fds", fdb, "-");
+    }
+  }
 
   gmem_init();
   gmem_x18_tsd_init();      // pick x18's home before any thread can bind its address
@@ -1765,6 +2063,28 @@ int main(int argc, char** argv) {
   gpu_init();
   syscalls_set_root(rootfs);
   syscalls_ext_set_root(rootfs);
+  // The root PID identifies which shim process owns the VT console renderer + reader thread.
+  // exec() keeps the PID, fork() gives the child a new one, so a re-exec'd main process (shebang,
+  // `exec` in a script) stays the renderer while forked gettys do not. Carried across exec in
+  // kCarry below and copied across fork for free.
+  if (!getenv("RDVT_ROOT_PID")) {
+    char rpid[32];
+    snprintf(rpid, sizeof rpid, "%d", (int)getpid());
+    setenv("RDVT_ROOT_PID", rpid, 1);
+  }
+  // A per-boot token shared by every shim process of this guest (carried across exec in kCarry).
+  // It keys the shared guest-child registry (guest_child_register/known) so PID 1 recognises
+  // children forked by executors it did not fork itself.
+  if (!getenv("RDSHIM_BOOT")) {
+    char bt[32];
+    snprintf(bt, sizeof bt, "%d", (int)getpid());
+    setenv("RDSHIM_BOOT", bt, 1);
+  }
+  vt_init();                       // /dev/tty1..6 virtual consoles (text getty + VT switching)
+#ifndef NO_GPU
+  extern void gpuwin_register_console_present(void);
+  gpuwin_register_console_present();   // wire the console renderer to the Metal present path
+#endif
 
   // ---- #! ------------------------------------------------------------------------------------
   // On Linux the KERNEL implements the shebang: execve() on a file whose first two bytes are "#!"
@@ -1824,6 +2144,11 @@ int main(int argc, char** argv) {
   }
 
   syscalls_set_exe(guestpath);
+  // Restore the guest ppid an exec'ing parent shim handed us (see guest_execve). exec keeps the
+  // parent, so a forked+exec'd getty must still see getppid()==1, not 0.
+  { const char* pp = getenv("RDGUESTPPID");
+    if (pp && *pp) syscalls_set_guest_ppid(atol(pp));
+  }
   // Restore the cwd an exec'ing parent shim handed us (see guest_execve). Must come after
   // syscalls_set_root, which does not touch g_cwd but owns everything else about resolution.
   { const char* cw = getenv("RDGUESTCWD");
@@ -1882,6 +2207,9 @@ int main(int argc, char** argv) {
     // or the other. $XDG_RUNTIME_DIR is /tmp in the guest, so this is the guest's /tmp/wayland-0.
     snprintf(sock, sizeof sock, "%s/tmp/wayland-0", uxpfx);
     wlsrv_start(sock);
+    // Native-DRM input: drain the NSEvent queue into /dev/input/event* for libinput. Only
+    // consumes events once the DRM master is active, so it never races wlsrv's wl_seat.
+    gpuwin_start_evdev_pump();
   }
   g_display_up = 1;                  // fork() must rebuild these in the child; see do_fork
 #endif
@@ -1922,10 +2250,12 @@ int main(int argc, char** argv) {
 
 
   char host[1024]; guest_host_path(rootfs, guestpath, host, sizeof host);
+  exec_dbg("resolve-host", guestpath, host);
   struct loaded prog = {0};
-  if (elf_load(host, &prog) != 0) { fprintf(stderr, "[shim] failed to load %s\n", host); return 1; }
+  if (elf_load(host, &prog) != 0) { exec_dbg("LOAD-FAIL", host, "elf_load"); fprintf(stderr, "[shim] failed to load %s\n", host); return 1; }
   fprintf(stderr, "[shim] loaded %s base=%#lx entry=%#lx interp='%s'\n",
           guestpath, prog.base, prog.entry, prog.interp);
+  exec_dbg("loaded-ok", guestpath, prog.interp);
 
   g_main_base = prog.base;
   struct prog_info pi = {0};

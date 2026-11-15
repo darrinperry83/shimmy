@@ -21,9 +21,9 @@ struct RDCarrier {
     bool issued,complete,bound;
 };
 static bool format_ok(RDCarrierFormat f){
-    return f.width&&f.height&&f.width<=2048&&f.height<=2048&&
+    return f.width&&f.height&&f.width<=4096&&f.height<=4096&&
         f.fourcc==RDCARRIER_ARGB8888&&f.stride>=f.width*4&&
-        f.stride<=2048*4&&(uint64_t)f.stride*f.height<=16u*1024u*1024u;
+        f.stride<=4096*4&&(uint64_t)f.stride*f.height<=64u*1024u*1024u;
 }
 static bool same(RDCarrierFormat a,RDCarrierFormat b){
     return a.width==b.width&&a.height==b.height&&a.stride==b.stride&&
