@@ -764,7 +764,7 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
     // /dev/dri/renderD128" and never brings up its EGL scene — which looks exactly like a client
     // that cannot reach the compositor. The top-level invocation worked only because RDDRM was in
     // the launch environment; the exec'd child got a fresh environment without it.
-    "RDDRM", "RDDRM_TRACE",
+    "RDDRM", "RDDRM_TRACE", "RDGPU_PRESENT_STATS",
     "RDX18_NOMT", "RDX18_NOTSD", "RDX18_NOPLAIN", "RDX18_MIXN", "RDX18_PARTIAL",
     "RDX18_BRPERSITE",
     "X11SRV_DEBUG", "X11SRV_DUMP", "WLSRV_DEBUG", "WLSRV_DUMP", "WLSRV_DUMP_MAX",
