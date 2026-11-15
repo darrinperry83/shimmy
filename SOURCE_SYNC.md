@@ -20,5 +20,17 @@ Verification on this Mac: `./build.sh` completed all targets; an isolated
 normal `/sbin/init --system` boot using the Git `shim_cli` reached a fresh
 `localhost login:` prompt and retained two D-Bus broker processes through a
 15-second settle; the standalone socket ABI test passed 179/179; and the VT
-exec test passed. These checks do not prove interactive login, installed rootfs
-boot, GUI desktop operation, multi-display hotplug, or packaged installation.
+exec test passed. The initial checks did not prove interactive login, installed
+rootfs boot, GUI desktop operation, multi-display hotplug, or packaged installation.
+
+## Interactive login follow-up
+
+An isolated cloned Arch root with a generated throwaway `shimtest` account
+reached the getty prompt, accepted a password through the VT pty, started Bash,
+and returned `shimtest` and UID `22001` from the guest's `id` command. The
+optional `RDVT_TEST_INPUT_FIFO` is a private FIFO injection seam for this test;
+it is disabled in ordinary runs. The fix maps virtual tty descriptors to
+`/dev/ttyN` for `ttyname`, and carries guest UID/GID changes across shim exec.
+The host process still accesses files under the Mac user's credentials; guest
+filesystem permission enforcement remains future work. This does not yet
+prove a live desktop or physical keyboard login.

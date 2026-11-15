@@ -1224,12 +1224,12 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   case 142: return -LX_EPERM;                                  // reboot
 
   // ===== 143..162: credentials, names ======================================
-  case 143: return g_uid0 ? 0 : ok0(setregid((gid_t)a0, (gid_t)a1));
-  case 144: return g_uid0 ? 0 : ok0(setgid((gid_t)a0));
-  case 145: return g_uid0 ? 0 : ok0(setreuid((uid_t)a0, (uid_t)a1));
-  case 146: return g_uid0 ? 0 : ok0(setuid((uid_t)a0));
+  case 143: return g_uid0 ? guest_cred_set_gid((int)a0, (int)a1, -1) : ok0(setregid((gid_t)a0, (gid_t)a1));
+  case 144: return g_uid0 ? guest_cred_set_gid((int)a0, (int)a0, (int)a0) : ok0(setgid((gid_t)a0));
+  case 145: return g_uid0 ? guest_cred_set_uid((int)a0, (int)a1, -1) : ok0(setreuid((uid_t)a0, (uid_t)a1));
+  case 146: return g_uid0 ? guest_cred_set_uid((int)a0, (int)a0, (int)a0) : ok0(setuid((uid_t)a0));
   case 147: {                                                  // setresuid (no macOS equivalent)
-    if (g_uid0) return 0;
+    if (g_uid0) return guest_cred_set_uid((int)a0, (int)a1, (int)a2);
     uid_t r = (uid_t)a0, ef = (uid_t)a1;
     if ((int)a0 == -1 && (int)a1 == -1) return 0;
     if (setreuid((int)a0 == -1 ? (uid_t)-1 : r, (int)a1 == -1 ? (uid_t)-1 : ef) != 0) return eret();
@@ -1238,24 +1238,24 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   case 148:                                                    // getresuid
     // RDUID0 has to be honoured HERE TOO, or a program that asks getresuid() instead of getuid()
     // sees the real uid and the two answers disagree -- glibc's `id` reads both. See syscalls.c:174.
-    if (a0) *(unsigned*)a0 = g_uid0 ? 0 : getuid();
-    if (a1) *(unsigned*)a1 = g_uid0 ? 0 : geteuid();
-    if (a2) *(unsigned*)a2 = g_uid0 ? 0 : geteuid();
+    if (a0) *(unsigned*)a0 = g_uid0 ? guest_cred_uid(0) : getuid();
+    if (a1) *(unsigned*)a1 = g_uid0 ? guest_cred_uid(1) : geteuid();
+    if (a2) *(unsigned*)a2 = g_uid0 ? guest_cred_uid(2) : geteuid();
     return 0;
   case 149: {                                                  // setresgid
-    if (g_uid0) return 0;
+    if (g_uid0) return guest_cred_set_gid((int)a0, (int)a1, (int)a2);
     if ((int)a0 == -1 && (int)a1 == -1) return 0;
     if (setregid((int)a0 == -1 ? (gid_t)-1 : (gid_t)a0,
                  (int)a1 == -1 ? (gid_t)-1 : (gid_t)a1) != 0) return eret();
     return 0;
   }
   case 150:                                                    // getresgid
-    if (a0) *(unsigned*)a0 = g_uid0 ? 0 : getgid();
-    if (a1) *(unsigned*)a1 = g_uid0 ? 0 : getegid();
-    if (a2) *(unsigned*)a2 = g_uid0 ? 0 : getegid();
+    if (a0) *(unsigned*)a0 = g_uid0 ? guest_cred_gid(0) : getgid();
+    if (a1) *(unsigned*)a1 = g_uid0 ? guest_cred_gid(1) : getegid();
+    if (a2) *(unsigned*)a2 = g_uid0 ? guest_cred_gid(2) : getegid();
     return 0;
-  case 151: return g_uid0 ? 0 : (long)geteuid();               // setfsuid -> previous fsuid
-  case 152: return g_uid0 ? 0 : (long)getegid();               // setfsgid -> previous fsgid
+  case 151: return g_uid0 ? (long)guest_cred_uid(1) : (long)geteuid(); // setfsuid -> previous fsuid
+  case 152: return g_uid0 ? (long)guest_cred_gid(1) : (long)getegid(); // setfsgid -> previous fsgid
   case 153: {                                                  // times (core normally owns this)
     struct rusage ru;
     if (getrusage(RUSAGE_SELF, &ru) != 0) return eret();
@@ -1291,7 +1291,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
       int sz = (int)a0;
       if (sz < 0) return -LX_EINVAL;
       if (sz == 0) return 1;                 // query count
-      if (a1) ((gid_t*)a1)[0] = 0;
+      if (a1) ((gid_t*)a1)[0] = (gid_t)guest_cred_gid(1);
       return 1;
     }
     int n = getgroups((int)a0, (gid_t*)a1);

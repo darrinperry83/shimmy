@@ -337,6 +337,30 @@ static char g_cwd[GPATH_MAX] = "/";     // guest-absolute cwd
 static char g_exe[GPATH_MAX] = "/proc/self/exe";  // guest path of the running program
 static int  g_trace;
 int g_uid0;                        // RDUID0=1: report uid/gid 0 to the guest. See case 174.
+static unsigned g_guest_uid[3], g_guest_gid[3];
+static void guest_cred_export(void) {
+  static const char* const names[6] = {"RDGUEST_RUID", "RDGUEST_EUID", "RDGUEST_SUID",
+                                       "RDGUEST_RGID", "RDGUEST_EGID", "RDGUEST_SGID"};
+  char value[24];
+  for (int i = 0; i < 6; i++) {
+    snprintf(value, sizeof value, "%u", i < 3 ? g_guest_uid[i] : g_guest_gid[i - 3]);
+    setenv(names[i], value, 1);
+  }
+}
+unsigned guest_cred_uid(int which) { return g_guest_uid[which]; }
+unsigned guest_cred_gid(int which) { return g_guest_gid[which]; }
+static long guest_cred_set(unsigned id[3], int real, int effective, int saved) {
+  int requested[3] = {real, effective, saved};
+  for (int i = 0; i < 3; i++)
+    if (requested[i] >= 0 && id[1] != 0 &&
+        (unsigned)requested[i] != id[0] && (unsigned)requested[i] != id[1] &&
+        (unsigned)requested[i] != id[2]) return -1; // EPERM
+  for (int i = 0; i < 3; i++) if (requested[i] >= 0) id[i] = (unsigned)requested[i];
+  guest_cred_export();
+  return 0;
+}
+long guest_cred_set_uid(int r, int e, int s) { return guest_cred_set(g_guest_uid, r, e, s); }
+long guest_cred_set_gid(int r, int e, int s) { return guest_cred_set(g_guest_gid, r, e, s); }
 static int  g_is_init;             // THIS shim process is the guest PID 1 (argv[0] = /sbin/init)
 static long g_guest_ppid;          // guest ppid of THIS process (0 for init, else the parent's guest pid)
 
@@ -362,6 +386,15 @@ void syscalls_set_root(const char* root) {
   guest_ownership_set_root(g_root);
   g_trace = getenv("RDSCTRACE") != NULL;
   g_uid0  = getenv("RDUID0")   != NULL;
+  if (g_uid0) {
+    static const char* const names[6] = {"RDGUEST_RUID", "RDGUEST_EUID", "RDGUEST_SUID",
+                                         "RDGUEST_RGID", "RDGUEST_EGID", "RDGUEST_SGID"};
+    for (int i = 0; i < 6; i++) {
+      const char* value = getenv(names[i]);
+      unsigned parsed = value ? (unsigned)strtoul(value, NULL, 10) : 0;
+      if (i < 3) g_guest_uid[i] = parsed; else g_guest_gid[i - 3] = parsed;
+    }
+  }
   // Materialize the synthesized /proc,/sys,/dev directory tree as real (empty) dirs so every
   // path-taking syscall finds them; do_getdents64() serves their entries instead of readdir.
   if (g_rootlen) synth_materialize_all();
@@ -4055,6 +4088,15 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     {
       int pfd = proc_fd_number(gabs);
       if (pfd >= 0) {
+        int tty = vt_number_for_fd(pfd);
+        if (tty) {
+          char t[24];
+          snprintf(t, sizeof t, "/dev/tty%d", tty);
+          size_t n = strlen(t);
+          if (n > sz) n = sz;
+          memcpy(buf, t, n);
+          return (long)n;
+        }
         char hp[PATH_MAX];
         if (fcntl(pfd, F_GETPATH, hp) == 0) {
           const char* t = hp;
@@ -4176,6 +4218,7 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     if (vt_is_node(gabs)) {
       memset(out, 0, sizeof *out);
       vt_fake_stat(&out->st_mode, &out->st_rdev, gabs);
+      vt_stat_identity(gabs, &out->st_dev, &out->st_ino);
       return 0;
     }
     // cgroup v2 files/dirs are synthesized; the host rootfs has none of them, so stat them from
@@ -4238,7 +4281,9 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     }
     if (vt_owns_fd((int)a0)) {
       struct linux_stat* o = (struct linux_stat*)a1;
-      vt_fake_stat(&o->st_mode, &o->st_rdev, "tty1");
+      char tty[24];
+      snprintf(tty, sizeof tty, "/dev/tty%d", vt_number_for_fd((int)a0));
+      vt_fake_stat(&o->st_mode, &o->st_rdev, tty);
     }
     return 0;
   }
@@ -4515,10 +4560,10 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   // (dictionaries-common's update-dictcommon-* refuse outright); those are fixed by it. Others
   // branch on uid 0 into chown()/chmod() they would otherwise skip -- dpkg does exactly that, which
   // is why `dpkg --force-not-root` is the better answer there and this is not the default.
-  case 174: return g_uid0 ? 0 : (long)getuid();
-  case 175: return g_uid0 ? 0 : (long)geteuid();
-  case 176: return g_uid0 ? 0 : (long)getgid();
-  case 177: return g_uid0 ? 0 : (long)getegid();
+  case 174: return g_uid0 ? (long)guest_cred_uid(0) : (long)getuid();
+  case 175: return g_uid0 ? (long)guest_cred_uid(1) : (long)geteuid();
+  case 176: return g_uid0 ? (long)guest_cred_gid(0) : (long)getgid();
+  case 177: return g_uid0 ? (long)guest_cred_gid(1) : (long)getegid();
   // gettid MUST be the GUEST tid, not the host pid.
   //
   // This used to return getpid() with the comment "single guest thread: tid == pid", which stopped

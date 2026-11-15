@@ -20,6 +20,12 @@ void syscalls_set_cwd(const char* guest_cwd);
 // RDUID0=1: report uid/gid 0 to the guest (the shim IS its kernel, so it can map). Opt-in — file
 // operations still run as the real uid. Read once in syscalls_set_root; see syscalls.c case 174.
 extern int g_uid0;
+// Guest identity remains virtual: host file access continues as the Mac user.
+// Under RDUID0, set*id changes these values and they survive shim-mediated exec.
+unsigned guest_cred_uid(int which);  // 0 real, 1 effective, 2 saved
+unsigned guest_cred_gid(int which);
+long guest_cred_set_uid(int real, int effective, int saved);  // -1 leaves a field unchanged
+long guest_cred_set_gid(int real, int effective, int saved);
 // The main guest thread's real stack extent, so /proc/self/maps can report it truthfully.
 // glibc's pthread_getattr_np() finds the INITIAL thread's stack by scanning that file.
 void syscalls_set_main_stack(unsigned long lo, unsigned long hi);

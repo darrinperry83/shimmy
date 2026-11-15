@@ -193,20 +193,41 @@ static void* vt_reader(void* arg) {
     (void)arg;
     int ticks = 0, autodone = 0;
     double last_blink = 0.0;
+    // Opt-in test input: a private FIFO lets an isolated boot test type through
+    // the same pty master as physical keyboard input. Never enabled by default.
+    int test_input = -1;
+    const char* input_path = getenv("RDVT_TEST_INPUT_FIFO");
+    if (input_path && *input_path) {
+        struct stat before, after;
+        if (lstat(input_path, &before) == 0 && S_ISFIFO(before.st_mode) &&
+            before.st_uid == getuid() && (before.st_mode & 077) == 0) {
+            test_input = open(input_path, O_RDWR | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
+            if (test_input >= 0 && (fstat(test_input, &after) != 0 ||
+                after.st_dev != before.st_dev || after.st_ino != before.st_ino)) {
+                close(test_input); test_input = -1;
+            }
+        }
+    }
     if (getenv("RDVT_TRACE"))
         fprintf(stderr, "[vt] reader started pid=%d masters=%d,%d,%d,%d,%d,%d\n",
                 (int)getpid(), g_vt[0].master, g_vt[1].master, g_vt[2].master,
                 g_vt[3].master, g_vt[4].master, g_vt[5].master);
     for (;;) {
-        struct pollfd fds[VT_MAX_TEXT];
+        struct pollfd fds[VT_MAX_TEXT + 1];
         for (int i = 0; i < VT_MAX_TEXT; i++) {
             fds[i].fd = g_vt[i].master;
             fds[i].events = POLLIN;
             fds[i].revents = 0;
         }
-        int pr = poll(fds, VT_MAX_TEXT, 200);
+        fds[VT_MAX_TEXT] = (struct pollfd){ .fd = test_input, .events = POLLIN };
+        int pr = poll(fds, VT_MAX_TEXT + (test_input >= 0), 200);
         int dirty = 0, got = 0;
         if (pr > 0) {
+            if (test_input >= 0 && (fds[VT_MAX_TEXT].revents & POLLIN)) {
+                char keys[256];
+                ssize_t n = read(test_input, keys, sizeof keys);
+                if (n > 0) vt_feed_key(keys, (size_t)n);
+            }
             for (int i = 0; i < VT_MAX_TEXT; i++) {
                 if (!(fds[i].revents & POLLIN)) continue;
                 uint8_t buf[4096];
@@ -431,13 +452,23 @@ int vt_open_node(const char* gpath) {
     return fd;
 }
 
-int vt_owns_fd(int fd) {
+int vt_number_for_fd(int fd) {
     if (!vt_enabled() || fd < 0) return 0;
     struct stat st;
     if (fstat(fd, &st) != 0) return 0;
     for (int i = 0; i < VT_MAX_TEXT; i++)
-        if (g_vt[i].slave_dev == st.st_dev && g_vt[i].slave_ino == st.st_ino) return 1;
+        if (g_vt[i].slave_dev == st.st_dev && g_vt[i].slave_ino == st.st_ino) return i + 1;
     return 0;
+}
+
+int vt_owns_fd(int fd) { return vt_number_for_fd(fd) != 0; }
+
+void vt_stat_identity(const char* gpath, uint64_t* dev, uint64_t* ino) {
+    int n = vt_node_number(gpath);
+    if (n == 0) n = atomic_load(&g_active);
+    if (n < 1 || n > VT_MAX_TEXT) n = 1;
+    *dev = (uint64_t)g_vt[n - 1].slave_dev;
+    *ino = (uint64_t)g_vt[n - 1].slave_ino;
 }
 
 void vt_fake_stat(unsigned int* mode, uint64_t* rdev, const char* gpath) {

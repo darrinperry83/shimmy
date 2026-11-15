@@ -668,6 +668,7 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
     // (This is about the shim's own MODE. The guest's x18 VALUE deliberately does not survive
     // execve — a new program image gets a new x18 by definition.)
     "RDVERBOSE", "RDEXECDBG", "RDNOVDSO", "RDFASTCALL", "RDPOLLLOG", "RDUID0", "RDEXECDBG", "RDSCENTER", "RDENOENTDBG", "RDFUTEX", "RDTIMERFD_TRACE", "RDDESERDBG",
+    "RDGUEST_RUID", "RDGUEST_EUID", "RDGUEST_SUID", "RDGUEST_RGID", "RDGUEST_EGID", "RDGUEST_SGID",
     // RDDRM gates the rdmetal DRM render node (drmasahi.c). It MUST ride across execve for the
     // same reason RDSOCKETGROUP does: a compositor launched by startplasma-wayland (kwin_wayland)
     // is a re-exec'd shim, and without the node it reports "Failed to create gbm device for
