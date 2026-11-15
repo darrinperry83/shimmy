@@ -315,3 +315,30 @@ enabled, while `src/syscalls.c` tracks per-process guest UIDs and the Arch
 name request. This is an inference from code and policy, not an observed broker
 denial. A correction must report the actual peer's guest credentials across
 Shimmy processes; substituting the current process's UID would be incorrect.
+
+## Resolver peer identity and query timer (2026-11-15)
+
+The credential lead was reproduced with two isolated Shimmy processes: a
+guest client with effective UID/GID 974 was reported by the server's Linux
+`SO_PEERCRED` as UID/GID 0. A private per-boot credential record now maps the
+kernel-provided peer PID to that process's virtual effective UID/GID. Record
+updates are atomic; missing, malformed, symlinked, or group/world-readable
+records fail the lookup. A native child test and the two-process guest probe
+reported UID/GID 974 correctly. In a disposable full Arch boot, the login
+prompt appeared and `busctl --system list` showed
+`org.freedesktop.resolve1` owned by `systemd-resolve`. This record is
+compatibility metadata among cooperating host-user processes, **not** a
+security boundary against another process running as the same macOS user.
+
+The first external `resolvectl query` then failed with `EINVAL` before a
+controlled loopback DNS responder saw any packet. `timerfd_create` rejected
+Linux `CLOCK_BOOTTIME` (7), despite `clock_gettime` already mapping that clock.
+Shimmy now supports BOOTTIME timerfds using the same host clock for absolute
+deadlines. A static guest test exercised a BOOTTIME absolute timer expiration
+and rejection of an unsupported clock. In a fresh full boot, the DNS error
+advanced from `Invalid argument` to `Network is down`; the responder still
+received zero packets. `resolvectl status` showed the configured test DNS
+server, while link scopes showed no usable route. A host-derived route/link
+availability check is the next blocker. No DNS success or live-network change
+is claimed; the resolver configuration and restart delay existed only in the
+disposable test root.

@@ -64,7 +64,10 @@ static int64_t now_ns(int clockid) {
   // The guest vDSO maps Linux CLOCK_MONOTONIC to macOS CLOCK_UPTIME_RAW.
   // Absolute timerfd deadlines must use the same epoch or frame timers fire
   // several seconds late on macOS (the two host clocks differ on this machine).
-  clock_gettime(clockid == 0 ? CLOCK_REALTIME : CLOCK_UPTIME_RAW, &now);
+  // Match clockid_l2m(): Linux BOOTTIME (7) advances across suspend, unlike
+  // MONOTONIC (1). Absolute deadlines must share clock_gettime's epoch.
+  clock_gettime(clockid == 0 ? CLOCK_REALTIME :
+                clockid == 7 ? CLOCK_MONOTONIC_RAW : CLOCK_UPTIME_RAW, &now);
   return ns(now);
 }
 static void fire(void* context) {
@@ -104,7 +107,7 @@ static struct timer_slot* lookup(int fd) {
   return NULL;
 }
 long timerfd_create_shim(int clockid, int flags) {
-  if (clockid != 0 && clockid != 1) return -22;
+  if (clockid != 0 && clockid != 1 && clockid != 7) return -22;
   if (flags & ~(L_NONBLOCK | L_CLOEXEC)) return -22;
   pthread_mutex_lock(&lock);
   if (count >= MAX_TIMERFD) { pthread_mutex_unlock(&lock); return -24; }

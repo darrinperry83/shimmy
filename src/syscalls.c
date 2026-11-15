@@ -1,4 +1,5 @@
 #include "guest_ownership.h"
+#include "guest_cred_registry.h"
 // syscalls.c — core Linux aarch64 -> macOS/BSD syscall translation.
 //
 // ABI (see ARCHITECTURE.md "Syscall ABI"): every return value is the RAW LINUX value.
@@ -358,6 +359,9 @@ static long guest_cred_set(unsigned id[3], int real, int effective, int saved) {
         (unsigned)requested[i] != id[2]) return -1; // EPERM
   for (int i = 0; i < 3; i++) if (requested[i] >= 0) id[i] = (unsigned)requested[i];
   guest_cred_export();
+  if (g_uid0 && guest_cred_registry_update(g_guest_uid[1], g_guest_gid[1]) < 0 &&
+      getenv("RDCREDLOG"))
+    fprintf(stderr, "[cred] failed to publish virtual credentials for pid=%d\n", (int)getpid());
   return 0;
 }
 long guest_cred_set_uid(int r, int e, int s) { return guest_cred_set(g_guest_uid, r, e, s); }

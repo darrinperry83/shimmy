@@ -51,6 +51,7 @@
 #include "snd_alsa.h"
 #include "pidfd_shim.h"
 #include "netlink_route_transport.h"
+#include "guest_cred_registry.h"
 
 // ---------------------------------------------------------------------------
 // Linux aarch64 syscall numbers we own
@@ -985,13 +986,17 @@ static int peer_ucred(int fd, struct lin_ucred* out) {
     fprintf(stderr, "[cred] peer fd=%d getsockopt_rc=%d -> pid=%d\n", fd, rc, (int)ppid);
   if (ppid <= 0) return 0;
   uid_t uid = 0; gid_t gid = 0;
-  if (getpeereid(fd, &uid, &gid) != 0) { uid = getuid(); gid = getgid(); }
-  // The host getpeereid() returns the HOST uid (e.g. 501), but the guest believes it is uid 0
-  // (RDUID0=1, see syscalls.c case 174). D-Bus' EXTERNAL auth has the client send getuid() and
-  // the server verify it against SO_PEERCRED; a host/guest mismatch makes dbus-daemon reject every
-  // connection ("Transport endpoint is not connected"). Report the guest's OWN view so both sides
-  // of the socket agree.
-  if (getenv("RDUID0")) { uid = 0; gid = 0; }
+  if (g_uid0) {
+    uint32_t guest_uid, guest_gid;
+    // The host UID is shared by every Shimmy process. Read the virtual UID of
+    // the peer identified by Darwin's kernel, never this process's UID or a
+    // blanket root identity. Missing or malformed records fail closed.
+    if (guest_cred_registry_lookup(ppid, &guest_uid, &guest_gid) < 0) return 0;
+    uid = (uid_t)guest_uid;
+    gid = (gid_t)guest_gid;
+  } else if (getpeereid(fd, &uid, &gid) != 0) {
+    return 0;
+  }
   out->pid = (int32_t)ppid; out->uid = (uint32_t)uid; out->gid = (uint32_t)gid;
   return 1;
 }
@@ -2751,6 +2756,9 @@ void net_init(void) {
     while (g_group_prefix_len > 1 && g_group_prefix[g_group_prefix_len - 1] == '/')
       g_group_prefix[--g_group_prefix_len] = 0;
     mkdir_p(g_group_prefix);
+    if (g_uid0 && guest_cred_registry_init(g_group_prefix, guest_cred_uid(1), guest_cred_gid(1)) < 0 &&
+        getenv("RDCREDLOG"))
+      fprintf(stderr, "[cred] guest credential record unavailable for pid=%d\n", (int)getpid());
   }
 }
 
