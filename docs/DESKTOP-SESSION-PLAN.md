@@ -7,12 +7,20 @@ claim that the desktop session or full rdmetal renderer already works.
 
 Boot `systemd` in the Arch root, authenticate a Linux user, start an installed Wayland desktop,
 lock and unlock it, log out, and return to the greeter or TTY that started the session. Keep
-the existing Shimmy host window throughout. Ctrl+Option+F1–F6 still shows text consoles;
-F7 returns to the graphical seat when one is active.
+the existing Shimmy host window throughout the first windowed mode. Full display takeover is
+the next product mode, using the same Linux boot, seat, GPU and session stack.
+Ctrl+Option+F1–F6 still shows text consoles; F7 returns to the graphical seat when one is active.
 Hyprland is the first compositor tested; Plasma and other compatible desktops must use the
 same host contract. Users choose and configure their display manager, greeter, desktop,
 session and locker with ordinary Arch packages, configuration and systemd services.
 Shimmy must not hardcode greetd, a particular greeter UI or Hyprland as its only session.
+
+Full takeover also requires macOS suppression on the selected displays: no Dock, menu bar,
+desktop, notifications or other Apple UI appearing over the Linux session in normal use.
+Avoid launching unnecessary Shimmy-owned host services; identify which macOS processes remain
+necessary for hardware, presentation, Mac app compatibility and recovery, and measure their
+CPU, memory, GPU and power cost. Suppression must be reversible on logout, crash and explicit
+exit. A visually hidden Mac desktop alone does not prove reduced host overhead.
 
 The Mac supplies physical display, keyboard, pointer and GPU services. Linux owns accounts,
 PAM authentication, systemd services, logind sessions, the Wayland compositor and its lock
@@ -55,8 +63,11 @@ Mac: one persistent shim_gui host process
 ```
 
 The presenter must be a host service owned by the original GUI process. The first target is
-the existing Shimmy window on one selected display. Later multi-monitor support may add
-one host-owned presentation window per display, but never one window per guest process.
+the existing Shimmy window on one selected display. Full takeover must give the Linux
+compositor a virtual KMS output for each selected physical display, with actual resolution,
+scale, refresh and topology, while the host presenter routes those outputs to the selected
+displays. It may need one host-owned presentation surface per display, never one per guest
+process.
 Forked guest programs must not create independent Mac desktop windows. The active compositor sends a
 completed IOSurface and fence to the presenter, which displays it in the existing layer.
 The host routes keyboard and pointer input to the active Linux seat; text VTs retain their
@@ -96,13 +107,19 @@ must run the compositor and GLES draw work on Metal, then hand the completed GPU
 its completion signal to the persistent Mac-window presenter. A KMS page flip should select
 that completed surface for presentation; it should not copy a CPU dumb buffer into a Metal
 texture. Windowed mode still uses this virtual display contract, with modes derived from
-the current host window and scale. Full-screen and later multi-display modes extend it.
+the current host window and scale. Full-screen and multi-display takeover extend this same
+device contract. A borderless window covering a display is an intermediate presentation
+mode; it is not, by itself, proof of physical display control or reliable macOS suppression.
 
 Keep the existing CPU-backed framebuffer path as a compatibility and recovery path while
 developing the GPU surface path. It does not qualify as full rdmetal. The target method is
 GPU-backed surfaces shared across Shimmy processes, with explicit buffer ownership and
 fences, then presentation through the original host window's Metal layer. A separate direct
-scan-out path is optional later; it is not a prerequisite for the first real desktop mode.
+scan-out path is not a prerequisite for the first real windowed desktop mode. Before calling
+the later mode full takeover, compare a host-owned full-screen presentation path with direct
+display presentation, verify sustained frames, hotplug, input and recovery, and document
+which layer actually owns physical display configuration. Do not label a full-screen window
+as direct scan-out.
 
 The first "full rdmetal desktop" gate means the compositor's required GLES operations and
 the representative app set perform their rendering on the Apple GPU through Metal. A Metal
@@ -190,12 +207,20 @@ the Linux session.
 5. **Lock and recovery.** Lock/unlock is authenticated; VT round-trip remains locked; compositor
    crash and logout clear old pixels and release device/input ownership. Test both screens and
    window resize/hotplug without changing the live Mac display configuration.
-6. **Product readiness.** Repeat the cycle on the installed root with the user's participation
+6. **Windowed readiness.** Repeat the cycle on the installed root with the user's participation
    for password entry, then a cold boot. Compare performance and power to the baseline and
    document known unsupported apps/operations. Plasma reuses the presenter and session
    contract rather than receiving a separate host integration. Update the README and
    `docs/HOW_IT_WORKS.md` to describe only paths proven by these gates.
-7. **Broader Linux GPU compatibility.** Establish separate conformance and application
+7. **Full display takeover.** Extend the same session and virtual DRM device across selected
+   physical displays. Verify real per-display modes, scale, refresh, hotplug, VT switching,
+   lock, crash recovery and sustained GPU presentation. Suppress macOS UI on those displays
+   throughout login, desktop, lock and TTY transitions; verify no Apple UI flashes through,
+   input stays with the active Linux seat, and explicit exit restores ordinary macOS control.
+   Measure and report host CPU, memory, GPU and power against normal macOS and windowed
+   Shimmy, along with exactly which display functions remain with macOS. An all-screen
+   borderless window is an intermediate result; direct display control requires its own evidence.
+8. **Broader Linux GPU compatibility.** Establish separate conformance and application
    evidence for each additional advertised graphics API, including Vulkan, desktop OpenGL,
    video acceleration and compute where implemented. Record performance and unsupported
    features per API rather than treating a working compositor as proof of full compatibility.
