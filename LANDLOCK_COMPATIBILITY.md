@@ -58,11 +58,30 @@ A narrow allowlist probe denied file reads and writes under `/Users/dperry`,
 then allowed read-only access to the Shimmy executable and Linux root plus
 metadata traversal for parent directories. Guest `cat /etc/os-release` exited
 0, while a guest read of the throwaway file elsewhere in the home tree failed
-with `Operation not permitted`. A stricter default-deny filesystem profile did
-not run even native `/usr/bin/true`: it aborted with signal 6 and no output.
-The missing runtime allowance is undiagnosed. These probes support further
-work on a whole-instance host confinement profile; neither is a complete
-package-worker policy, and neither was shipped as a launcher.
+with `Operation not permitted`.
+
+A stricter default-deny filesystem profile initially aborted even native
+`/usr/bin/true` with signal 6 and no output. The macOS sandbox denial log
+identified a denied `file-read-data /` operation. Allowing a read of the root
+directory itself fixed that native startup failure. Under the corrected
+default-deny profile, guest `cat /etc/os-release` succeeded while guest reads
+of a host file outside the Linux root failed. A repeatable test in
+[`tests/test_host_filesystem_sandbox.py`](tests/test_host_filesystem_sandbox.py)
+also confirmed that a guest child could not read that file and a guest could
+not overwrite a host file. Its temporary Unix-socket namespace is the only
+allowed writable filesystem subtree; the test root is read-only. It passes on
+this Mac with both the existing Alpine and Arch test roots when run outside an
+enclosing macOS sandbox. An optional guest curl HEAD probe also reached the
+official Arch Linux ARM package mirror from the confined Arch process. This
+checks transport reachability, not a package download or install.
+
+The test intentionally allows non-filesystem host operations by default, and
+allows filesystem metadata reads globally, plus data reads from system
+libraries and `/private/var/db`. It is a
+host-filesystem-policy prototype, not a complete package-worker profile or
+production launcher. It has not been tested with Arch pacman under the
+profile, package hooks, all host service calls, other devices or pre-opened
+descriptors. It does not implement Linux Landlock semantics.
 
 ## Safe engineering path
 
