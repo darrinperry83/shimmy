@@ -64,6 +64,8 @@
 #define LSO_REUSEADDR 2
 #define LSO_ERROR 4
 #define LSO_PASSCRED 16
+#define LSO_PROTOCOL 38
+#define LSO_DOMAIN 39
 #define LEPOLL_CTL_ADD 1
 #define LEPOLL_CTL_DEL 2
 #define LEPOLLIN  0x001u
@@ -526,10 +528,34 @@ static void t_sockopt_af(void) {
   CHECK(r == 0 && err == 0, "getsockopt(linux SO_ERROR=4 -> darwin 0x1007) -> %ld val=%d", r, err);
   OK("SO_ERROR 4 -> 0x1007, value 0 (errno-translated on the way out)");
 
+  int meta = -1; uint32_t mlen = sizeof meta;
+  r = SC5(N_getsockopt, fd, LSOL_SOCKET, LSO_DOMAIN, &meta, &mlen);
+  CHECK(r == 0 && meta == LAF_INET && mlen == 4,
+        "SO_DOMAIN -> %ld domain=%d len=%u", r, meta, mlen);
+  meta = -1; mlen = sizeof meta;
+  r = SC5(N_getsockopt, fd, LSOL_SOCKET, LSO_PROTOCOL, &meta, &mlen);
+  CHECK(r == 0 && meta == 6 && mlen == 4,
+        "SO_PROTOCOL TCP -> %ld protocol=%d len=%u", r, meta, mlen);
+
   r = SC5(N_setsockopt, fd, LSOL_SOCKET, LSO_PASSCRED, &on, sizeof on);
   CHECK(r == 0, "SO_PASSCRED (no macOS analog) -> %ld (want 0, accepted+ignored)", r);
   OK("SO_PASSCRED accepted as a no-op");
   close((int)fd);
+
+  int uv[2];
+  CHECK(SC4(N_socketpair, LAF_UNIX, LSOCK_STREAM, 0, uv) == 0,
+        "Unix socketpair for metadata");
+  meta = -1; mlen = sizeof meta;
+  r = SC5(N_getsockopt, uv[0], LSOL_SOCKET, LSO_DOMAIN, &meta, &mlen);
+  CHECK(r == 0 && meta == LAF_UNIX, "Unix SO_DOMAIN -> %ld domain=%d", r, meta);
+  meta = -1; mlen = sizeof meta;
+  r = SC5(N_getsockopt, uv[0], LSOL_SOCKET, LSO_PROTOCOL, &meta, &mlen);
+  CHECK(r == 0 && meta == 0, "Unix SO_PROTOCOL -> %ld protocol=%d", r, meta);
+  close(uv[0]); close(uv[1]);
+
+  CHECK(SC3(N_socket, 16 /*AF_NETLINK*/, LSOCK_DGRAM,
+            9 /*NETLINK_AUDIT*/) == -97 /*EAFNOSUPPORT*/,
+        "NETLINK_AUDIT must fail without an audit backend");
 
   long s6 = SC3(N_socket, LAF_INET6, LSOCK_DGRAM, 0);
   CHECK(s6 >= 0, "socket(linux AF_INET6=10 -> darwin 30) -> %ld", s6);

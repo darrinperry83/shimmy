@@ -676,11 +676,11 @@ static const struct optmap k_sol_socket[] = {
   // reason and not because it looks harmless. (OPT_NOOP sweep, W2.)
   { 34, OPT_NOOP       },  // SO_PASSSEC     — faithful: no LSM, so Linux sends no label either
   { 35, OPT_NOOP       },  // SO_TIMESTAMPNS — emulated, intercepted in do_setsockopt()
-  // SO_PROTOCOL / SO_DOMAIN / SO_PEERSEC stay OPT_BAD deliberately. Refusing an option is HONEST:
+  // SO_PEERSEC stays OPT_BAD deliberately. Refusing an option is HONEST:
   // the caller sees ENOPROTOOPT and takes its fallback. That is the whole lesson of this sweep --
   // the dangerous answer is not "no", it is "yes" followed by nothing.
-  { 38, OPT_BAD        },  // SO_PROTOCOL
-  { 39, OPT_BAD        },  // SO_DOMAIN
+  { 38, OPT_BAD        },  // SO_PROTOCOL: answered by do_getsockopt()
+  { 39, OPT_BAD        },  // SO_DOMAIN: answered by do_getsockopt()
 };
 // ---- OPT_NOOP audit (W2) -------------------------------------------------------------------
 // The rule this table now follows, after SO_PASSCRED cost a day:
@@ -912,6 +912,33 @@ static long do_getsockopt(int fd, int llevel, int lname, void* val, uint32_t* le
   if (llevel == L_SOL_SOCKET && lname == 16) {     // SO_PASSCRED: report what we recorded
     if (val && len && *len >= 4) { uint32_t v = (uint32_t)passcred_get(fd); memcpy(val, &v, 4); *len = 4; }
     else if (len) *len = 0;
+    return 0;
+  }
+  if (llevel == L_SOL_SOCKET && (lname == 38 || lname == 39)) {
+    // Darwin does not offer Linux SO_PROTOCOL/SO_DOMAIN. Derive both from
+    // the actual host socket; systemd's sd_is_socket() checks them on inherited
+    // activation descriptors before accepting the socket.
+    if (!val || !len || *len < sizeof(int)) return -L_EINVAL;
+    struct sockaddr_storage sa;
+    socklen_t sa_len = sizeof sa;
+    if (getsockname(fd, (struct sockaddr*)&sa, &sa_len) < 0) return lerr();
+    int answer;
+    if (lname == 39) {
+      answer = af_h2l(sa.ss_family);
+      if (answer < 0) return -L_EAFNOSUPPORT;
+    } else if (sa.ss_family == AF_UNIX) {
+      answer = 0;
+    } else if (sa.ss_family == AF_INET || sa.ss_family == AF_INET6) {
+      int type = 0; socklen_t type_len = sizeof type;
+      if (getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &type_len) < 0) return lerr();
+      if (type == SOCK_STREAM) answer = IPPROTO_TCP;
+      else if (type == SOCK_DGRAM) answer = IPPROTO_UDP;
+      else return -L_ENOPROTOOPT;
+    } else {
+      return -L_ENOPROTOOPT;
+    }
+    memcpy(val, &answer, sizeof answer);
+    *len = sizeof answer;
     return 0;
   }
   long m = opt_l2h(llevel, lname, &hlevel, &hname);
@@ -1508,6 +1535,9 @@ static long sys_socket(int ldomain, int ltype, int protocol) {
   // difference between KWin's GpuManager booting (udev_monitor_new_from_netlink returns non-NULL)
   // and a null deref. See the GpuManager crash note in the KDE integration docs.
   if (ldomain == L_AF_NETLINK) {
+    // There is no audit backend. Let libaudit disable optional auditing rather
+    // than handing it a fake socket whose first send inevitably fails.
+    if (protocol == 9) return -L_EAFNOSUPPORT; // NETLINK_AUDIT
     int nonblock = (ltype & L_SOCK_NONBLOCK) != 0, cloexec = (ltype & L_SOCK_CLOEXEC) != 0;
     // A host AF_UNIX datagram socket: never connected, never written to, so poll()/epoll never
     // reports it readable and recv() returns EAGAIN — exactly a netlink socket with no events.
