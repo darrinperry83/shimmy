@@ -1406,6 +1406,15 @@ static int proc_open(const char* g, long* out) {
     *out = fd < 0 ? herrno() : fd;
     return 1;
   }
+  if (strcmp(g, "/proc/self/mounts") == 0) {
+    // /etc/mtab normally points here. Package managers inspect this table before
+    // committing a transaction; only the guest-visible root and proc are listed.
+    snprintf(buf, sizeof buf, "rootfs / ext4 rw,relatime 0 0\n"
+                              "proc /proc proc rw,nosuid,nodev,noexec,relatime 0 0\n");
+    int fd = mem_fd(buf, strlen(buf));
+    *out = fd < 0 ? herrno() : fd;
+    return 1;
+  }
   if (strcmp(g, "/proc/cpuinfo") == 0) {
     static char cpub[16384];
     proc_cpuinfo(cpub, sizeof cpub);
@@ -2876,6 +2885,7 @@ static const struct synth_ent PROC_PID_ENTS[] = {       // /proc/self and /proc/
   { "exe",     DT_LNK },
   { "fd",      DT_DIR },
   { "maps",    DT_REG },
+  { "mounts",  DT_REG },
   { "root",    DT_LNK },
   { "stat",    DT_REG },
   { "status",  DT_REG },
@@ -3659,7 +3669,7 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     if (strcmp(gabs, "/proc/self/exe") == 0 || strcmp(gabs, "/proc/self/maps") == 0 ||
         strcmp(gabs, "/proc/self/cmdline") == 0 || strcmp(gabs, "/proc/self/stat") == 0 ||
         strcmp(gabs, "/proc/self/status") == 0 || strcmp(gabs, "/proc/self/environ") == 0 ||
-        strcmp(gabs, "/proc/self/auxv") == 0 || strcmp(gabs, "/proc/cpuinfo") == 0 ||
+        strcmp(gabs, "/proc/self/auxv") == 0 || strcmp(gabs, "/proc/self/mounts") == 0 || strcmp(gabs, "/proc/cpuinfo") == 0 ||
         strcmp(gabs, "/proc/meminfo") == 0 || strcmp(gabs, "/proc/uptime") == 0 ||
         strcmp(gabs, "/proc/loadavg") == 0 || strcmp(gabs, "/proc/stat") == 0 ||
         strcmp(gabs, "/proc/version") == 0 || strcmp(gabs, "/proc/consoles") == 0 ||
@@ -4179,6 +4189,13 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     if ((r = resolve_f((int)a0, p, (a3 & LX_AT_SYMLINK_NOFOLLOW) ? RSV_NOFOLLOW : 0,
                        host, sizeof host, gabs, sizeof gabs)) < 0) return r;
     if (strcmp(gabs, "/proc/self/exe") == 0) guest_to_host(g_exe, host, sizeof host);
+    if (strcmp(gabs, "/proc/self/mounts") == 0) {
+      memset(out, 0, sizeof *out);
+      out->st_mode = S_IFREG | 0444;
+      out->st_nlink = 1; out->st_uid = 0; out->st_gid = 0;
+      out->st_blksize = 4096; out->st_ino = 3;
+      return 0;
+    }
     // Synthetic sysfs nodes under /sys/dev/char/226:*/ — answer from drmasahi.c, not the host fs.
     if (drm_sysfs_kind(gabs)) {
       memset(out, 0, sizeof *out);

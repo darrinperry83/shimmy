@@ -33,6 +33,7 @@
 #include <mach/mach_vm.h>
 #include <mach/mach.h>
 #include <mach/arm/thread_state.h>
+#include <mach-o/dyld.h>
 #include <mach/thread_act.h>
 #include <signal.h>
 #include <sys/ucontext.h>
@@ -775,8 +776,10 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
     return -8;
   }
   execve(g_self_path, hargv, henv);
+  int exec_error = errno;
+  fprintf(stderr, "[shim] host re-exec failed for %s: %s\n", exec_guest_path, strerror(exec_error));
   free(hargv); free(henv);
-  return -8;                                                   // -ENOEXEC
+  return -(long)linux_errno_from_host(exec_error);
 }
 
 // A child that _exit()s without exec'ing still has to be waitpid()-able by its parent, and the
@@ -2037,8 +2040,15 @@ int main(int argc, char** argv) {
     fprintf(stderr, "[fd] RLIMIT_NOFILE soft=%llu hard=%llu\n",
             (unsigned long long)rl.rlim_cur, (unsigned long long)rl.rlim_max);
   }
-  snprintf(g_self_path, sizeof g_self_path, "%s", argv[0]);
-  snprintf(g_rootfs_path, sizeof g_rootfs_path, "%s", rootfs);
+  // Guest programs may chdir before execve (pacman does this for libalpm
+  // hooks). The re-exec target and root must therefore be absolute host paths.
+  char self_image[PATH_MAX];
+  uint32_t self_cap = sizeof self_image;
+  if (_NSGetExecutablePath(self_image, &self_cap) != 0 ||
+      !realpath(self_image, g_self_path) || !realpath(rootfs, g_rootfs_path)) {
+    fprintf(stderr, "[shim] cannot resolve shim executable or guest root: %s\n", strerror(errno));
+    return 1;
+  }
   const char* guestpath = argv[2];          // guest-absolute, e.g. /bin/busybox
   idle_trace_fd13("new-shim-entry", guestpath);
   {
