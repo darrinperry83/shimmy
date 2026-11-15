@@ -28,13 +28,14 @@ with tempfile.TemporaryDirectory(prefix="shimmy-init-env-") as tmp:
         "import json, os, sys\n"
         "print(json.dumps({'argv': sys.argv[1:], 'env': "
         "{k: os.environ.get(k) for k in "
-        "['RDUID0', 'RDNATIVE_SESSION', 'RDENV_WAYLAND_DISPLAY', 'RDENV_DISPLAY', "
+        "['RDUID0', 'RDNATIVE_SESSION', 'LIBGL_ALWAYS_INDIRECT', "
+        "'RDENV_WAYLAND_DISPLAY', 'RDENV_DISPLAY', "
         "'RDENV_XDG_RUNTIME_DIR', 'RDENV_LIBGL_ALWAYS_INDIRECT']}}))\n"
     )
     fake.chmod(0o755)
 
     env = os.environ.copy()
-    env.update(ROOTFS=str(root), SHIM_GUI_OVERRIDE=str(fake))
+    env.update(ROOTFS=str(root), SHIM_GUI_OVERRIDE=str(fake), LIBGL_ALWAYS_INDIRECT="1")
     run = subprocess.run([str(repo / "run.sh"), "--init"], env=env,
                          text=True, capture_output=True, check=True)
     result = json.loads(run.stdout)
@@ -42,6 +43,7 @@ with tempfile.TemporaryDirectory(prefix="shimmy-init-env-") as tmp:
     assert result["env"] == {
         "RDUID0": "1",
         "RDNATIVE_SESSION": "1",
+        "LIBGL_ALWAYS_INDIRECT": "",
         "RDENV_WAYLAND_DISPLAY": "",
         "RDENV_DISPLAY": "",
         "RDENV_XDG_RUNTIME_DIR": "",

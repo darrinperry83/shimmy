@@ -106,7 +106,7 @@ if [ "$BOOT_INIT" = 1 ]; then
   # starts. Empty RDENV_* entries shadow those defaults and are then removed from the
   # guest environment; the display manager can set the real values for its user session.
   RDENV_WAYLAND_DISPLAY= RDENV_DISPLAY= RDENV_XDG_RUNTIME_DIR= \
-  RDENV_LIBGL_ALWAYS_INDIRECT= RDNATIVE_SESSION=1 RDUID0=1 \
+  LIBGL_ALWAYS_INDIRECT= RDENV_LIBGL_ALWAYS_INDIRECT= RDNATIVE_SESSION=1 RDUID0=1 \
     exec "$SHIM" "$ROOT" /sbin/init "$@"
 fi
 
