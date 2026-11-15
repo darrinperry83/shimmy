@@ -133,6 +133,16 @@ resolver now reports `Address family not supported by protocol` immediately
 instead of failing later on netlink options. **This does not make resolver or
 networkd functional.** Real route/link events and dump replies remain needed.
 
+The next step adds a **snapshot encoder**, not a route socket. `src/netlink_route_snapshot.c`
+collects the host's actual interface names, indices, flags and MTUs, deduplicates
+them by index, and encodes Linux `RTM_NEWLINK` messages with the caller's sequence
+number. A deterministic wire-format test plus a live host-interface snapshot
+test pass. This is the first read-only piece of the required `RTM_GETLINK` dump.
+`NETLINK_ROUTE` still returns `EAFNOSUPPORT`: there is no request/reply socket,
+`NLMSG_DONE` completion, `RTM_GETADDR` dump or event stream yet, and exposing
+the encoder as a working resolver service would be misleading. Host interface
+presence alone also does not prove that an interface is usable inside the guest.
+
 ## Isolated interactive terminal result (2026-11-15)
 
 `RD_LOGIN_ROOT=<private build/ clone> RD_TEST_JOB_CONTROL=1 python3
