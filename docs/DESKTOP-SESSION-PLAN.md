@@ -71,7 +71,23 @@ active compositor/seat may submit display frames or receive desktop input. A cra
 logged-out compositor must lose those rights and return the existing window to the greeter
 or TTY. Reject stale frames and input from an earlier session.
 
-## GPU contract
+## Linux GPU contract
+
+The product goal is a usable Linux GPU, not merely a desktop image accelerated at the
+last step. An unmodified Arch compositor or application should discover standard Linux
+graphics devices and libraries, allocate GPU buffers, submit work, share those buffers,
+synchronize access and present results without a Shimmy-specific application path. The
+implementation may translate that contract to Metal on the Mac, but the guest-facing
+behavior must be truthful and testable. Each advertised API/version/capability needs its
+required behavior; unsupported capabilities must not be advertised as working.
+
+The first required stack is DRM/KMS + GBM + EGL + OpenGL ES for the compositor and ordinary
+Wayland applications, including GPU buffer import/export and synchronization. The same
+device contract must be suitable for other compositors. Vulkan, desktop OpenGL, video
+acceleration and GPU compute are separate capability gates for the broader Linux GPU goal:
+inventory what Shimmy already provides, identify missing API coverage, and validate real
+applications before declaring each complete. Passing the first desktop gate must not be
+presented as all Linux GPU software working.
 
 The virtual DRM device exposes the usual Linux division of work. Its render side provides
 buffer and GPU interfaces to Mesa/rdmetal; its KMS side reports connectors, modes and
@@ -88,9 +104,10 @@ GPU-backed surfaces shared across Shimmy processes, with explicit buffer ownersh
 fences, then presentation through the original host window's Metal layer. A separate direct
 scan-out path is optional later; it is not a prerequisite for the first real desktop mode.
 
-“Full rdmetal” means the compositor's required GLES operations and the representative app
-set perform their rendering on the Apple GPU through Metal. A Metal final blit of a CPU
-rasterized desktop does not satisfy it. CPU work for ordinary application logic is fine;
+The first "full rdmetal desktop" gate means the compositor's required GLES operations and
+the representative app set perform their rendering on the Apple GPU through Metal. A Metal
+final blit of a CPU rasterized desktop does not satisfy it. CPU work for ordinary application
+logic is fine;
 software *graphics* fallback must be disabled for the acceptance run.
 
 Work from the actual Gallium operations used by the selected compositor, greeter, locker and
@@ -157,9 +174,11 @@ the Linux session.
 1. **Measured baseline.** Capture current renderer/fallback/CPU-copy counters for the existing
    standalone Hyprland path and a systemd boot. Record exactly which operations reach Metal.
    No product claim changes based on screenshots or `GL_RENDERER` alone.
-2. **Production GPU path.** A strict, fallback-disabled rdmetal run completes compositor,
-   greeter, locker and representative GLES app scenes. The mock fixture is off; GPU and fence
-   evidence is recorded. Unsupported operations fail visibly during development.
+2. **Production GPU desktop path.** A strict, fallback-disabled rdmetal run completes
+   compositor, greeter, locker and representative GLES app scenes through standard guest
+   DRM/GBM/EGL interfaces. The mock fixture is off; GPU and fence evidence is recorded.
+   Unsupported operations fail visibly during development. This gate does not imply Vulkan,
+   desktop OpenGL, video acceleration or compute is complete.
 3. **Single-window bridge.** An isolated systemd boot moves VT → test GPU surface → VT in one
    persistent NSWindow. A second guest process cannot open another desktop window. Input,
    resize, process exit, stale-frame rejection and bounded queue tests pass.
@@ -176,6 +195,10 @@ the Linux session.
    document known unsupported apps/operations. Plasma reuses the presenter and session
    contract rather than receiving a separate host integration. Update the README and
    `docs/HOW_IT_WORKS.md` to describe only paths proven by these gates.
+7. **Broader Linux GPU compatibility.** Establish separate conformance and application
+   evidence for each additional advertised graphics API, including Vulkan, desktop OpenGL,
+   video acceleration and compute where implemented. Record performance and unsupported
+   features per API rather than treating a working compositor as proof of full compatibility.
 
 Use disposable copy-on-write roots for service, package and credential tests. Do not change
 the live root or restart the user's current GUI merely to run a test. Keep the current TTY
