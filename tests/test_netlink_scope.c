@@ -3,12 +3,14 @@
 //   src/netlink_route_transport.c src/netlink_route_snapshot.c
 #include <assert.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/uio.h>
 #include "net.h"
+#include "netlink_route_transport.h"
 
 // Unused dependencies of net.c in this focused socket test.
 pid_t pidfd_shim_pid(int fd) { (void)fd; return -1; }
@@ -66,8 +68,8 @@ int main(void) {
   assert(sc(209, route, 270, 9, 0, (unsigned long)&groups_len) == 0);
   assert(groups_len == 0);
   assert(sc(209, route, 270, 9, 0, 0) == -14);
-  int link_group = 1;
-  assert(sc(208, route, 270, 1, (unsigned long)&link_group, sizeof link_group) == -92);
+  int unsupported_group = 7; // route updates have no event source yet
+  assert(sc(208, route, 270, 1, (unsigned long)&unsupported_group, sizeof unsupported_group) == -95);
   for (int option = 11; option <= 12; option++)
     assert(sc(208, route, 270, option, (unsigned long)&domain, sizeof domain) == -92);
   unsigned char req[32] = {0};
@@ -104,6 +106,31 @@ int main(void) {
   assert(sc(207, route, (unsigned long)reply, sizeof reply, 0x40, 0) == -11);
   address[8] = 1; // multicast groups cannot be supplied
   assert(sc(200, route, (unsigned long)address, sizeof address, 0, 0) == -95);
+  if (getenv("RD_ROUTE_EVENTS_TEST")) {
+    int link_group = 1;
+    assert(sc(208, route, 270, 1, (unsigned long)&link_group, sizeof link_group) == 0);
+    struct rd_route_link links[128]; struct rd_route_address addresses[128];
+    int lc = rd_route_collect_links(links, 128);
+    int ac = rd_route_collect_addresses(addresses, 128, 0);
+    assert(lc > 0 && ac >= 0);
+    assert(rd_rtnl_reconcile_snapshot(links, (size_t)lc, addresses, (size_t)ac) == 0);
+    while (sc(207, route, (unsigned long)reply, sizeof reply, 0x40, 0) > 0) {}
+    links[0].mtu++;
+    assert(rd_rtnl_reconcile_snapshot(links, (size_t)lc, addresses, (size_t)ac) == 0);
+    memset(address, 0, sizeof address);
+    uint8_t cmsg[32] = {0};
+    recv_msg.namelen = sizeof address;
+    recv_msg.control = (uint64_t)cmsg; recv_msg.controllen = sizeof cmsg;
+    assert(sc(212, route, (unsigned long)&recv_msg, 0, 0, 0) > 24);
+    uint16_t kind; uint32_t mcast_mask;
+    memcpy(&kind, reply + 4, 2); memcpy(&mcast_mask, address + 8, 4);
+    assert(kind == 16 && mcast_mask == 1 && recv_msg.controllen == 24);
+    uint64_t cmsg_length; int32_t cmsg_level, cmsg_type; uint32_t cmsg_group;
+    memcpy(&cmsg_length, cmsg, 8); memcpy(&cmsg_level, cmsg + 8, 4);
+    memcpy(&cmsg_type, cmsg + 12, 4); memcpy(&cmsg_group, cmsg + 16, 4);
+    assert(cmsg_length == 20 && cmsg_level == 270 && cmsg_type == 3 && cmsg_group == 1);
+    assert(sc(208, route, 270, 2, (unsigned long)&link_group, sizeof link_group) == 0);
+  }
   net_fd_closed((int)route); close((int)route);
   puts("PASS KOBJECT monitor and bounded ROUTE GETLINK path");
   return 0;

@@ -180,6 +180,27 @@ Arch root; normal boot again reached login with D-Bus settled. A future event
 backend must translate actual host link/address changes and preserve group
 identity before the resolver can subscribe.
 
+The route-event increment now opens a real macOS `PF_ROUTE` notification socket
+before accepting Linux link, IPv4-address or IPv6-address membership. The
+monitor compares bounded host snapshots after relevant notifications and sends
+`RTM_NEWLINK`/`RTM_DELLINK` or `RTM_NEWADDR`/`RTM_DELADDR` only for observed
+differences. Each event has its Linux group in the sender address and, when
+requested, `NETLINK_PKTINFO`. Duplicate descriptors share memberships and
+packet-info state. Leaving the last group stops the monitor; delivery uses
+nonblocking bounded datagrams and reports overflow rather than silently
+pretending every update arrived. Unsupported route groups still fail.
+
+Synthetic snapshot changes passed tests for link/address serialization, group
+filtering, unsubscribe/restart, queue overflow and the guest `recvmsg` control
+message. A read-only macOS route notification socket opened; no live network
+change was induced to validate its event timing. The isolated Arch boot still
+reached login with D-Bus settled. `systemd-resolved` now passes subscription
+registration and its ACK-tagged `RTM_GETLINK` dump. It still does not start:
+the direct isolated run logged repeated LLMNR socket-option failures and
+`Could not create manager: No data available`. Host link metadata, route
+information and systemd network state are not yet complete; do not treat the
+new event path as a working DNS service.
+
 Regression commands: `clang -arch arm64 -O2 -Wall -Wextra -Werror -I src -o
 build/test_netlink_route_transport tests/test_netlink_route_transport.c
 src/netlink_route_transport.c src/netlink_route_snapshot.c &&

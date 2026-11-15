@@ -101,6 +101,7 @@ enum {
 #define L_ENOSYS 38
 #define L_ENOTSOCK 88
 #define L_ENOTCONN 107
+#define L_ENOBUFS 105
 #define L_ENOPROTOOPT 92
 #define L_EAFNOSUPPORT 97
 #define L_EOPNOTSUPP 95
@@ -1112,6 +1113,13 @@ struct lin_timeval { int64_t tv_sec; int64_t tv_usec; };   // Linux suseconds_t 
 struct lin_timespec64 { int64_t tv_sec; int64_t tv_nsec; };
 static long do_setsockopt(int fd, int llevel, int lname, const void* val, uint32_t len) {
   int hlevel = 0, hname = 0;
+  if (rd_rtnl_is_fd(fd) && llevel == 270 /*SOL_NETLINK*/ &&
+      (lname == 1 /*ADD_MEMBERSHIP*/ || lname == 2 /*DROP_MEMBERSHIP*/)) {
+    if (!val || len < sizeof(int)) return -L_EINVAL;
+    int group; memcpy(&group, val, sizeof group);
+    if (group <= 0) return -L_EINVAL;
+    return rd_rtnl_membership(fd, (unsigned)group, lname == 1) < 0 ? lerr() : 0;
+  }
   if (rd_rtnl_is_fd(fd) && llevel == 270 /*SOL_NETLINK*/ && lname == 3 /*NETLINK_PKTINFO*/) {
     if (!val || len < sizeof(int)) return -L_EINVAL;
     int enabled; memcpy(&enabled, val, sizeof enabled);
@@ -1151,11 +1159,11 @@ static long do_setsockopt(int fd, int llevel, int lname, const void* val, uint32
 static long do_getsockopt(int fd, int llevel, int lname, void* val, uint32_t* len) {
   int hlevel = 0, hname = 0;
   if (rd_rtnl_is_fd(fd) && llevel == 270 /*SOL_NETLINK*/ && lname == 9 /*NETLINK_LIST_MEMBERSHIPS*/) {
-    // This read-only route socket has no memberships. Linux permits a size
-    // query with NULL data and zero length, which systemd uses on bind.
     if (!len) return -L_EFAULT;
-    *len = 0;
-    return 0;
+    size_t size = *len;
+    int result = rd_rtnl_memberships(fd, val, &size);
+    *len = (uint32_t)size;
+    return result < 0 ? lerr() : 0;
   }
   if (rd_rtnl_is_fd(fd) && llevel == 270 /*SOL_NETLINK*/ && lname == 3 /*NETLINK_PKTINFO*/) {
     if (!val || !len || *len < sizeof(int)) return -L_EINVAL;
@@ -2013,8 +2021,8 @@ static long sys_socket(int ldomain, int ltype, int protocol) {
   // AF_NETLINK does not exist on macOS. The one limited compatibility surface
   // here is libudev's KOBJECT_UEVENT datagram monitor: it can open and bind a
   // quiet socket, but no host hotplug events are translated yet. NETLINK_ROUTE
-  // has only a read-only RTM_GETLINK snapshot request/reply path. It does not
-  // promise address dumps, routes or change notifications.
+  // provides host-derived link/address snapshots and selected subscriptions
+  // from macOS PF_ROUTE notifications. It does not implement routes.
   if (ldomain == L_AF_NETLINK) {
     // NETLINK_AUDIT (9) also has no backend; fail before libaudit tries sendto.
     int base_type = ltype & ~(L_SOCK_NONBLOCK | L_SOCK_CLOEXEC);
@@ -2120,9 +2128,9 @@ static long sys_socketpair(int ldomain, int ltype, int protocol, int* usv) {
 }
 
 static long sys_bind(int fd, const void* uaddr, uint32_t len) {
-  // netlink "bind" carries a sockaddr_nl (pid/groups), not a filesystem path. The socket is the
-  // emulated datagram above, so accept any netlink bind and record nothing: no events will ever
-  // arrive, which is correct for a shim with no kernel uevent source.
+  // netlink "bind" carries a sockaddr_nl (pid/groups), not a filesystem path.
+  // ROUTE group subscriptions use the explicit membership options below;
+  // KOBJECT remains a quiet monitor without a host uevent source.
   if (uaddr && len >= 2) {
     uint16_t fam; memcpy(&fam, uaddr, 2);
     if (fam == L_AF_NETLINK) {
@@ -2302,12 +2310,16 @@ static long sys_sendto(int fd, const void* buf, size_t len, int lflags,
 static long sys_recvfrom(int fd, void* buf, size_t len, int lflags,
                          unsigned long uaddr, unsigned long ulen) {
   if (rd_rtnl_is_fd(fd)) {
+    if (rd_rtnl_take_overflow(fd)) return -L_ENOBUFS;
     ssize_t n = recv(fd, buf, len, msgflags_l2h(lflags));
     if (n < 0) return lerr();
     if (uaddr && ulen) {
       uint32_t avail; memcpy(&avail, (const void*)ulen, 4);
       unsigned char addr[12] = {0}; uint16_t fam = L_AF_NETLINK;
       memcpy(addr, &fam, 2);
+      unsigned group = rd_rtnl_event_group(buf, n > 0 ? (size_t)n : 0);
+      uint32_t groups = group ? 1u << (group - 1) : 0;
+      memcpy(addr + 8, &groups, 4);
       if (avail > sizeof addr) avail = sizeof addr;
       memcpy((void*)uaddr, addr, avail);
       uint32_t full = sizeof addr; memcpy((void*)ulen, &full, 4);
@@ -2424,6 +2436,7 @@ static long sys_sendmmsg(int fd, struct lin_mmsghdr* lv, unsigned vlen, int lfla
 static long sys_recvmsg(int fd, struct lin_msghdr* lm, int lflags) {
   if (!lm) return -L_EFAULT;
   if (rd_rtnl_is_fd(fd)) {
+    if (rd_rtnl_take_overflow(fd)) return -L_ENOBUFS;
     if (lm->msg_iovlen > INT_MAX || (lm->msg_iovlen && !lm->msg_iov)) return -L_EINVAL;
     ssize_t full_length = -1;
     if (lflags & L_MSG_TRUNC) {
@@ -2462,14 +2475,35 @@ static long sys_recvmsg(int fd, struct lin_msghdr* lm, int lflags) {
     hm.msg_iov = (struct iovec*)lm->msg_iov; hm.msg_iovlen = (int)lm->msg_iovlen;
     ssize_t n = recvmsg(fd, &hm, msgflags_l2h(lflags));
     if (n < 0) return lerr();
+    unsigned char header[24]; size_t copied = 0;
+    const struct iovec* parts = (const struct iovec*)lm->msg_iov;
+    for (size_t i = 0; i < lm->msg_iovlen && copied < sizeof header; i++) {
+      size_t take = parts[i].iov_len < sizeof header - copied ? parts[i].iov_len : sizeof header - copied;
+      if (take) memcpy(header + copied, parts[i].iov_base, take);
+      copied += take;
+    }
+    unsigned group = (n >= 24 && copied >= 24) ? rd_rtnl_event_group(header, (size_t)n) : 0;
     if (lm->msg_name) {
       unsigned char addr[12] = {0}; uint16_t fam = L_AF_NETLINK;
       memcpy(addr, &fam, 2);
+      uint32_t groups = group ? 1u << (group - 1) : 0;
+      memcpy(addr + 8, &groups, 4);
       size_t copy = lm->msg_namelen < sizeof addr ? lm->msg_namelen : sizeof addr;
       memcpy((void*)lm->msg_name, addr, copy);
     }
-    lm->msg_namelen = 12; lm->msg_controllen = 0;
+    lm->msg_namelen = 12;
     lm->msg_flags = hm.msg_flags & MSG_TRUNC ? L_MSG_TRUNC : 0;
+    if (group && rd_rtnl_get_pktinfo(fd) > 0) {
+      if (lm->msg_control && lm->msg_controllen >= 24) {
+        uint64_t cmsg_length = 20; int32_t level = 270, type = 3;
+        memcpy((void*)lm->msg_control, &cmsg_length, 8);
+        memcpy((char*)lm->msg_control + 8, &level, 4);
+        memcpy((char*)lm->msg_control + 12, &type, 4);
+        memcpy((char*)lm->msg_control + 16, &group, 4);
+        memset((char*)lm->msg_control + 20, 0, 4);
+        lm->msg_controllen = 24;
+      } else { lm->msg_controllen = 0; lm->msg_flags |= L_MSG_CTRUNC; }
+    } else lm->msg_controllen = 0;
     return full_length >= 0 ? full_length : n;
   }
   struct msghdr hm; memset(&hm, 0, sizeof hm);

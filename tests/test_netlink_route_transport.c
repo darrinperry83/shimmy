@@ -87,6 +87,10 @@ int main(void) {
   assert(recv(first, empty, sizeof empty, MSG_DONTWAIT) == -1 &&
          (errno == EAGAIN || errno == EWOULDBLOCK));
   request(a, 101);
+  put16(a + 6, 0x305); put32(a + 8, 102); // systemd dump with ACK requested
+  assert(rd_rtnl_send(first, a, 32) == 32);
+  check_dump(first, 102, 16, 0);
+  request(a, 101);
   assert(rd_rtnl_send(first, a, 32) == 32);
   assert(rd_rtnl_send(second, b, 32) == 32);
   check_dump(second, 202, 16, 0); check_dump(first, 101, 16, 0);
@@ -150,6 +154,58 @@ int main(void) {
   pthread_t workers[4]; uint32_t bases[4] = {1000, 2000, 3000, 4000};
   for (int i = 0; i < 4; i++) assert(pthread_create(&workers[i], NULL, concurrent_client, &bases[i]) == 0);
   for (int i = 0; i < 4; i++) assert(pthread_join(workers[i], NULL) == 0);
+  // Synthetic snapshot changes exercise the exact path the macOS PF_ROUTE
+  // monitor uses, without changing any actual host network setting.
+  int observer = rd_rtnl_open(SOCK_RAW, 1, 1, 9001);
+  int bystander = rd_rtnl_open(SOCK_RAW, 1, 1, 9002);
+  assert(observer >= 0 && bystander >= 0);
+  assert(rd_rtnl_membership(observer, 1, 1) == 0);
+  struct rd_route_link links[128]; struct rd_route_address addresses[128];
+  int lc = rd_route_collect_links(links, 128);
+  int ac = rd_route_collect_addresses(addresses, 128, 0);
+  assert(lc > 0 && ac > 0);
+  unsigned addr_group = addresses[0].family == 2 ? 5 : 9;
+  assert(rd_rtnl_membership(observer, addr_group, 1) == 0);
+  unsigned mask = 0; size_t mask_size = sizeof mask;
+  assert(rd_rtnl_memberships(observer, &mask, &mask_size) == 0);
+  assert(mask_size == 4 && mask == ((1u << 0) | (1u << (addr_group - 1))));
+  assert(rd_rtnl_membership(observer, 7, 1) == -1 && errno == EOPNOTSUPP);
+  // Reset the monitor baseline, then change only one link and one address.
+  assert(rd_rtnl_reconcile_snapshot(links, (size_t)lc, addresses, (size_t)ac) == 0);
+  unsigned char event[256];
+  while (recv(observer, event, sizeof event, MSG_DONTWAIT) > 0) {} // initial host drift, if any
+  links[0].mtu++;
+  addresses[0].flags ^= 1;
+  assert(rd_rtnl_reconcile_snapshot(links, (size_t)lc, addresses, (size_t)ac) == 0);
+  ssize_t en = recv(observer, event, sizeof event, 0);
+  assert(en > 24 && get16(event + 4) == 16 && rd_rtnl_event_group(event, (size_t)en) == 1);
+  en = recv(observer, event, sizeof event, 0);
+  assert(en > 24 && get16(event + 4) == 21 && rd_rtnl_event_group(event, (size_t)en) == addr_group);
+  en = recv(observer, event, sizeof event, 0);
+  assert(en > 24 && get16(event + 4) == 20 && rd_rtnl_event_group(event, (size_t)en) == addr_group);
+  assert(recv(bystander, event, sizeof event, MSG_DONTWAIT) == -1 &&
+         (errno == EAGAIN || errno == EWOULDBLOCK));
+  assert(rd_rtnl_membership(observer, 1, 0) == 0);
+  assert(rd_rtnl_membership(observer, addr_group, 0) == 0);
+  assert(rd_rtnl_memberships(observer, &mask, &mask_size) == 0 && mask_size == 0);
+  links[0].mtu++;
+  assert(rd_rtnl_reconcile_snapshot(links, (size_t)lc, addresses, (size_t)ac) == 0);
+  assert(recv(observer, event, sizeof event, MSG_DONTWAIT) == -1 &&
+         (errno == EAGAIN || errno == EWOULDBLOCK));
+  usleep(400000); // allow the now-unsubscribed monitor to stop
+  assert(rd_rtnl_membership(observer, 1, 1) == 0); // restart host observer
+  assert(rd_rtnl_membership(observer, 1, 0) == 0);
+  int flood = rd_rtnl_open(SOCK_RAW, 1, 1, 9003);
+  assert(flood >= 0 && rd_rtnl_membership(flood, 1, 1) == 0);
+  for (int i = 0; i < 4000 && !rd_rtnl_take_overflow(flood); i++) {
+    links[0].mtu++;
+    assert(rd_rtnl_reconcile_snapshot(links, (size_t)lc, addresses, (size_t)ac) == 0);
+    if (i == 3999) assert(!"event queue failed to signal overflow");
+  }
+  assert(rd_rtnl_membership(flood, 1, 0) == 0);
+  rd_rtnl_close(flood); close(flood);
+  rd_rtnl_close(observer); close(observer);
+  rd_rtnl_close(bystander); close(bystander);
   assert(reserved == unreserved);
   puts("PASS bounded GETLINK multipart, malformed/unsupported requests, sequences, sockets and dup");
 }
