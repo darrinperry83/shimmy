@@ -60,8 +60,32 @@ if [ "$BOOT_INIT" = 1 ]; then
   # the shim (drmasahi.c -> window.m -> rdgpu_scanout_client), so it fires on whichever
   # DRM-master compositor the chosen desktop runs. Nothing here pins a DE: RDGPU_SCANOUT
   # is inherited through `exec` unchanged.
-  [ "$SHIM_CHOSEN" = 0 ] && SHIM="$HERE/shim_gui"   # a visible login needs the Metal VT console
+  [ "$SHIM_CHOSEN" = 0 ] && SHIM="${SHIM_GUI_OVERRIDE:-$HERE/shim_gui}"   # app bundle may supply its signed GUI binary
   [ -x "$SHIM" ] || { echo "error: $SHIM missing — run ./build.sh gui first" >&2; exit 1; }
+
+  # The rootfs's /tmp is already a host-backed sticky directory. Shimmy does
+  # not implement a separate tmpfs mount namespace yet; accepting mount(2)
+  # without making a mount makes systemd retry tmp.mount indefinitely. Mask
+  # only the vendor unit, leaving any existing administrator override alone.
+  [ "$(stat -f %Sp "$ROOT/tmp")" = drwxrwxrwt ] || {
+    echo "error: $ROOT/tmp must be a mode-1777 directory" >&2; exit 1;
+  }
+  TMP_UNIT="$ROOT/etc/systemd/system/tmp.mount"
+  if [ ! -e "$TMP_UNIT" ] && [ ! -L "$TMP_UNIT" ]; then
+    mkdir -p "$(dirname "$TMP_UNIT")"
+    ln -s /dev/null "$TMP_UNIT"
+    echo "[run] masked tmp.mount; guest /tmp uses the rootfs's host-backed sticky directory" >&2
+  fi
+
+  # Older installed roots have only tty1 enabled. Install the remaining gettys
+  # idempotently before PID 1 starts, preserving any administrator overrides.
+  mkdir -p "$ROOT/etc/systemd/system/getty.target.wants"
+  for tty in 2 3 4 5 6; do
+    unit="$ROOT/etc/systemd/system/getty.target.wants/getty@tty${tty}.service"
+    if [ ! -e "$unit" ] && [ ! -L "$unit" ]; then
+      ln -s /usr/lib/systemd/system/getty@.service "$unit"
+    fi
+  done
 
   INIT="$ROOT/sbin/init"
   INIT_RESOLVED="$(readlink -f "$INIT" 2>/dev/null || true)"

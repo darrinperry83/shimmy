@@ -22,3 +22,4 @@ src/test_fastcall
 src/test_glbridge
 src/test_gmem
 src/test_window
+/build/Shimmy.app/

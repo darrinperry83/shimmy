@@ -1482,6 +1482,12 @@ static int proc_open(const char* g, long* out) {
     *out = fd < 0 ? herrno() : fd;
     return 1;
   }
+  if (strcmp(g, "/sys/class/tty/tty0/active") == 0) {
+    snprintf(buf, sizeof buf, "tty1\n");
+    int fd = mem_fd(buf, strlen(buf));
+    *out = fd < 0 ? herrno() : fd;
+    return 1;
+  }
   // /proc/sys/kernel/* — systemd/journald read these at startup; the OPEN-FAIL log showed
   // osrelease/hostname/boot_id all ENOENT, and journald treats the missing hostname as fatal.
   if (strcmp(g, "/proc/sys/kernel/hostname") == 0) {

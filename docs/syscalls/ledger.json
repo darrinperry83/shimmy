@@ -1,0 +1,6424 @@
+{
+  "architecture": "aarch64-linux",
+  "counts": {
+    "has_dispatch_case": 300,
+    "no_dispatch_case": 27,
+    "numbered_header_entries": 327,
+    "partial_or_unknown": 10,
+    "placeholder": 12,
+    "unknown": 209,
+    "unsupported": 96
+  },
+  "header": "rootfs/usr/include/asm/unistd_64.h",
+  "header_sha256": "a6277c8757890bd4fe8afaf76a8ea79274e7b0484ec147e717634c16fe54e1d9",
+  "method": "static case-label scan; no syscall or integration test was run",
+  "schema_version": 1,
+  "source_commit": "6b8ed28fc6963dac5e7835c6cdeeeb29ffddb8c3",
+  "source_dirty_at_scan": true,
+  "source_repo": "shimmy-development",
+  "syscalls": [
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 852,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "io_setup",
+      "notes": "",
+      "number": 0,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 852,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "io_destroy",
+      "notes": "",
+      "number": 1,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 852,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "io_submit",
+      "notes": "",
+      "number": 2,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 852,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "io_cancel",
+      "notes": "",
+      "number": 3,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 852,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "io_getevents",
+      "notes": "",
+      "number": 4,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 853,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "setxattr",
+      "notes": "",
+      "number": 5,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 853,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "lsetxattr",
+      "notes": "",
+      "number": 6,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 853,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "fsetxattr",
+      "notes": "",
+      "number": 7,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 864,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "getxattr",
+      "notes": "",
+      "number": 8,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 864,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "lgetxattr",
+      "notes": "",
+      "number": 9,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 864,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "fgetxattr",
+      "notes": "",
+      "number": 10,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 875,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "listxattr",
+      "notes": "",
+      "number": 11,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 875,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "llistxattr",
+      "notes": "",
+      "number": 12,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 875,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "flistxattr",
+      "notes": "",
+      "number": 13,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 885,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "removexattr",
+      "notes": "",
+      "number": 14,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 885,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "lremovexattr",
+      "notes": "",
+      "number": 15,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 885,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "fremovexattr",
+      "notes": "",
+      "number": 16,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 3532,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "getcwd",
+      "notes": "",
+      "number": 17,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 893,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "lookup_dcookie",
+      "notes": "",
+      "number": 18,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/net.c",
+          "line": 2835,
+          "tier": "network"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "eventfd2",
+      "notes": "",
+      "number": 19,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/net.c",
+          "line": 2838,
+          "tier": "network"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "epoll_create1",
+      "notes": "",
+      "number": 20,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/net.c",
+          "line": 2840,
+          "tier": "network"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "epoll_ctl",
+      "notes": "",
+      "number": 21,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/net.c",
+          "line": 2843,
+          "tier": "network"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "epoll_pwait",
+      "notes": "",
+      "number": 22,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 894,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "dup",
+      "notes": "",
+      "number": 23,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 905,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "dup3",
+      "notes": "",
+      "number": 24,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 3542,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "fcntl",
+      "notes": "",
+      "number": 25,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 912,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "inotify_init1",
+      "notes": "",
+      "number": 26,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 927,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "inotify_add_watch",
+      "notes": "",
+      "number": 27,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "source explicitly has a no-op or synthetic success; verify the observable contract",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 931,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "inotify_rm_watch",
+      "notes": "",
+      "number": 28,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "placeholder",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 3545,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "ioctl",
+      "notes": "ioctl covers many synthetic device contracts; per-device conformance is required",
+      "number": 29,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "source explicitly has a no-op or synthetic success; verify the observable contract",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 932,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "ioprio_set",
+      "notes": "",
+      "number": 30,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "placeholder",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "source explicitly has a no-op or synthetic success; verify the observable contract",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 932,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "ioprio_get",
+      "notes": "",
+      "number": 31,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "placeholder",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 3559,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "flock",
+      "notes": "",
+      "number": 32,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "contains an unsupported branch; supported subset not proven",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 933,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "mknodat",
+      "notes": "",
+      "number": 33,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "partial_or_unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 3562,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "mkdirat",
+      "notes": "",
+      "number": 34,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 3585,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "unlinkat",
+      "notes": "",
+      "number": 35,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 951,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "symlinkat",
+      "notes": "",
+      "number": 36,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 3609,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "linkat",
+      "notes": "",
+      "number": 37,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 3619,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "renameat",
+      "notes": "",
+      "number": 38,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "source explicitly has a no-op or synthetic success; verify the observable contract",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 958,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "umount2",
+      "notes": "umount2 currently reports success without mount-state change",
+      "number": 39,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "placeholder",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "source explicitly has a no-op or synthetic success; verify the observable contract",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 964,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "mount",
+      "notes": "mount currently reports success without mount-state change; tmp.mount subsequently fails",
+      "number": 40,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "placeholder",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 969,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "pivot_root",
+      "notes": "",
+      "number": 41,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 970,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "nfsservctl",
+      "notes": "",
+      "number": 42,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 3647,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "statfs",
+      "notes": "",
+      "number": 43,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 3655,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "fstatfs",
+      "notes": "",
+      "number": 44,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 971,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "truncate",
+      "notes": "",
+      "number": 45,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "contains an unsupported branch; supported subset not proven",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 3666,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "ftruncate",
+      "notes": "",
+      "number": 46,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "partial_or_unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 975,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "fallocate",
+      "notes": "",
+      "number": 47,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 3682,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "faccessat",
+      "notes": "",
+      "number": 48,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 3712,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "chdir",
+      "notes": "",
+      "number": 49,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 976,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "fchdir",
+      "notes": "",
+      "number": 50,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 977,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "chroot",
+      "notes": "",
+      "number": 51,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 978,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "fchmod",
+      "notes": "",
+      "number": 52,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 979,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "fchmodat",
+      "notes": "",
+      "number": 53,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 985,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "fchownat",
+      "notes": "",
+      "number": 54,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1006,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "fchown",
+      "notes": "",
+      "number": 55,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 3736,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "openat",
+      "notes": "",
+      "number": 56,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 3930,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "close",
+      "notes": "",
+      "number": 57,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1012,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "vhangup",
+      "notes": "",
+      "number": 58,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1013,
+          "tier": "extended"
+        },
+        {
+          "file": "src/net.c",
+          "line": 2851,
+          "tier": "network"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "pipe2",
+      "notes": "",
+      "number": 59,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1014,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "quotactl",
+      "notes": "",
+      "number": 60,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 3979,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "getdents64",
+      "notes": "",
+      "number": 61,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 3982,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "lseek",
+      "notes": "",
+      "number": 62,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 3990,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "read",
+      "notes": "",
+      "number": 63,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4031,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "write",
+      "notes": "",
+      "number": 64,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4067,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "readv",
+      "notes": "",
+      "number": 65,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4068,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "writev",
+      "notes": "",
+      "number": 66,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4091,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "pread64",
+      "notes": "",
+      "number": 67,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4092,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "pwrite64",
+      "notes": "",
+      "number": 68,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1017,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "preadv",
+      "notes": "",
+      "number": 69,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1021,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "pwritev",
+      "notes": "",
+      "number": 70,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1025,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "sendfile",
+      "notes": "",
+      "number": 71,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/net.c",
+          "line": 2854,
+          "tier": "network"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "pselect6",
+      "notes": "",
+      "number": 72,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/net.c",
+          "line": 2857,
+          "tier": "network"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "ppoll",
+      "notes": "",
+      "number": 73,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1032,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "signalfd4",
+      "notes": "",
+      "number": 74,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1033,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "vmsplice",
+      "notes": "",
+      "number": 75,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1034,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "splice",
+      "notes": "",
+      "number": 76,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1043,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "tee",
+      "notes": "",
+      "number": 77,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4095,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "readlinkat",
+      "notes": "",
+      "number": 78,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4193,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "newfstatat",
+      "notes": "",
+      "number": 79,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4300,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "fstat",
+      "notes": "",
+      "number": 80,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1046,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "sync",
+      "notes": "",
+      "number": 81,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1047,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "fsync",
+      "notes": "",
+      "number": 82,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1048,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "fdatasync",
+      "notes": "",
+      "number": 83,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1052,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "sync_file_range",
+      "notes": "",
+      "number": 84,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1053,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "timerfd_create",
+      "notes": "",
+      "number": 85,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1054,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "timerfd_settime",
+      "notes": "",
+      "number": 86,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1055,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "timerfd_gettime",
+      "notes": "",
+      "number": 87,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1056,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "utimensat",
+      "notes": "",
+      "number": 88,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1064,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "acct",
+      "notes": "",
+      "number": 89,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1065,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "capget",
+      "notes": "",
+      "number": 90,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1082,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "capset",
+      "notes": "",
+      "number": 91,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1083,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "personality",
+      "notes": "",
+      "number": 92,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4331,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "exit",
+      "notes": "",
+      "number": 93,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4344,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "exit_group",
+      "notes": "",
+      "number": 94,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1086,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "waitid",
+      "notes": "",
+      "number": 95,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4365,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "set_tid_address",
+      "notes": "",
+      "number": 96,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1110,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "unshare",
+      "notes": "",
+      "number": 97,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4368,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "futex",
+      "notes": "",
+      "number": 98,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4372,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "set_robust_list",
+      "notes": "",
+      "number": 99,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1111,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "get_robust_list",
+      "notes": "",
+      "number": 100,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1112,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "nanosleep",
+      "notes": "",
+      "number": 101,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1114,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "getitimer",
+      "notes": "",
+      "number": 102,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1124,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "setitimer",
+      "notes": "",
+      "number": 103,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1140,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "kexec_load",
+      "notes": "",
+      "number": 104,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1140,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "init_module",
+      "notes": "",
+      "number": 105,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1140,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "delete_module",
+      "notes": "",
+      "number": 106,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1141,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "timer_create",
+      "notes": "",
+      "number": 107,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1141,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "timer_gettime",
+      "notes": "",
+      "number": 108,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1141,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "timer_getoverrun",
+      "notes": "",
+      "number": 109,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1141,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "timer_settime",
+      "notes": "",
+      "number": 110,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1141,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "timer_delete",
+      "notes": "",
+      "number": 111,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1145,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "clock_settime",
+      "notes": "",
+      "number": 112,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4375,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "clock_gettime",
+      "notes": "",
+      "number": 113,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4387,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "clock_getres",
+      "notes": "",
+      "number": 114,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4400,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "clock_nanosleep",
+      "notes": "",
+      "number": 115,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "source explicitly has a no-op or synthetic success; verify the observable contract",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1146,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "syslog",
+      "notes": "syslog currently has a documented stub success",
+      "number": 116,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "placeholder",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1147,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "ptrace",
+      "notes": "",
+      "number": 117,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1148,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "sched_setparam",
+      "notes": "",
+      "number": 118,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1148,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "sched_setscheduler",
+      "notes": "",
+      "number": 119,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1149,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "sched_getscheduler",
+      "notes": "",
+      "number": 120,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1150,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "sched_getparam",
+      "notes": "",
+      "number": 121,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4427,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "sched_setaffinity",
+      "notes": "",
+      "number": 122,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4446,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "sched_getaffinity",
+      "notes": "",
+      "number": 123,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1153,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "sched_yield",
+      "notes": "",
+      "number": 124,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1154,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "sched_get_priority_max",
+      "notes": "",
+      "number": 125,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1154,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "sched_get_priority_min",
+      "notes": "",
+      "number": 126,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1165,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "sched_rr_get_interval",
+      "notes": "",
+      "number": 127,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1168,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "restart_syscall",
+      "notes": "",
+      "number": 128,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4482,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "kill",
+      "notes": "",
+      "number": 129,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1171,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "tkill",
+      "notes": "",
+      "number": 130,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1171,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "tgkill",
+      "notes": "",
+      "number": 131,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1194,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "sigaltstack",
+      "notes": "",
+      "number": 132,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1195,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "rt_sigsuspend",
+      "notes": "",
+      "number": 133,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4498,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "rt_sigaction",
+      "notes": "",
+      "number": 134,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4509,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "rt_sigprocmask",
+      "notes": "",
+      "number": 135,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1204,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "rt_sigpending",
+      "notes": "",
+      "number": 136,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4526,
+          "tier": "main"
+        },
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1207,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "rt_sigtimedwait",
+      "notes": "",
+      "number": 137,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1208,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "rt_sigqueueinfo",
+      "notes": "",
+      "number": 138,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4536,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "rt_sigreturn",
+      "notes": "",
+      "number": 139,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1218,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "setpriority",
+      "notes": "",
+      "number": 140,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1221,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "getpriority",
+      "notes": "",
+      "number": 141,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1227,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "reboot",
+      "notes": "",
+      "number": 142,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1230,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "setregid",
+      "notes": "",
+      "number": 143,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1231,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "setgid",
+      "notes": "",
+      "number": 144,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1232,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "setreuid",
+      "notes": "",
+      "number": 145,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1233,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "setuid",
+      "notes": "",
+      "number": 146,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1234,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "setresuid",
+      "notes": "",
+      "number": 147,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1241,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "getresuid",
+      "notes": "",
+      "number": 148,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1248,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "setresgid",
+      "notes": "",
+      "number": 149,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1255,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "getresgid",
+      "notes": "",
+      "number": 150,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1260,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "setfsuid",
+      "notes": "",
+      "number": 151,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1261,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "setfsgid",
+      "notes": "",
+      "number": 152,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4539,
+          "tier": "main"
+        },
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1262,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "times",
+      "notes": "",
+      "number": 153,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1279,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "setpgid",
+      "notes": "",
+      "number": 154,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1280,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "getpgid",
+      "notes": "",
+      "number": 155,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1283,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "getsid",
+      "notes": "",
+      "number": 156,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1286,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "setsid",
+      "notes": "",
+      "number": 157,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1289,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "getgroups",
+      "notes": "",
+      "number": 158,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1303,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "setgroups",
+      "notes": "",
+      "number": 159,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4558,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "uname",
+      "notes": "",
+      "number": 160,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1304,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "sethostname",
+      "notes": "",
+      "number": 161,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1304,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "setdomainname",
+      "notes": "",
+      "number": 162,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1305,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "getrlimit",
+      "notes": "",
+      "number": 163,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1315,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "setrlimit",
+      "notes": "",
+      "number": 164,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4572,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "getrusage",
+      "notes": "",
+      "number": 165,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1324,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "umask",
+      "notes": "",
+      "number": 166,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1325,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "prctl",
+      "notes": "",
+      "number": 167,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1326,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "getcpu",
+      "notes": "",
+      "number": 168,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1330,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "gettimeofday",
+      "notes": "",
+      "number": 169,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1337,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "settimeofday",
+      "notes": "",
+      "number": 170,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1338,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "adjtimex",
+      "notes": "",
+      "number": 171,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4589,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "getpid",
+      "notes": "",
+      "number": 172,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4590,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "getppid",
+      "notes": "",
+      "number": 173,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4599,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "getuid",
+      "notes": "",
+      "number": 174,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4600,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "geteuid",
+      "notes": "",
+      "number": 175,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4601,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "getgid",
+      "notes": "",
+      "number": 176,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4602,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "getegid",
+      "notes": "",
+      "number": 177,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4615,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "gettid",
+      "notes": "",
+      "number": 178,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4618,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "sysinfo",
+      "notes": "",
+      "number": 179,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1347,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "mq_open",
+      "notes": "",
+      "number": 180,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1347,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "mq_unlink",
+      "notes": "",
+      "number": 181,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1347,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "mq_timedsend",
+      "notes": "",
+      "number": 182,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1347,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "mq_timedreceive",
+      "notes": "",
+      "number": 183,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1347,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "mq_notify",
+      "notes": "",
+      "number": 184,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1347,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "mq_getsetattr",
+      "notes": "",
+      "number": 185,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1354,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "msgget",
+      "notes": "",
+      "number": 186,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "contains an unsupported branch; supported subset not proven",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1359,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "msgctl",
+      "notes": "",
+      "number": 187,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "partial_or_unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1357,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "msgrcv",
+      "notes": "",
+      "number": 188,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1355,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "msgsnd",
+      "notes": "",
+      "number": 189,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1430,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "semget",
+      "notes": "",
+      "number": 190,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "contains an unsupported branch; supported subset not proven",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1437,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "semctl",
+      "notes": "",
+      "number": 191,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "partial_or_unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1466,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "semtimedop",
+      "notes": "",
+      "number": 192,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1432,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "semop",
+      "notes": "",
+      "number": 193,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1391,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "shmget",
+      "notes": "",
+      "number": 194,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "contains an unsupported branch; supported subset not proven",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1399,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "shmctl",
+      "notes": "",
+      "number": 195,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "partial_or_unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1393,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "shmat",
+      "notes": "",
+      "number": 196,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1397,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "shmdt",
+      "notes": "",
+      "number": 197,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/net.c",
+          "line": 2860,
+          "tier": "network"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "socket",
+      "notes": "socket family/protocol behavior varies; netlink udev boot gap under active work",
+      "number": 198,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/net.c",
+          "line": 2862,
+          "tier": "network"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "socketpair",
+      "notes": "",
+      "number": 199,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/net.c",
+          "line": 2864,
+          "tier": "network"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "bind",
+      "notes": "",
+      "number": 200,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/net.c",
+          "line": 2866,
+          "tier": "network"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "listen",
+      "notes": "",
+      "number": 201,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/net.c",
+          "line": 2876,
+          "tier": "network"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "accept",
+      "notes": "",
+      "number": 202,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/net.c",
+          "line": 2880,
+          "tier": "network"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "connect",
+      "notes": "",
+      "number": 203,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/net.c",
+          "line": 2882,
+          "tier": "network"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "getsockname",
+      "notes": "",
+      "number": 204,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/net.c",
+          "line": 2884,
+          "tier": "network"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "getpeername",
+      "notes": "",
+      "number": 205,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/net.c",
+          "line": 2886,
+          "tier": "network"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "sendto",
+      "notes": "",
+      "number": 206,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/net.c",
+          "line": 2889,
+          "tier": "network"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "recvfrom",
+      "notes": "",
+      "number": 207,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/net.c",
+          "line": 2891,
+          "tier": "network"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "setsockopt",
+      "notes": "",
+      "number": 208,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/net.c",
+          "line": 2894,
+          "tier": "network"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "getsockopt",
+      "notes": "",
+      "number": 209,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/net.c",
+          "line": 2897,
+          "tier": "network"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "shutdown",
+      "notes": "",
+      "number": 210,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/net.c",
+          "line": 2899,
+          "tier": "network"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "sendmsg",
+      "notes": "",
+      "number": 211,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/net.c",
+          "line": 2901,
+          "tier": "network"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "recvmsg",
+      "notes": "",
+      "number": 212,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1476,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "readahead",
+      "notes": "",
+      "number": 213,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4642,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "brk",
+      "notes": "",
+      "number": 214,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4645,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "munmap",
+      "notes": "",
+      "number": 215,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4648,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "mremap",
+      "notes": "",
+      "number": 216,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1477,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "add_key",
+      "notes": "",
+      "number": 217,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1477,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "request_key",
+      "notes": "",
+      "number": 218,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1477,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "keyctl",
+      "notes": "",
+      "number": 219,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "trap handler also handles this syscall; case body alone is insufficient",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1478,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "clone",
+      "notes": "clone is handled in the shim trap handler, which needs the guest register file",
+      "number": 220,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "partial_or_unknown",
+      "test_evidence": [],
+      "trap_override": true,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1479,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "execve",
+      "notes": "execve re-execs the host shim; verify file descriptors, signals and credentials",
+      "number": 221,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4688,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "mmap",
+      "notes": "",
+      "number": 222,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1491,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "fadvise64",
+      "notes": "",
+      "number": 223,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1492,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "swapon",
+      "notes": "",
+      "number": 224,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1492,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "swapoff",
+      "notes": "",
+      "number": 225,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4706,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "mprotect",
+      "notes": "",
+      "number": 226,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1493,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "msync",
+      "notes": "",
+      "number": 227,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1501,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "mlock",
+      "notes": "",
+      "number": 228,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1502,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "munlock",
+      "notes": "",
+      "number": 229,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1503,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "mlockall",
+      "notes": "",
+      "number": 230,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1504,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "munlockall",
+      "notes": "",
+      "number": 231,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1509,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "mincore",
+      "notes": "",
+      "number": 232,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4709,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "madvise",
+      "notes": "",
+      "number": 233,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1528,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "remap_file_pages",
+      "notes": "",
+      "number": 234,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "source explicitly has a no-op or synthetic success; verify the observable contract",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1529,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "mbind",
+      "notes": "",
+      "number": 235,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "placeholder",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1530,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "get_mempolicy",
+      "notes": "",
+      "number": 236,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "source explicitly has a no-op or synthetic success; verify the observable contract",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1533,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "set_mempolicy",
+      "notes": "",
+      "number": 237,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "placeholder",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1534,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "migrate_pages",
+      "notes": "",
+      "number": 238,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1534,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "move_pages",
+      "notes": "",
+      "number": 239,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1208,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "rt_tgsigqueueinfo",
+      "notes": "",
+      "number": 240,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1535,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "perf_event_open",
+      "notes": "",
+      "number": 241,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/net.c",
+          "line": 2878,
+          "tier": "network"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "accept4",
+      "notes": "",
+      "number": 242,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/net.c",
+          "line": 2903,
+          "tier": "network"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "recvmmsg",
+      "notes": "",
+      "number": 243,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4712,
+          "tier": "main"
+        },
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1541,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "wait4",
+      "notes": "",
+      "number": 260,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4727,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "prlimit64",
+      "notes": "",
+      "number": 261,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1554,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "fanotify_init",
+      "notes": "",
+      "number": 262,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1554,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "fanotify_mark",
+      "notes": "",
+      "number": 263,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1555,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "name_to_handle_at",
+      "notes": "",
+      "number": 264,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1574,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "open_by_handle_at",
+      "notes": "",
+      "number": 265,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1575,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "clock_adjtime",
+      "notes": "",
+      "number": 266,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1576,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "syncfs",
+      "notes": "",
+      "number": 267,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1577,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "setns",
+      "notes": "",
+      "number": 268,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/net.c",
+          "line": 2906,
+          "tier": "network"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "sendmmsg",
+      "notes": "",
+      "number": 269,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1582,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "process_vm_readv",
+      "notes": "",
+      "number": 270,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1582,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "process_vm_writev",
+      "notes": "",
+      "number": 271,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1603,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "kcmp",
+      "notes": "",
+      "number": 272,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1604,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "finit_module",
+      "notes": "",
+      "number": 273,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1605,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "sched_setattr",
+      "notes": "",
+      "number": 274,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1605,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "sched_getattr",
+      "notes": "",
+      "number": 275,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1606,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "renameat2",
+      "notes": "",
+      "number": 276,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1623,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "seccomp",
+      "notes": "",
+      "number": 277,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4769,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "getrandom",
+      "notes": "",
+      "number": 278,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1624,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "memfd_create",
+      "notes": "",
+      "number": 279,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1625,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "bpf",
+      "notes": "",
+      "number": 280,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1626,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "execveat",
+      "notes": "",
+      "number": 281,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1627,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "userfaultfd",
+      "notes": "",
+      "number": 282,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1628,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "membarrier",
+      "notes": "",
+      "number": 283,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1633,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "mlock2",
+      "notes": "",
+      "number": 284,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1634,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "copy_file_range",
+      "notes": "",
+      "number": 285,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1643,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "preadv2",
+      "notes": "",
+      "number": 286,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1647,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "pwritev2",
+      "notes": "",
+      "number": 287,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1651,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "pkey_mprotect",
+      "notes": "",
+      "number": 288,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1651,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "pkey_alloc",
+      "notes": "",
+      "number": 289,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1651,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "pkey_free",
+      "notes": "",
+      "number": 290,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1653,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "statx",
+      "notes": "",
+      "number": 291,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1654,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "io_pgetevents",
+      "notes": "",
+      "number": 292,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "contains an unsupported branch; supported subset not proven",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4777,
+          "tier": "main"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "rseq",
+      "notes": "rseq returns ENOSYS; guest libc may fall back",
+      "number": 293,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "partial_or_unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1655,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "kexec_file_load",
+      "notes": "",
+      "number": 294,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1701,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "pidfd_send_signal",
+      "notes": "",
+      "number": 424,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1707,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "io_uring_setup",
+      "notes": "",
+      "number": 425,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1707,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "io_uring_enter",
+      "notes": "",
+      "number": 426,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1707,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "io_uring_register",
+      "notes": "",
+      "number": 427,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1708,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "open_tree",
+      "notes": "open_tree returns a host directory fd, not a Linux detached mount",
+      "number": 428,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "source explicitly has a no-op or synthetic success; verify the observable contract",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1724,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "move_mount",
+      "notes": "move_mount is a no-op success",
+      "number": 429,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "placeholder",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1714,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "fsopen",
+      "notes": "fsopen returns an unconnected host datagram socket, not a filesystem context",
+      "number": 430,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "source explicitly has a no-op or synthetic success; verify the observable contract",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1725,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "fsconfig",
+      "notes": "fsconfig is a no-op success",
+      "number": 431,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "placeholder",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1708,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "fsmount",
+      "notes": "fsmount returns a host directory fd, not a mounted filesystem",
+      "number": 432,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1714,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "fspick",
+      "notes": "",
+      "number": 433,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1726,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "pidfd_open",
+      "notes": "",
+      "number": 434,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "trap handler also handles this syscall; case body alone is insufficient",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1727,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "clone3",
+      "notes": "clone3 has trap-handler support for some forms; other forms fail",
+      "number": 435,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "partial_or_unknown",
+      "test_evidence": [],
+      "trap_override": true,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1742,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "close_range",
+      "notes": "",
+      "number": 436,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1784,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "openat2",
+      "notes": "",
+      "number": 437,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1785,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "pidfd_getfd",
+      "notes": "",
+      "number": 438,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1786,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "faccessat2",
+      "notes": "",
+      "number": 439,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "source explicitly has a no-op or synthetic success; verify the observable contract",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1811,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "process_madvise",
+      "notes": "",
+      "number": 440,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "placeholder",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "contains an unsupported branch; supported subset not proven",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1812,
+          "tier": "extended"
+        },
+        {
+          "file": "src/net.c",
+          "line": 2846,
+          "tier": "network"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "epoll_pwait2",
+      "notes": "",
+      "number": 441,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "partial_or_unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "source explicitly has a no-op or synthetic success; verify the observable contract",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1813,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "mount_setattr",
+      "notes": "mount_setattr is a no-op success",
+      "number": 442,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "placeholder",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "direct unsupported error return",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1814,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "quotactl_fd",
+      "notes": "",
+      "number": 443,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "landlock_create_ruleset",
+      "notes": "",
+      "number": 444,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "landlock_add_rule",
+      "notes": "",
+      "number": 445,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "landlock_restrict_self",
+      "notes": "",
+      "number": 446,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "memfd_secret",
+      "notes": "",
+      "number": 447,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "process_mrelease",
+      "notes": "",
+      "number": 448,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "futex_waitv",
+      "notes": "",
+      "number": 449,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "set_mempolicy_home_node",
+      "notes": "",
+      "number": 450,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "cachestat",
+      "notes": "",
+      "number": 451,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "contains an unsupported branch; supported subset not proven",
+      "dispatch_locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1815,
+          "tier": "extended"
+        }
+      ],
+      "dispatch_state": "case",
+      "name": "fchmodat2",
+      "notes": "",
+      "number": 452,
+      "priority": "P0_boot",
+      "runtime_evidence": [],
+      "semantic_status": "partial_or_unknown",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "map_shadow_stack",
+      "notes": "",
+      "number": 453,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "futex_wake",
+      "notes": "",
+      "number": 454,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "futex_wait",
+      "notes": "",
+      "number": 455,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "futex_requeue",
+      "notes": "",
+      "number": 456,
+      "priority": "P1_common",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "statmount",
+      "notes": "",
+      "number": 457,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "listmount",
+      "notes": "",
+      "number": 458,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "lsm_get_self_attr",
+      "notes": "",
+      "number": 459,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "lsm_set_self_attr",
+      "notes": "",
+      "number": 460,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "lsm_list_modules",
+      "notes": "",
+      "number": 461,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "mseal",
+      "notes": "",
+      "number": 462,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "setxattrat",
+      "notes": "",
+      "number": 463,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "getxattrat",
+      "notes": "",
+      "number": 464,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "listxattrat",
+      "notes": "",
+      "number": 465,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "removexattrat",
+      "notes": "",
+      "number": 466,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "open_tree_attr",
+      "notes": "",
+      "number": 467,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "file_getattr",
+      "notes": "",
+      "number": 468,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "file_setattr",
+      "notes": "",
+      "number": 469,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "listns",
+      "notes": "",
+      "number": 470,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    },
+    {
+      "classification_reason": "no dispatch case; falls through to extended default ENOSYS",
+      "dispatch_locations": [],
+      "dispatch_state": "none",
+      "name": "rseq_slice_yield",
+      "notes": "",
+      "number": 471,
+      "priority": "P2_other",
+      "runtime_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": [],
+      "trap_override": false,
+      "verified_compatible": false
+    }
+  ]
+}

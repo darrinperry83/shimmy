@@ -15,7 +15,21 @@
 static char metadata[PATH_MAX];
 void guest_ownership_set_root(const char *root) {
   if (!root || !*root || !strcmp(root,"/")) { metadata[0]=0; return; }
-  int n=snprintf(metadata,sizeof metadata,"%s/.rdshim-ownership",root);
+  // An installed rootfs may keep its top directory read-only while /var/lib
+  // remains writable. Preserve older records when present, but put new state
+  // under /var/lib so virtual chown works without changing the root mode.
+  char legacy[PATH_MAX];
+  int ln=snprintf(legacy,sizeof legacy,"%s/.rdshim-ownership",root);
+  struct stat st;
+  int legacy_exists=0;
+  if (ln>0 && (size_t)ln<sizeof legacy) {
+    int result=lstat(legacy,&st);
+    // Only ENOENT means it is safe to select new storage. An inaccessible or
+    // malformed legacy path must not silently hide the old ownership records.
+    legacy_exists=result==0 || errno!=ENOENT;
+  }
+  int n=snprintf(metadata,sizeof metadata,legacy_exists ?
+                 "%s/.rdshim-ownership" : "%s/var/lib/.rdshim-ownership",root);
   if(n<0 || (size_t)n>=sizeof metadata) metadata[0]=0;
 }
 static int open_record(const struct stat *st, int create) {

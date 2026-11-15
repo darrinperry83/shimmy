@@ -1,11 +1,10 @@
 // test_net.c — standalone exercise of net.c through the raw Linux syscall ABI.
 //
-//   clang -arch arm64 -O2 -Wall -o /Users/dperry/linux-shim/tests/test_net \
-//         /Users/dperry/linux-shim/src/test_net.c /Users/dperry/linux-shim/src/net.c
+//   sh tests/run-net-tests.sh
 //
 // Everything goes through net_syscall() with LINUX syscall numbers, LINUX struct layouts and
 // LINUX constant values, so the translation layer is what is actually under test. Scratch files
-// live under /Users/dperry/linux-shim/tests (never /tmp, which gets purged).
+// live under /tmp/shimmy-net-test.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,9 +16,11 @@
 #include <poll.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
+#include <sys/proc_info.h>
+#include <libproc.h>
 #include "net.h"
 
-#define SCRATCH "/Users/dperry/linux-shim/tests/net-scratch"
+#define SCRATCH "/tmp/shimmy-net-test"
 #define PREFIX  SCRATCH "/prefix"
 
 // ---- Linux syscall numbers (aarch64) ----
@@ -27,6 +28,7 @@
 #define N_epoll_create1 20
 #define N_epoll_ctl     21
 #define N_epoll_pwait   22
+#define N_epoll_pwait2 441
 #define N_pipe2         59
 #define N_pselect6      72
 #define N_ppoll         73
@@ -337,6 +339,12 @@ static void t_epoll(void) {
   memset(out, 0xAA, sizeof out);
   r = SC4(N_epoll_pwait, ep, out, 4, 0);           // nothing pending yet
   CHECK(r == 0, "epoll_pwait with no events -> %ld (want 0)", r);
+  struct lin_timespec zero_timeout = {0, 0};
+  r = SC6(N_epoll_pwait2, ep, out, 4, &zero_timeout, 0, 0);
+  CHECK(r == 0, "epoll_pwait2 with zero timeout -> %ld (want 0)", r);
+  struct lin_timespec bad_timeout = {0, 1000000000};
+  r = SC6(N_epoll_pwait2, ep, out, 4, &bad_timeout, 0, 0);
+  CHECK(r == -22, "epoll_pwait2 invalid nsec -> %ld (want EINVAL)", r);
 
   CHECK(SC6(N_sendto, sv[0], "wake", 4, 0, 0, 0) == 4, "send failed");
   memset(out, 0xAA, sizeof out);
@@ -346,6 +354,10 @@ static void t_epoll(void) {
   CHECK(out[0].data == MAGIC, "data=%#llx want %#llx",
         (unsigned long long)out[0].data, (unsigned long long)MAGIC);
   CHECK(out[0].__pad == 0, "pad word not cleared (%#x)", out[0].__pad);
+  r = SC6(N_epoll_pwait2, ep, out, 4, &zero_timeout, 0, 0);
+  CHECK(r == 1 && out[0].data == MAGIC,
+        "epoll_pwait2 ready event -> %ld data=%#llx", r,
+        (unsigned long long)out[0].data);
 
   // byte-level proof that data really sits at +8 and events at +0
   const uint8_t* raw = (const uint8_t*)&out[0];
@@ -560,9 +572,10 @@ static void t_sockopt_af(void) {
   CHECK(SC3(N_socket, 16 /*AF_NETLINK*/, LSOCK_DGRAM,
             0 /*NETLINK_ROUTE*/) == -95 /*EOPNOTSUPP*/,
         "NETLINK_ROUTE without CLOEXEC cannot survive shim re-exec");
-  CHECK(SC3(N_socket, 16 /*AF_NETLINK*/, 3 /*SOCK_RAW*/,
-            15 /*NETLINK_KOBJECT_UEVENT*/) == -97 /*EAFNOSUPPORT*/,
-        "only the monitored datagram netlink type is supported");
+  long raw_monitor = SC3(N_socket, 16 /*AF_NETLINK*/, 3 /*SOCK_RAW*/,
+                         15 /*NETLINK_KOBJECT_UEVENT*/);
+  CHECK(raw_monitor >= 0, "raw KOBJECT_UEVENT monitor should open");
+  if (raw_monitor >= 0) close((int)raw_monitor);
 
   long s6 = SC3(N_socket, LAF_INET6, LSOCK_DGRAM, 0);
   CHECK(s6 >= 0, "socket(linux AF_INET6=10 -> darwin 30) -> %ld", s6);
@@ -611,9 +624,17 @@ static void t_acceptconn(void) {
         "SO_ACCEPTCONN on empty listener -> %d", v);
   long client = SC3(N_socket, LAF_UNIX, LSOCK_STREAM, 0);
   CHECK(client >= 0 && SC3(N_connect, client, &u, n) == 0, "connect client");
+  struct socket_fdinfo before, after;
+  int before_size = proc_pidfdinfo(getpid(), (int)listener, PROC_PIDFDSOCKETINFO,
+                                   &before, sizeof before);
   v = -1; len = sizeof v;
   CHECK(SC5(N_getsockopt, listener, LSOL_SOCKET, LSO_ACCEPTCONN, &v, &len) == 0 && v == 1,
         "SO_ACCEPTCONN with queued client -> %d", v);
+  int after_size = proc_pidfdinfo(getpid(), (int)listener, PROC_PIDFDSOCKETINFO,
+                                  &after, sizeof after);
+  CHECK(before_size == sizeof before && after_size == sizeof after &&
+        before.psi.soi_qlen == 1 && after.psi.soi_qlen == 1,
+        "SO_ACCEPTCONN must leave connection on listener for a different process");
   long accepted = SC4(N_accept4, listener, 0, 0, 0);
   CHECK(accepted >= 0, "accept after metadata query -> %ld", accepted);
   if (accepted >= 0) close((int)accepted);
@@ -683,19 +704,18 @@ static void t_cmsg(void) {
 static void t_ownership(void) {
   SECTION("net_owns_syscall coverage");
   static const unsigned long owned[] = { 19,20,21,22,59,72,73,198,199,200,201,202,203,204,
-                                         205,206,207,208,209,210,211,212,242,243 };
+                                         205,206,207,208,209,210,211,212,242,243,441 };
   for (size_t i = 0; i < sizeof owned / sizeof *owned; i++)
     CHECK(net_owns_syscall(owned[i]), "net_owns_syscall(%lu) should be true", owned[i]);
   // Anything else must fall through to linux_syscall().
   static const unsigned long foreign[] = { 0,17,18,23,24,25,56,57,62,63,64,66,78,93,94,
-                                           129,213,241,260,435,441 };
+                                         129,213,241,260,435 };
   for (size_t i = 0; i < sizeof foreign / sizeof *foreign; i++)
     CHECK(!net_owns_syscall(foreign[i]), "net_owns_syscall(%lu) should be false", foreign[i]);
-  OK("owns exactly 24 syscall numbers (incl. pipe2 and recvmmsg), rejects everything else");
+  OK("owns network syscall numbers (incl. pipe2, recvmmsg and epoll_pwait2), rejects everything else");
 }
 
 int main(void) {
-  mkdir("/Users/dperry/linux-shim/tests", 0755);
   mkdir(SCRATCH, 0755);
   mkdir(PREFIX, 0755);
   net_init();

@@ -26,9 +26,12 @@
 #include <spawn.h>
 #include <sys/sysctl.h>
 #include <sys/stat.h>
+#include <sys/event.h>
+#include <sys/resource.h>
 #include <dirent.h>
 #include <errno.h>
 #include <limits.h>
+#include <stdint.h>
 #include <fcntl.h>
 #include <fcntl.h>
 #include <mach/mach_vm.h>
@@ -41,6 +44,7 @@
 #include <pthread/pthread.h>
 #include "elfload.h"
 #include "pidfd_shim.h"
+#include "timerfd_shim.h"
 #include "syscalls.h"
 #include "syscalls_ext.h"
 #include "net.h"
@@ -67,7 +71,6 @@ extern long syscalls_get_guest_ppid(void);
 #include "wlsrv.h"                                // compositor without Metal (see wlhead_stub.c)
 #endif
 struct gpu_req;                                   // CLI build: no Metal/Cocoa
-static void gpu_init(void){}
 static long gpu_hypercall(struct gpu_req* r){ (void)r; return -38; }
 static void gpu_run_event_loop(void){ for(;;) pause(); }  // guest thread _exit()s the process
 #endif
@@ -86,6 +89,81 @@ extern long hostcall(struct hostcall_req* r);
 
 extern boolean_t mach_exc_server(mach_msg_header_t*, mach_msg_header_t*);
 static int g_verbose;
+static int g_boot_lock_fd = -1;
+static int g_boot_watch_fd = -1;
+
+// A Linux boot must have one PID 1 per rootfs. Separate host launches otherwise
+// share /run, /dev/tty*, D-Bus sockets, and SSH port 22, producing misleading
+// service failures and orphaned helpers. POSIX record locks belong to the root
+// host process and survive its systemd re-exec, but are not inherited by forks.
+static int boot_lock_rootfs(const char* rootfs) {
+  uint64_t hash = 1469598103934665603ULL;
+  for (const unsigned char* p = (const unsigned char*)rootfs; *p; ++p)
+    hash = (hash ^ *p) * 1099511628211ULL;
+  char path[128];
+  snprintf(path, sizeof path, "/tmp/shimmy-boot-%016llx.lock",
+           (unsigned long long)hash);
+  int fd = open(path, O_RDWR | O_CREAT, 0600);
+  if (fd < 0) return -1;
+  // Reserve/relocate BEFORE locking: POSIX record locks are released when
+  // any descriptor for this file is closed, and reserve closes the low fd.
+  fd = shim_fd_reserve(fd);
+  struct flock lock = {0};
+  lock.l_type = F_WRLCK;
+  lock.l_whence = SEEK_SET;
+  if (fcntl(fd, F_SETLK, &lock) < 0) {
+    shim_fd_unreserve(fd);
+    close(fd);
+    return -1;
+  }
+  g_boot_lock_fd = fd;
+  // Retain the lock through systemd's host re-exec, then re-register the fd.
+  fcntl(g_boot_lock_fd, F_SETFD, 0);
+  char number[32];
+  snprintf(number, sizeof number, "%d", g_boot_lock_fd);
+  setenv("RDBOOT_LOCK_FD", number, 1);
+  return 0;
+}
+
+// Each Linux process is a host process. A service may call setsid() and be reparented
+// to launchd, so walking the host parent tree cannot clean it up when init exits.
+// Watch the original init PID directly; an exec of init keeps that PID. This also
+// covers forked services which have not yet exec'd their next guest image.
+static void* boot_root_watch(void* unused) {
+  (void)unused;
+  const char* s = getenv("RDVT_ROOT_PID");
+  if (!s || !*s) return NULL;
+  char* end = NULL;
+  long root = strtol(s, &end, 10);
+  if (*end || root <= 1 || root == (long)getpid()) return NULL;
+  int kq = kqueue();
+  if (kq < 0) return NULL;
+  kq = shim_fd_reserve(kq);
+  g_boot_watch_fd = kq;
+  struct kevent change, event;
+  EV_SET(&change, (uintptr_t)root, EVFILT_PROC, EV_ADD | EV_ENABLE,
+         NOTE_EXIT, 0, NULL);
+  if (kevent(kq, &change, 1, NULL, 0, NULL) < 0) {
+    close(kq);
+    if (errno == ESRCH) _exit(0);
+    return NULL;
+  }
+  // If init exited between creation and registration, the NOTE_EXIT event is
+  // queued; otherwise this blocks without polling or waking the guest.
+  int n;
+  do { n = kevent(kq, NULL, 0, &event, 1, NULL); }
+  while (n < 0 && errno == EINTR);
+  if (n == 1 && event.filter == EVFILT_PROC && (event.fflags & NOTE_EXIT)) _exit(0);
+  return NULL;
+}
+
+static void boot_root_watch_start(void) {
+  const char* s = getenv("RDVT_ROOT_PID");
+  if (!s || atol(s) == (long)getpid()) return;
+  pthread_t thread;
+  if (pthread_create(&thread, NULL, boot_root_watch, NULL) == 0)
+    pthread_detach(thread);
+}
 static int g_sctrace_fx;          // RDFUTEX_SC=1: mirror the syscall trace into the per-pid futex log
 void fx_note(const char* fmt, ...);
 static unsigned long g_main_base, g_interp_base;   // for fault diagnostics
@@ -427,7 +505,7 @@ static unsigned long gt_x18_get(struct gthread* g) {
 // syscalls.c can ask "which guest thread am I?" without threading a parameter through everything.
 static _Thread_local struct gthread* t_cur;
 
-int  guest_tid(void)        { return t_cur ? t_cur->tid : 1; }
+int  guest_tid(void)        { return t_cur ? t_cur->tid : (int)syscalls_guest_pid(); }
 
 // Is `tid` one of OUR guest threads? The signal path needs this because guest tids and host pids
 // are DIFFERENT NAMESPACES that happen to overlap at small integers -- guest tids start at 1, and
@@ -440,7 +518,7 @@ int guest_tid_known(int tid) {
   for (int i = 0; i < MAX_GTHREAD; i++)
     if (g_gt[i].used && g_gt[i].tid == tid) { found = 1; break; }
   pthread_mutex_unlock(&g_gt_mu);
-  return found || tid == 1;          // tid 1 is the main guest thread even before registration
+  return found || tid == (int)syscalls_guest_pid(); // main thread before registration
 }
 // Host children we spawned for the guest (see guestthread.h). A small ring is enough: it only has
 // to answer "did we make this pid", and a guest that outlives 256 children has long since lost
@@ -730,7 +808,7 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
     // eight times over, while the top-level process reports the flag set. Same silent-revert-in-
     // the-child shape as every RDX18_* knob above; glmark2 never caught it because glmark2 does
     // not exec and WebKit always does.
-    "RDHOSTCALL", "RDVT_ROOT_PID", "RDVT_STATE", "RDSHIM_BOOT", "RDNOTIFYDBG", "RDERRDBG", "RDNETSOCK",
+    "RDHOSTCALL", "RDVT_ROOT_PID", "RDVT_STATE", "RDSHIM_BOOT", "RDBOOT_LOCK_FD", "RDNOTIFYDBG", "RDERRDBG", "RDNETSOCK",
     // The VT/console knobs ride across exec too, so a forked+exec'd getty (or a re-exec'd main
     // process after `exec` in a boot script) keeps the same console geometry, trace and dump.
     "RDVT", "RDVT_TRACE", "RDVT_AUTOSWITCH", "RDCONS_DUMP", "RDCONS_DUMPFILE", "RDCONS_COLS", "RDCONS_ROWS", 0
@@ -956,7 +1034,7 @@ static void* forked_guest(void* arg) {
   struct fork_ctx* fc = (struct fork_ctx*)arg;
   mach_port_t self = mach_thread_self();
   struct gthread* g = gt_for(self);
-  if (g) { g->tid = 1; g->is_child = 0; g->tpidr = g_guest_tpidr; }
+  if (g) { g->tid = (int)syscalls_guest_pid(); g->is_child = 0; g->tpidr = g_guest_tpidr; }
   // fork() kept only the calling thread — the EXCEPTION thread — so the guest thread that called
   // fork(), and its TSD block, do not exist in this child. This is a brand new pthread with a
   // brand new, all-zero TSD block, so the parent's x18 has to be re-seeded into it. (The
@@ -1039,7 +1117,10 @@ static long do_fork(const arm_thread_state64_t* ts) {
   long parent_guest_pid = syscalls_guest_pid();    // child's guest ppid (1 for a direct child of init)
 
   fflush(NULL);                              // do not duplicate buffered output into the child
+  timerfd_shim_prepare_fork();
   pid_t pid = fork();
+  if (pid == 0) timerfd_shim_child_after_fork();
+  else timerfd_shim_parent_after_fork();
   if (getenv("RDCLONEDBG")) {
     FILE* cf = fopen("/tmp/rd_clone_dbg.txt", "a");
     if (cf) { fprintf(cf, "do_fork result=%d errno=%d\n", pid, pid < 0 ? errno : 0); fclose(cf); }
@@ -1049,6 +1130,15 @@ static long do_fork(const arm_thread_state64_t* ts) {
 
   // ---- child ----------------------------------------------------------------------------
   // FIRST, BEFORE ANY OTHER LINE: give this child its own stdio.
+  if (g_boot_lock_fd >= 0) {
+    close(g_boot_lock_fd);
+    g_boot_lock_fd = -1;
+    unsetenv("RDBOOT_LOCK_FD");
+  }
+  if (g_boot_watch_fd >= 0) {
+    close(g_boot_watch_fd);
+    g_boot_watch_fd = -1;
+  }
   //
   // fork() keeps only the calling thread. Every mutex another thread held at that instant is
   // orphaned in the child and can never be unlocked -- including the FILE lock inside stderr.
@@ -1083,14 +1173,15 @@ static long do_fork(const arm_thread_state64_t* ts) {
   g_guest_tpidr = saved_tpidr;
   gmem_guest_x18 = saved_x18;
   memset(g_gt, 0, sizeof g_gt);
-  g_next_tid = 1;
   t_cur = NULL;
   syscalls_set_init(0);          // a forked child is a new guest process: not PID 1
   syscalls_set_guest_ppid(parent_guest_pid);   // ...whose parent is the process that forked it
+  g_next_tid = (int)syscalls_guest_pid();
 
   // Before the guest runs again: it may connect to its display on the very next instruction, and
   // the display it inherited belongs to a process that is about to exit.
   display_restart_in_fork_child();
+  boot_root_watch_start();
 
   mach_port_t np = MACH_PORT_NULL;
   mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &np);
@@ -1853,7 +1944,8 @@ static void* guest_thread(void* arg) {
   // anyway, so this only publishes the address.
   {
     struct gthread* self = gt_for(mach_thread_self());
-    if (self) { self->tid = 1; self->is_child = 0; }
+    if (self) { self->tid = (int)syscalls_guest_pid(); self->is_child = 0; }
+    g_next_tid = (int)syscalls_guest_pid() + 1;
     gt_bind_x18(self, 0);
   }
 
@@ -2041,6 +2133,27 @@ static int close_initial_host_fds(void) {
 
 int main(int argc, char** argv) {
   if (argc < 3) { fprintf(stderr, "usage: %s <rootfs> <guest-path> [args...]\n", argv[0]); return 2; }
+  // LaunchServices gives apps a soft limit of 256 fds, while the shim reserves
+  // internal descriptors at 256+ and its private stderr at 900+. Without this,
+  // VT masters stay at fds 4..9, children reject their inherited console state,
+  // and getty fails with ENOTTY. Shell-launched tests usually have a higher limit.
+  struct rlimit nofile;
+  if (getrlimit(RLIMIT_NOFILE, &nofile) != 0) {
+    fprintf(stderr, "[shim] cannot read file descriptor limit: %s\n", strerror(errno));
+    return 1;
+  }
+  if (nofile.rlim_cur < 1024) {
+    rlim_t target = nofile.rlim_max < 4096 ? nofile.rlim_max : 4096;
+    if (target < 1024) {
+      fprintf(stderr, "[shim] file descriptor hard limit below required 1024\n");
+      return 1;
+    }
+    nofile.rlim_cur = target;
+    if (setrlimit(RLIMIT_NOFILE, &nofile) != 0) {
+      fprintf(stderr, "[shim] cannot raise file descriptor limit for Linux boot: %s\n", strerror(errno));
+      return 1;
+    }
+  }
   if (getenv("RDHOST_FD_CLEAN")) {
     if (close_initial_host_fds() != 0) {
       fprintf(stderr, "[shim] cannot sanitize inherited host descriptors: %s\n", strerror(errno));
@@ -2093,6 +2206,31 @@ int main(int argc, char** argv) {
     return 1;
   }
   const char* guestpath = argv[2];          // guest-absolute, e.g. /bin/busybox
+  // systemd keeps its host PID when it re-execs. Recover the rootfs lock's
+  // high fd before the guest can close_range() over its descriptors. A child
+  // never owns this lock, even if it inherited the environment via spawn.
+  const char* lock_number = getenv("RDBOOT_LOCK_FD");
+  if (lock_number) {
+    char* end = NULL;
+    long fd = strtol(lock_number, &end, 10);
+    const char* root_number = getenv("RDVT_ROOT_PID");
+    if (end != lock_number && !*end && fd >= 256 && fd < 65536 &&
+        root_number && atol(root_number) == (long)getpid() &&
+        fcntl((int)fd, F_GETFD) >= 0) {
+      g_boot_lock_fd = shim_fd_reserve((int)fd);
+      fcntl(g_boot_lock_fd, F_SETFD, 0);
+    } else {
+      if (end != lock_number && !*end && fd >= 256 && fd < 65536) close((int)fd);
+      unsetenv("RDBOOT_LOCK_FD");
+    }
+  }
+  if (!getenv("RDSHIM_BOOT") &&
+      (!strcmp(guestpath, "/sbin/init") || !strcmp(guestpath, "/usr/lib/systemd/systemd")) &&
+      boot_lock_rootfs(g_rootfs_path) != 0) {
+    fprintf(stderr, "[shim] another boot already owns rootfs %s (or boot lock failed): %s\n",
+            g_rootfs_path, strerror(errno));
+    return 1;
+  }
   idle_trace_fd13("new-shim-entry", guestpath);
   {
     const char* fx = getenv("RDFUTEX"); const char* fxs = getenv("RDFUTEX_SC");
@@ -2114,7 +2252,9 @@ int main(int argc, char** argv) {
   gmem_init();
   gmem_x18_tsd_init();      // pick x18's home before any thread can bind its address
   if (!getenv("RDNOVDSO")) vdso_build();   // A/B: RDNOVDSO=1 forces libc onto real syscalls
-  gpu_init();
+  // Metal is created lazily by gpu_metal_device() when a process actually
+  // presents a window or DRM frame. System services re-exec this same GUI
+  // binary and do not need a device/command queue during boot.
   syscalls_set_root(rootfs);
   syscalls_ext_set_root(rootfs);
   // The root PID identifies which shim process owns the VT console renderer + reader thread.
@@ -2134,6 +2274,7 @@ int main(int argc, char** argv) {
     snprintf(bt, sizeof bt, "%d", (int)getpid());
     setenv("RDSHIM_BOOT", bt, 1);
   }
+  boot_root_watch_start();
   vt_init();                       // /dev/tty1..6 virtual consoles (text getty + VT switching)
 #ifndef NO_GPU
   extern void gpuwin_register_console_present(void);

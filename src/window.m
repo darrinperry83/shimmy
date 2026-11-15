@@ -840,7 +840,7 @@ static void takeover_ignore_window_geometry(void) {
 // ---------------------------------------------------------------- NSApp bring-up
 // Non-bundled binaries default to a background activation policy: the window would be created
 // but stay behind every other app. Regular + activateIgnoringOtherApps fixes that. Idempotent;
-// callable from gpuwin_open() (test harness path) and gpu_run_event_loop() (real path).
+// called when gpuwin_open() creates a visible window; service processes stay background-only.
 // MUST be called on the main thread.
 void gpuwin_ensure_app(void) {
   static int done = 0;

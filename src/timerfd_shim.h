@@ -6,4 +6,9 @@ long timerfd_create_shim(int clockid, int flags);
 long timerfd_settime_shim(int fd, int flags, const linux_itimerspec* next, linux_itimerspec* old);
 long timerfd_gettime_shim(int fd, linux_itimerspec* current);
 void timerfd_shim_closed(int fd);
+// A real fork keeps the timerfd descriptors but not libdispatch's worker threads.
+// Call around the host fork before the child resumes guest instructions.
+void timerfd_shim_prepare_fork(void);
+void timerfd_shim_parent_after_fork(void);
+void timerfd_shim_child_after_fork(void);
 #endif

@@ -38,7 +38,9 @@ int main(void) {
   assert(sc(198, 16, 2, 0, 0, 0) == -95);   // ROUTE without CLOEXEC cannot survive re-exec
   assert(sc(198, 16, 2, 9, 0, 0) == -97);   // NETLINK_AUDIT
   assert(sc(198, 16, 2, 99, 0, 0) == -97);  // Unknown protocol
-  assert(sc(198, 16, 3, 15, 0, 0) == -97);  // RAW KOBJECT also unsupported
+  long raw_kobject = sc(198, 16, 3, 15, 0, 0); // udev's RAW KOBJECT monitor
+  assert(raw_kobject >= 0);
+  close((int)raw_kobject);
 
   long fd = sc(198, 16, 2, 15, 0, 0);       // KOBJECT_UEVENT DGRAM monitor
   assert(fd >= 0);

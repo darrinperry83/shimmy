@@ -95,6 +95,22 @@ build_gui() {
 }
 
 
+build_app() {
+  # A normal macOS app identity lets accessibility tools and users select the GUI window.
+  # The launcher follows run.sh --init exactly, using the bundled shim_gui for re-exec children.
+  echo "== Shimmy.app =="
+  local app="build/Shimmy.app"
+  rm -rf "$app"
+  mkdir -p "$app/Contents/MacOS"
+  cp packaging/macos/Info.plist "$app/Contents/Info.plist"
+  cp packaging/macos/Shimmy "$app/Contents/MacOS/Shimmy"
+  cp shim_gui "$app/Contents/MacOS/shim_gui"
+  chmod 755 "$app/Contents/MacOS/Shimmy"
+  codesign --force --sign - "$app"
+  echo "   -> ./$app"
+}
+
+
 build_wlh() {
   # Diagnostic: CLI core (no Metal/Cocoa, no window-server lock) + the Wayland compositor.
   echo "== shim_wlh =="
@@ -179,7 +195,7 @@ case "${1:-both}" in
   cli) build_third_party; build_cli ;;
   capres) build_capres ;;
   wlh) build_wlh ;;
-  gui) build_third_party; build_gui; build_mac_app ;;
+  gui) build_third_party; build_gui; build_mac_app; build_app ;;
   chooser) build_chooser ;;
   handoff) build_handoff ;;
   macapp) build_mac_app ;;
@@ -193,6 +209,6 @@ case "${1:-both}" in
   # shim_wlh is the headless-Wayland binary, i.e. the one every GUI measurement that does not want
   # the window-server lock is supposed to use. Making it opt-in put the project's most-used test
   # binary on the one path a routine rebuild skipped. Build time is not the scarce resource here.
-  *)   build_third_party; build_cli; build_gui; build_wlh; build_capres; build_mac_app; build_chooser ;;
+  *)   build_third_party; build_cli; build_gui; build_wlh; build_capres; build_mac_app; build_app; build_chooser ;;
 esac
 echo "done. try:  ./shim_cli rootfs /bin/busybox echo hello-from-linux"

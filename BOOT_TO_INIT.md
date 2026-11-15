@@ -74,6 +74,23 @@ in a separate session before treating this as a usable installed boot.
 
 ## Isolated normal-boot result (2026-11-15)
 
+### Tmpfiles boot latency (2026-11-16)
+
+The installed Arch rootfs spent about 45 seconds on `systemd-tmpfiles-setup-dev-early.service`.
+An isolated clone reproduced a 61.2-second boot to login. Tmpfiles connected to the
+userdb Multiplexer and its `epoll_pwait` returned only when the 45-second timer fired.
+The first connection was exposed to Shimmy's socket readiness recovery, which could
+call `accept()` in PID 1 and hold the client in a process-local queue that the activated
+userdb service could not see. Later connections worked, matching this first-request
+failure mode. A 200 ms kqueue recheck did not help and was reverted.
+
+The socket bridge now uses `proc_pidfdinfo` to read `SO_ACCEPTCONN` and the pending
+listen-queue length without accepting a client. A private Arch boot with the original
+`group: files [SUCCESS=merge] systemd` rule and no tmpfiles override reached login in
+17.7 seconds; the early `/dev` unit completed promptly. The 15.2-second scoped
+`SYSTEMD_BYPASS_USERDB` control proved the userdb dependency, but that workaround
+was removed from `run.sh`. The probe stopped only its private guest processes.
+
 `RD_LOGIN_ROOT=build/<private-arch-clone> python3 tests/run-login-boot.py` boots the private Arch fixture with
 `/sbin/init --system` and captures a fresh `localhost login:` prompt. The
 fixture now uses its original `group: files [SUCCESS=merge] systemd` NSS rule;

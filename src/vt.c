@@ -76,6 +76,7 @@ typedef struct {
 
 static vt_unit g_vt[VT_MAX_TEXT];
 static _Atomic int g_active = 1;         // 1..6 text, 7 = GUI
+static _Atomic int g_graphics_seen;
 static vt_present_fn g_present;
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static int g_inited;
@@ -225,8 +226,10 @@ void vt_switch_to(int n) {
 
 void vt_graphics_frame(void) {
     if (!vt_enabled()) return;
-    if (atomic_load(&g_active) != VT_GRAPHICS) {
-        atomic_store(&g_active, VT_GRAPHICS);
+    // Auto-select the desktop only when it first appears. Subsequent frames must
+    // not undo a user's explicit Ctrl+Alt+Fn switch to a text login.
+    if (!atomic_exchange(&g_graphics_seen, 1) &&
+        atomic_exchange(&g_active, VT_GRAPHICS) != VT_GRAPHICS) {
         fprintf(stderr, "[vt] GUI frame detected -> input to GUI console\n");
     }
 }
@@ -261,6 +264,31 @@ void vt_set_present_fn(vt_present_fn fn) {
 static void vt_render_and_present(const console* c) {
     if (!g_fb || g_fb_w <= 0 || g_fb_h <= 0) return;
     console_render(c, g_fb, g_fb_w, g_fb_h, g_fb_w * 4);
+    // RDVT_FBDUMP=1: dump the rendered RGBA framebuffer to /tmp/cons-fb.ppm (once) so the
+    // console image can be inspected independently of the Metal present path.
+    if (getenv("RDVT_FBDUMP")) {
+        static int dumped;
+        if (!dumped && console_has_content(c)) {
+            dumped = 1;
+            FILE* f = fopen("/tmp/cons-fb.ppm", "wb");
+            if (f) {
+                fprintf(f, "P6\n%d %d\n255\n", g_fb_w, g_fb_h);
+                uint8_t* rgb = (uint8_t*)malloc((size_t)g_fb_w * 3);
+                for (int y = 0; y < g_fb_h; y++) {
+                    const uint8_t* s = g_fb + (size_t)y * g_fb_w * 4;
+                    for (int x = 0; x < g_fb_w; x++) {
+                        rgb[x*3+0] = s[x*4+0];
+                        rgb[x*3+1] = s[x*4+1];
+                        rgb[x*3+2] = s[x*4+2];
+                    }
+                    fwrite(rgb, 1, (size_t)g_fb_w * 3, f);
+                }
+                free(rgb);
+                fclose(f);
+                fprintf(stderr, "[vt] dumped console framebuffer to /tmp/cons-fb.ppm\n");
+            }
+        }
+    }
     if (g_present) g_present(g_fb, (uint64_t)g_fb_w, (uint64_t)g_fb_h, 0);
 
     if (g_dump) {

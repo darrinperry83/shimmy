@@ -43,6 +43,8 @@
 #include <sys/time.h>
 #include <sys/select.h>
 #include <sys/uio.h>
+#include <sys/proc_info.h>
+#include <libproc.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <poll.h>
@@ -61,6 +63,7 @@ enum {
   LSYS_epoll_create1 = 20,
   LSYS_epoll_ctl     = 21,
   LSYS_epoll_pwait   = 22,
+  LSYS_epoll_pwait2  = 441,
   LSYS_pipe2         = 59,
   LSYS_pselect6      = 72,
   LSYS_ppoll         = 73,
@@ -90,6 +93,7 @@ enum {
 #define L_EPERM 1
 #define L_ENOENT 2
 #define L_EINTR 4
+#define L_EIO 5
 #define L_EBADF 9
 #define L_EAGAIN 11
 #define L_ENOMEM 12
@@ -381,66 +385,6 @@ static int apply_fd_flags(int fd, int nonblock, int cloexec) {
 // Guest processes expect EPIPE, not a fatal SIGPIPE delivered to the host process.
 static void kill_sigpipe(int fd) { int on = 1; setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof on); }
 
-// Pending-accept re-queue. macOS kqueue does NOT fire EVFILT_READ for a LISTENING SOCK_STREAM
-// socket when a connection arrives from a DIFFERENT process (it does for datagrams). systemd's
-// socket activation depends on that wake: PID1 watches /run/systemd/userdb/io.systemd.Multiplexer
-// and journald watches /run/systemd/journal/stdout, and neither accept()s because the kevent never
-// arrives. The epoll recovery path proves readiness by non-blocking accept()ing the pending
-// connection(s) and parking them here; the guest's accept() drains this queue first.
-// A query for SO_ACCEPTCONN may consume a real pending connection. Keep that
-// connection until the guest accepts it. Match both descriptor and file identity
-// so a recycled descriptor cannot receive another listener's old connection.
-struct accept_pending {
-  int listener, client;
-  dev_t dev; ino_t ino;
-  struct sockaddr_storage addr; socklen_t addrlen;
-  struct accept_pending* next;
-};
-static pthread_mutex_t g_accept_lock = PTHREAD_MUTEX_INITIALIZER;
-static struct accept_pending* g_accept_pending;
-static void acceptq_push(int listener, int client, const struct sockaddr* addr, socklen_t addrlen) {
-  struct stat st;
-  if (fstat(listener, &st) < 0) { close(client); return; }
-  struct accept_pending* p = calloc(1, sizeof *p);
-  if (!p) { close(client); return; }
-  p->listener = listener; p->client = client;
-  p->dev = st.st_dev; p->ino = st.st_ino;
-  p->addrlen = addrlen < sizeof p->addr ? addrlen : sizeof p->addr;
-  if (addr && p->addrlen) memcpy(&p->addr, addr, p->addrlen);
-  pthread_mutex_lock(&g_accept_lock);
-  p->next = g_accept_pending; g_accept_pending = p;
-  pthread_mutex_unlock(&g_accept_lock);
-}
-static int acceptq_pop(int listener, struct sockaddr* addr, socklen_t* addrlen) {
-  struct stat st;
-  if (fstat(listener, &st) < 0) return -1;
-  pthread_mutex_lock(&g_accept_lock);
-  struct accept_pending** link = &g_accept_pending;
-  while (*link) {
-    struct accept_pending* p = *link;
-    if (p->listener == listener && (p->dev != st.st_dev || p->ino != st.st_ino)) {
-      *link = p->next;
-      close(p->client);
-      free(p);
-      continue;
-    }
-    if (p->listener == listener && p->dev == st.st_dev && p->ino == st.st_ino) {
-      *link = p->next;
-      int client = p->client;
-      if (addr && addrlen) {
-        socklen_t copied = *addrlen < p->addrlen ? *addrlen : p->addrlen;
-        if (copied) memcpy(addr, &p->addr, copied);
-        *addrlen = p->addrlen;
-      }
-      free(p);
-      pthread_mutex_unlock(&g_accept_lock);
-      return client;
-    }
-    link = &p->next;
-  }
-  pthread_mutex_unlock(&g_accept_lock);
-  return -1;
-}
 // ---------------------------------------------------------------------------
 // unix-socket path relocation
 // ---------------------------------------------------------------------------
@@ -1228,27 +1172,16 @@ static long do_getsockopt(int fd, int llevel, int lname, void* val, uint32_t* le
     return 0;
   }
   if (llevel == L_SOL_SOCKET && lname == 30) {
-    // Darwin defines SO_ACCEPTCONN but getsockopt returns ENOPROTOOPT even for a listening
-    // AF_UNIX socket. Probe accept() nonblocking, preserving a pending connection in the
-    // same accept queue used by the epoll bridge. This is required by sd_is_socket().
+    // Darwin's getsockopt(SO_ACCEPTCONN) returns ENOPROTOOPT, but proc_pidfdinfo
+    // exposes the actual socket option without consuming a pending connection.
+    // An accept() probe is unsafe across systemd socket activation: PID 1 can
+    // swallow the request into its process-local queue before userdbd inherits
+    // the listener, leaving the client waiting for its 45-second timeout.
     if (!val || !len || *len < sizeof(int)) return -L_EINVAL;
-    int flags = fcntl(fd, F_GETFL, 0);
-    if (flags < 0) return lerr();
-    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) return lerr();
-    struct sockaddr_storage sa; socklen_t salen = sizeof sa;
-    int cfd = accept(fd, (struct sockaddr*)&sa, &salen);
-    int saved_errno = errno;
-    fcntl(fd, F_SETFL, flags);
-    int answer = 0;
-    if (cfd >= 0) {
-      acceptq_push(fd, cfd, (struct sockaddr*)&sa, salen);
-      answer = 1;
-    } else if (saved_errno == EAGAIN || saved_errno == EWOULDBLOCK) {
-      answer = 1;
-    } else if (saved_errno != EINVAL && saved_errno != EOPNOTSUPP) {
-      errno = saved_errno;
-      return lerr();
-    }
+    struct socket_fdinfo info;
+    int got = proc_pidfdinfo(getpid(), fd, PROC_PIDFDSOCKETINFO, &info, sizeof info);
+    if (got != sizeof info) return got < 0 ? lerr() : -L_EIO;
+    int answer = !!(info.psi.soi_options & SO_ACCEPTCONN);
     memcpy(val, &answer, sizeof answer);
     *len = sizeof answer;
     return 0;
@@ -1632,18 +1565,14 @@ static long sys_epoll_ctl(int epfd, int op, int fd, struct lin_epoll_event* uev)
   return r;
 }
 
-static long sys_epoll_pwait(int epfd, struct lin_epoll_event* uev, int maxevents, int timeout_ms) {
+static long sys_epoll_wait_ts(int epfd, struct lin_epoll_event* uev, int maxevents,
+                             const struct timespec* tsp, const char* wait_name,
+                             double requested_ms) {
   if (maxevents <= 0) return -L_EINVAL;
   if (!uev) return -L_EFAULT;
   if (maxevents > 4096) maxevents = 4096;
   struct kevent* kv = (struct kevent*)calloc((size_t)maxevents, sizeof *kv);
   if (!kv) return -L_ENOMEM;
-  struct timespec ts, *tsp = NULL;
-  if (timeout_ms >= 0) {
-    ts.tv_sec = timeout_ms / 1000;
-    ts.tv_nsec = (long)(timeout_ms % 1000) * 1000000L;
-    tsp = &ts;
-  }
   int* idents = (int*)calloc((size_t)maxevents, sizeof *idents);   // for coalescing by fd
   if (!idents) { free(kv); return -L_ENOMEM; }
 
@@ -1670,8 +1599,8 @@ static long sys_epoll_pwait(int epfd, struct lin_epoll_event* uev, int maxevents
                              i ? "," : "", (int)kv[i].ident, kv[i].filter,
                              (unsigned)kv[i].flags, (long)kv[i].data);
     }
-    fprintf(stderr, "[polllog] t=%.2f epoll_pwait req=%dms act=%.2fms ret=%d fds=[%s]\n",
-            now_ms(), timeout_ms, now_ms() - t0, n, fds);
+    fprintf(stderr, "[polllog] t=%.2f %s req=%.3fms act=%.2fms ret=%d fds=[%s]\n",
+            now_ms(), wait_name, requested_ms, now_ms() - t0, n, fds);
   }
   if (n < 0) { long e = lerr(); free(kv); free(idents); return e; }
 
@@ -1694,26 +1623,19 @@ static long sys_epoll_pwait(int epfd, struct lin_epoll_event* uev, int maxevents
         struct stat st;
         int has_data = 0;
         if (fstat(rfd, &st) == 0 && S_ISSOCK(st.st_mode)) {
-          // LISTENING socket: the kqueue does not fire EVFILT_READ for a STREAM listen socket with
-          // a pending connection, so prove readiness by non-blocking accept() and re-queue the
-          // connection for the guest's accept(). macOS has no working SO_ACCEPTCONN getsockopt, so
-          // detect "listening" from accept()'s errno instead: EAGAIN == listening/empty,
-          // EINVAL/EOPNOTSUPP/ENOTSOCK == not a listening socket.
-          int fl = fcntl(rfd, F_GETFL, 0);
-          fcntl(rfd, F_SETFL, fl | O_NONBLOCK);
-          struct sockaddr_storage sa; socklen_t salen = sizeof sa;
-          int cfd = accept(rfd, (struct sockaddr*)&sa, &salen);
-          if (cfd >= 0) {
-            acceptq_push(rfd, cfd, (struct sockaddr*)&sa, salen);
-            has_data = 1;
-            int c2;
-            while ((c2 = accept(rfd, (struct sockaddr*)&sa, &salen)) >= 0)
-              acceptq_push(rfd, c2, (struct sockaddr*)&sa, salen);
-          } else if (errno == EINVAL || errno == EOPNOTSUPP || errno == ENOTSOCK) {
+          // Query the kernel's listen queue without accepting the connection.
+          // PID 1 may pass this listener to a newly activated service; an
+          // accepted connection parked in our process-local queue would be
+          // invisible to that service and its client would time out.
+          struct socket_fdinfo info;
+          int got = proc_pidfdinfo(getpid(), rfd, PROC_PIDFDSOCKETINFO,
+                                   &info, sizeof info);
+          if (got == sizeof info && (info.psi.soi_options & SO_ACCEPTCONN)) {
+            has_data = info.psi.soi_qlen > 0;
+          } else {
             char tmp;
             has_data = recv(rfd, &tmp, 1, MSG_PEEK | MSG_DONTWAIT) > 0;
           }
-          fcntl(rfd, F_SETFL, fl);
         } else if (pidfd_shim_pid(rfd) > 0) {
           // pidfd: a kqueue watching a child pid; "readable" once the child exits.
           struct kevent kev;
@@ -1800,6 +1722,42 @@ static long sys_epoll_pwait(int epfd, struct lin_epoll_event* uev, int maxevents
   free(kv);
   free(idents);
   return out;
+}
+
+static long sys_epoll_pwait(int epfd, struct lin_epoll_event* uev,
+                            int maxevents, int timeout_ms) {
+  struct timespec ts;
+  const struct timespec* tsp = NULL;
+  if (timeout_ms >= 0) {
+    ts.tv_sec = timeout_ms / 1000;
+    ts.tv_nsec = (long)(timeout_ms % 1000) * 1000000L;
+    tsp = &ts;
+  }
+  return sys_epoll_wait_ts(epfd, uev, maxevents, tsp, "epoll_pwait", timeout_ms);
+}
+
+static long sys_epoll_pwait2(int epfd, struct lin_epoll_event* uev, int maxevents,
+                             const struct lin_timespec* timeout, const void* sigmask,
+                             size_t sigsetsize) {
+  // Linux checks sigsetsize only when a mask is supplied. The shim does not have
+  // an atomic guest-signal-mask + kqueue wait operation, so refuse that form
+  // before consuming events rather than silently pretending to apply the mask.
+  if (sigmask) {
+    if (sigsetsize != sizeof(uint64_t)) return -L_EINVAL;
+    return -L_EOPNOTSUPP;
+  }
+  struct timespec ts;
+  const struct timespec* tsp = NULL;
+  double requested_ms = -1;
+  if (timeout) {
+    if (timeout->tv_sec < 0 || timeout->tv_nsec < 0 || timeout->tv_nsec >= 1000000000LL)
+      return -L_EINVAL;
+    ts.tv_sec = (time_t)timeout->tv_sec;
+    ts.tv_nsec = (long)timeout->tv_nsec;
+    tsp = &ts;
+    requested_ms = (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
+  }
+  return sys_epoll_wait_ts(epfd, uev, maxevents, tsp, "epoll_pwait2", requested_ms);
 }
 
 // ---------------------------------------------------------------------------
@@ -2083,7 +2041,7 @@ static long sys_socket(int ldomain, int ltype, int protocol) {
                             (ltype & L_SOCK_CLOEXEC) != 0, (unsigned)syscalls_guest_pid());
       return fd < 0 ? lerr() : fd;
     }
-    if (protocol != 15 || (ltype & ~(L_SOCK_NONBLOCK | L_SOCK_CLOEXEC)) != SOCK_DGRAM)
+    if (protocol != 15 || (base_type != SOCK_DGRAM && base_type != SOCK_RAW))
       return -L_EAFNOSUPPORT;
     int nonblock = (ltype & L_SOCK_NONBLOCK) != 0, cloexec = (ltype & L_SOCK_CLOEXEC) != 0;
     // A host AF_UNIX datagram socket: never connected, never written to, so poll()/epoll never
@@ -2276,9 +2234,7 @@ static long sys_connect(int fd, const void* uaddr, uint32_t len) {
 static long sys_accept4(int fd, unsigned long uaddr, unsigned long ulen, int flags) {
   struct sockaddr_storage hs; socklen_t hlen = sizeof hs;
   memset(&hs, 0, sizeof hs);
-  int nfd = acceptq_pop(fd, (struct sockaddr*)&hs, &hlen);   // re-queued by the epoll recovery path?
-  if (nfd < 0)
-    nfd = accept(fd, (struct sockaddr*)&hs, &hlen);
+  int nfd = accept(fd, (struct sockaddr*)&hs, &hlen);
   if (getenv("RDNETSOCK")) {
     FILE* f = fopen("/tmp/rd_netsock_dbg.txt", "a");
     if (f) { fprintf(f, "pid=%d ACCEPT fd=%d -> %d errno=%d\n", (int)getpid(), fd, nfd, nfd < 0 ? errno : 0); fclose(f); }
@@ -2768,6 +2724,7 @@ int net_owns_syscall(unsigned long nr) {
     case LSYS_epoll_create1:
     case LSYS_epoll_ctl:
     case LSYS_epoll_pwait:
+    case LSYS_epoll_pwait2:
     case LSYS_pipe2:
     case LSYS_pselect6:
     case LSYS_ppoll:
@@ -2797,7 +2754,6 @@ int net_owns_syscall(unsigned long nr) {
 
 long net_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigned long a2,
                  unsigned long a3, unsigned long a4, unsigned long a5) {
-  (void)a5;
   switch (nr) {
     case LSYS_eventfd2:
       return sys_eventfd2((unsigned int)a0, (int)(long)a1);
@@ -2810,6 +2766,10 @@ long net_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigned 
     case LSYS_epoll_pwait:
       return sys_epoll_pwait((int)(long)a0, (struct lin_epoll_event*)a1,
                              (int)(long)a2, (int)(long)a3);   // a4/a5: sigmask — ignored
+    case LSYS_epoll_pwait2:
+      return sys_epoll_pwait2((int)(long)a0, (struct lin_epoll_event*)a1,
+                              (int)(long)a2, (const struct lin_timespec*)a3,
+                              (const void*)a4, (size_t)a5);
 
     case LSYS_pipe2:
       return sys_pipe2((int*)a0, (int)(long)a1);

@@ -1,0 +1,7 @@
+#!/bin/sh
+# Launch the same init boot as ./run.sh --init from this development checkout.
+set -eu
+macos_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_dir=$(CDPATH= cd -- "$macos_dir/../../../.." && pwd)
+export SHIM_GUI_OVERRIDE="$macos_dir/shim_gui"
+exec "$repo_dir/run.sh" --init

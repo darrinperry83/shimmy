@@ -21,7 +21,7 @@ void net_set_unix_prefix(const char* host_prefix);
 void net_note_spawned_child(int pid);
 
 // True for the syscall numbers this module implements. Must cover at least:
-//   19 eventfd2, 20/21/22 epoll_create1/epoll_ctl/epoll_pwait, 23/24 dup/dup3(if desired),
+//   19 eventfd2, 20/21/22 epoll_create1/epoll_ctl/epoll_pwait, 441 epoll_pwait2,
 //   59 pipe2, 72 pselect6, 73 ppoll,
 //   198..207 socket, socketpair, bind, listen, accept, connect, getsockname,
 //             getpeername, sendto, recvfrom,

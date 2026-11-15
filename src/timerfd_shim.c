@@ -21,11 +21,16 @@ struct timer_slot {
   dispatch_source_t source;
   linux_itimerspec spec;
   int64_t due_ns;
+  uint64_t generation;
+  int worker_started;
 };
 static struct timer_slot slots[MAX_TIMERFD];
 static int count;
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t changed = PTHREAD_COND_INITIALIZER;
 static dispatch_queue_t queue;
+static int fork_child_mode;
+static uint64_t next_generation = 1;
 static _Atomic int trace_arms, trace_fires;
 static void trace_timer(const char* kind, int fd, int64_t value, int64_t interval) {
   const char* enabled = getenv("RDTIMERFD_TRACE");
@@ -106,6 +111,71 @@ static struct timer_slot* lookup(int fd) {
   for (int i = 0; i < count; i++) if (slots[i].fd == fd) return &slots[i];
   return NULL;
 }
+
+// libdispatch explicitly cannot continue a timer source copied by fork() from a
+// multi-threaded process. The child keeps its timerfd socketpair and uses a small
+// pthread waiter instead. This path also covers timerfds created by that child.
+struct child_timer { int index; uint64_t generation; };
+static void* child_timer_wait(void* arg) {
+  struct child_timer c = *(struct child_timer*)arg;
+  free(arg);
+  pthread_mutex_lock(&lock);
+  for (;;) {
+    struct timer_slot* s = &slots[c.index];
+    if (s->fd < 0 || s->generation != c.generation) break;
+    if (!s->due_ns) { pthread_cond_wait(&changed, &lock); continue; }
+    int64_t now = now_ns(s->clockid);
+    if (now < s->due_ns) {
+      int64_t delay = s->due_ns - now;
+      if (delay > 60000000000LL) delay = 60000000000LL;
+      struct timespec until;
+      clock_gettime(CLOCK_REALTIME, &until);
+      int64_t nsec = (int64_t)until.tv_nsec + delay % 1000000000LL;
+      until.tv_sec += delay / 1000000000LL + nsec / 1000000000LL;
+      until.tv_nsec = nsec % 1000000000LL;
+      pthread_cond_timedwait(&changed, &lock, &until);
+      continue;
+    }
+    int64_t interval = ns(s->spec.it_interval);
+    uint64_t ticks = interval ? 1 + (uint64_t)((now - s->due_ns) / interval) : 1;
+    if (interval && ticks <= (uint64_t)(INT64_MAX / interval))
+      s->due_ns += (int64_t)ticks * interval;
+    else s->due_ns = 0;
+    (void)write(s->writer, &ticks, sizeof ticks);
+  }
+  pthread_mutex_unlock(&lock);
+  return NULL;
+}
+
+void timerfd_shim_prepare_fork(void) { pthread_mutex_lock(&lock); }
+void timerfd_shim_parent_after_fork(void) { pthread_mutex_unlock(&lock); }
+void timerfd_shim_child_after_fork(void) {
+  // The parent may have owned the dispatch queue; never cancel or release those
+  // inherited objects in the child. Its worker threads no longer exist here.
+  lock = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
+  changed = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
+  queue = NULL;
+  fork_child_mode = 1;
+  for (int i = 0; i < count; i++) {
+    slots[i].source = NULL;
+    slots[i].worker_started = 0;
+    slots[i].generation = next_generation++;
+  }
+}
+
+static int start_child_worker(int index) {
+  struct timer_slot* s = &slots[index];
+  if (s->worker_started) return 0;
+  struct child_timer* c = malloc(sizeof *c);
+  if (!c) return -12;
+  *c = (struct child_timer){ index, s->generation };
+  pthread_t t;
+  int err = pthread_create(&t, NULL, child_timer_wait, c);
+  if (err) { free(c); return -11; }
+  pthread_detach(t);
+  s->worker_started = 1;
+  return 0;
+}
 long timerfd_create_shim(int clockid, int flags) {
   if (clockid != 0 && clockid != 1 && clockid != 7) return -22;
   if (flags & ~(L_NONBLOCK | L_CLOEXEC)) return -22;
@@ -131,7 +201,7 @@ long timerfd_create_shim(int clockid, int flags) {
   // would also close the parent's timerfd read end.
   pair[0] = shim_fd_reserve(pair[0]);
   pair[1] = shim_fd_reserve(pair[1]);
-  if (!queue) queue = dispatch_queue_create("org.linux-shim.timerfd", DISPATCH_QUEUE_SERIAL);
+  if (!fork_child_mode && !queue) queue = dispatch_queue_create("org.linux-shim.timerfd", DISPATCH_QUEUE_SERIAL);
   // Reuse a freed slot (fd == -1). The old code always appended at slots[count] and only grew
   // `count`, so 32 create/close cycles (systemd churns a restart timer + watchdog per unit) filled
   // the registry and timerfd_create started returning -EMFILE ("Failed to install restart timer:
@@ -141,13 +211,16 @@ long timerfd_create_shim(int clockid, int flags) {
   struct timer_slot* slot = &slots[index];
   memset(slot, 0, sizeof *slot);
   slot->fd = pair[0]; slot->writer = pair[1]; slot->clockid = clockid;
-  slot->source = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
-  if (!slot->source) { close(pair[0]); close(pair[1]); pthread_mutex_unlock(&lock); return -12; }
-  dispatch_set_context(slot->source, slot);
-  dispatch_source_set_event_handler_f(slot->source, fire);
-  dispatch_source_set_cancel_handler_f(slot->source, cancelled);
-  dispatch_source_set_timer(slot->source, DISPATCH_TIME_FOREVER, DISPATCH_TIME_FOREVER, 0);
-  dispatch_resume(slot->source);
+  slot->generation = next_generation++;
+  if (!fork_child_mode) {
+    slot->source = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
+    if (!slot->source) { close(pair[0]); close(pair[1]); pthread_mutex_unlock(&lock); return -12; }
+    dispatch_set_context(slot->source, slot);
+    dispatch_source_set_event_handler_f(slot->source, fire);
+    dispatch_source_set_cancel_handler_f(slot->source, cancelled);
+    dispatch_source_set_timer(slot->source, DISPATCH_TIME_FOREVER, DISPATCH_TIME_FOREVER, 0);
+    dispatch_resume(slot->source);
+  }
   if (index == count) count++;
   trace_timer("create", slot->fd, clockid, flags);
   pthread_mutex_unlock(&lock);
@@ -183,15 +256,21 @@ long timerfd_settime_shim(int fd, int flags, const linux_itimerspec* next, linux
   trace_timer((flags & 1) ? "arm-absolute" : "arm-relative", fd, value, interval);
   if (!value) {
     slot->due_ns = 0;
-    dispatch_source_set_timer(slot->source, DISPATCH_TIME_FOREVER, DISPATCH_TIME_FOREVER, 0);
+    if (fork_child_mode) pthread_cond_broadcast(&changed);
+    else dispatch_source_set_timer(slot->source, DISPATCH_TIME_FOREVER, DISPATCH_TIME_FOREVER, 0);
   } else {
     int64_t now = now_ns(slot->clockid);
     int64_t delay = (flags & 1) ? value - now : value;
     if (delay < 0) delay = 0;
     trace_timer("schedule-now-and-delay", fd, now, delay);
-    slot->due_ns = now + delay;
-    dispatch_source_set_timer(slot->source, dispatch_time(DISPATCH_TIME_NOW, delay),
-                              interval ? (uint64_t)interval : DISPATCH_TIME_FOREVER, 1000000);
+    slot->due_ns = delay > INT64_MAX - now ? INT64_MAX : now + delay;
+    if (fork_child_mode) {
+      int index = (int)(slot - slots);
+      int rc = start_child_worker(index);
+      if (rc < 0) { slot->due_ns = 0; pthread_mutex_unlock(&lock); return rc; }
+      pthread_cond_broadcast(&changed);
+    } else dispatch_source_set_timer(slot->source, dispatch_time(DISPATCH_TIME_NOW, delay),
+                                     interval ? (uint64_t)interval : DISPATCH_TIME_FOREVER, 1000000);
   }
   pthread_mutex_unlock(&lock);
   return 0;
@@ -212,9 +291,12 @@ void timerfd_shim_closed(int fd) {
     trace_timer("close", fd, 0, 0);
     slot->fd = -1;
     if (slot->writer >= 0) { shim_fd_unreserve(slot->writer); close(slot->writer); slot->writer = -1; }
-    dispatch_source_cancel(slot->source);
+    if (fork_child_mode) pthread_cond_broadcast(&changed);
+    else dispatch_source_cancel(slot->source);
     slot->source = NULL;
     slot->due_ns = 0;
+    slot->generation = next_generation++;
+    slot->worker_started = 0;
   }
   pthread_mutex_unlock(&lock);
 }

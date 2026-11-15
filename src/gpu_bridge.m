@@ -4,8 +4,8 @@
 //   gpu_bridge.m  — the MTLDevice/MTLCommandQueue, gpu_init/gpu_hypercall/gpu_run_event_loop
 //   window.m      — the NSWindow + CAMetalLayer and every gpuwin_* entry point
 //
-// gpu_init() deliberately creates *only* the device and queue: it runs long before the guest
-// has asked for a window, and window.m pulls the device back out through gpu_metal_device().
+// gpu_init() can explicitly prewarm only the device and queue. Normal startup now
+// waits until the console or an app asks for Metal through gpu_metal_device().
 // That accessor is dispatch_once-guarded, so any thread may be first to need it.
 //
 // gpu_run_event_loop() is the main thread's terminal call: -[NSApp run] never returns. The
@@ -105,9 +105,7 @@ long gpu_hypercall(struct gpu_req* r) {
 // Main thread only. Never returns.
 void gpu_run_event_loop(void) {
   [NSApplication sharedApplication];
-  // Non-bundled binary: without an explicit regular policy the process stays a background
-  // agent and its window never comes to the front.
-  [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
-  [NSApp activateIgnoringOtherApps:YES];
+  // Every guest process runs this loop, including systemd services. Keep them background
+  // agents; gpuwin_ensure_app() promotes a process only when it opens a visible window.
   [NSApp run];
 }
