@@ -557,6 +557,12 @@ static void t_sockopt_af(void) {
   CHECK(SC3(N_socket, 16 /*AF_NETLINK*/, LSOCK_DGRAM,
             9 /*NETLINK_AUDIT*/) == -97 /*EAFNOSUPPORT*/,
         "NETLINK_AUDIT must fail without an audit backend");
+  CHECK(SC3(N_socket, 16 /*AF_NETLINK*/, LSOCK_DGRAM,
+            0 /*NETLINK_ROUTE*/) == -97 /*EAFNOSUPPORT*/,
+        "NETLINK_ROUTE must fail without link and address dump support");
+  CHECK(SC3(N_socket, 16 /*AF_NETLINK*/, 3 /*SOCK_RAW*/,
+            15 /*NETLINK_KOBJECT_UEVENT*/) == -97 /*EAFNOSUPPORT*/,
+        "only the monitored datagram netlink type is supported");
 
   long s6 = SC3(N_socket, LAF_INET6, LSOCK_DGRAM, 0);
   CHECK(s6 >= 0, "socket(linux AF_INET6=10 -> darwin 30) -> %ld", s6);
@@ -574,9 +580,18 @@ static void t_sockopt_af(void) {
   OK("AF_INET6 reported back to the guest as 10, len 28");
   close((int)s6);
 
-  long monitor = SC3(N_socket, 16 /*AF_NETLINK*/, LSOCK_DGRAM, 0);
-  CHECK(monitor >= 0, "NETLINK_ROUTE monitor socket -> %ld", monitor);
-  if (monitor >= 0) close((int)monitor);
+  long monitor = SC3(N_socket, 16 /*AF_NETLINK*/, LSOCK_DGRAM,
+                     15 /*NETLINK_KOBJECT_UEVENT*/);
+  CHECK(monitor >= 0, "KOBJECT_UEVENT monitor socket -> %ld", monitor);
+  if (monitor >= 0) {
+    int buf = 8192;
+    CHECK(SC5(N_setsockopt, monitor, LSOL_SOCKET, 8 /*SO_RCVBUF*/,
+              &buf, sizeof buf) == 0, "monitor SO_RCVBUF maps to a real socket buffer");
+    CHECK(SC5(N_setsockopt, monitor, 270 /*SOL_NETLINK*/, 3 /*NETLINK_PKTINFO*/,
+              &on, sizeof on) == -92 /*ENOPROTOOPT*/,
+          "NETLINK_PKTINFO must fail without ancillary packet-info support");
+    close((int)monitor);
+  }
 }
 
 static void t_acceptconn(void) {

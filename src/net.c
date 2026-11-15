@@ -1977,15 +1977,16 @@ static long sys_pipe2(int* ufd, int flags) {
 // sockets
 // ---------------------------------------------------------------------------
 static long sys_socket(int ldomain, int ltype, int protocol) {
-  // AF_NETLINK does not exist on macOS. libudev only needs a netlink socket to (a) open and
-  // (b) bind so its hotplug monitor "exists"; the guest never receives actual hotplug events,
-  // so a quiet datagram socket is faithful ("subscribed, nothing arrives") — and it is the
-  // difference between KWin's GpuManager booting (udev_monitor_new_from_netlink returns non-NULL)
-  // and a null deref. See the GpuManager crash note in the KDE integration docs.
+  // AF_NETLINK does not exist on macOS. The one limited compatibility surface
+  // here is libudev's KOBJECT_UEVENT datagram monitor: it can open and bind a
+  // quiet socket, but no host hotplug events are translated yet. In particular,
+  // NETLINK_ROUTE is NOT a route/link dump backend. systemd-resolved requests
+  // RTM_GETLINK/GETADDR dumps and would otherwise receive a success-shaped
+  // socket that can never answer. Reject unsupported protocols at creation.
   if (ldomain == L_AF_NETLINK) {
-    // NETLINK_AUDIT (9) has no backend here. Fail at socket creation so libaudit can
-    // disable optional audit, instead of promising a socket and failing its sendto().
-    if (protocol == 9) return -L_EAFNOSUPPORT;
+    // NETLINK_AUDIT (9) also has no backend; fail before libaudit tries sendto.
+    if (protocol != 15 || (ltype & ~(L_SOCK_NONBLOCK | L_SOCK_CLOEXEC)) != SOCK_DGRAM)
+      return -L_EAFNOSUPPORT;
     int nonblock = (ltype & L_SOCK_NONBLOCK) != 0, cloexec = (ltype & L_SOCK_CLOEXEC) != 0;
     // A host AF_UNIX datagram socket: never connected, never written to, so poll()/epoll never
     // reports it readable and recv() returns EAGAIN — exactly a netlink socket with no events.

@@ -118,6 +118,21 @@ and left zero disposable processes. These checks do not claim a clean boot:
 `SOL_NETLINK` options 11, 12 and 3 returning `ENOPROTOOPT`; Shimmy does not
 implement those netlink options, so the service failure remains honest.
 
+The next netlink audit found a more fundamental limit: the old socket path
+returned a quiet AF_UNIX datagram for *every* AF_NETLINK protocol. In
+[systemd 261's resolver source](https://github.com/systemd/systemd/blob/v261/src/resolve/resolved-manager.c),
+`manager_rtnl_listen()` needs `NETLINK_ROUTE` link and address dumps, which
+that quiet socket cannot provide. Shimmy now exposes only its existing
+`NETLINK_KOBJECT_UEVENT` datagram monitor subset and rejects route, audit,
+unknown protocols and unsupported socket types at creation. A focused native
+test verifies the monitor's real `SO_RCVBUF` mapping, rejects unsupported
+`SOL_NETLINK` options, and rejects the unsupported protocols. CLI and GUI
+builds passed. A fresh isolated full boot still reached login with both D-Bus
+broker processes after settling, then cleaned up all test processes. The
+resolver now reports `Address family not supported by protocol` immediately
+instead of failing later on netlink options. **This does not make resolver or
+networkd functional.** Real route/link events and dump replies remain needed.
+
 ## Isolated interactive terminal result (2026-11-15)
 
 `RD_LOGIN_ROOT=<private build/ clone> RD_TEST_JOB_CONTROL=1 python3
