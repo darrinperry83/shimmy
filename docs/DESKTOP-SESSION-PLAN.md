@@ -7,8 +7,8 @@ claim that the desktop session or full rdmetal renderer already works.
 
 Boot `systemd` in the Arch root, authenticate a Linux user, start an installed Wayland desktop,
 lock and unlock it, log out, and return to the greeter or TTY that started the session. Keep
-the existing Shimmy host window throughout the first windowed mode. Full display takeover is
-the next product mode, using the same Linux boot, seat, GPU and session stack.
+the existing Shimmy host window as a development and recovery mode. Full display takeover is
+the primary product mode, using the same Linux boot, seat, GPU and session stack.
 Ctrl+Option+F1–F6 still shows text consoles; F7 returns to the graphical seat when one is active.
 Hyprland is the first compositor tested; Plasma and other compatible desktops must use the
 same host contract. Users choose and configure their display manager, greeter, desktop,
@@ -69,8 +69,8 @@ Mac: one persistent shim_gui host process
                             persistent shim_gui presenter
 ```
 
-The presenter must be a host service owned by the original GUI process. The first target is
-the existing Shimmy window on one selected display. Full takeover must give the Linux
+The presenter must be a host service owned by the original GUI process. The existing Shimmy
+window remains a diagnostic and recovery target. Full takeover must give the Linux
 compositor a virtual KMS output for each selected physical display, with actual resolution,
 scale, refresh and topology, while the host presenter routes those outputs to the selected
 displays. It may need one host-owned presentation surface per display, never one per guest
@@ -151,6 +151,10 @@ frame time, CPU use, memory and power against the current hybrid path.
 `RDGPU_PRESENT_STATS=1` now reports CPU-backed host presentation paths and the framebuffer
 payload bytes handed to Metal upload or a CGImage copy. These counters establish a CPU
 presentation baseline; they do not measure GPU draw coverage or total memory traffic.
+The opt-in `RDGPU_SCANOUT_DIRECT_SOURCE=1` proof arm submits an IOSurface directly to the
+existing scanout service after a Metal completion fence, without scheduling a WindowServer
+drawable when the handoff succeeds. It has only a build check so far; sustained display,
+flick/recovery and input behavior still need live validation before enabling it by default.
 
 Performance acceptance is comparative and trace-based: ordinary composition must have no
 per-frame CPU framebuffer readback/upload, no unbounded waits on the UI thread, and a bounded
@@ -207,9 +211,10 @@ the Linux session.
    DRM/GBM/EGL interfaces. The mock fixture is off; GPU and fence evidence is recorded.
    Unsupported operations fail visibly during development. This gate does not imply Vulkan,
    desktop OpenGL, video acceleration or compute is complete.
-3. **Single-window bridge.** An isolated systemd boot moves VT → test GPU surface → VT in one
-   persistent NSWindow. A second guest process cannot open another desktop window. Input,
-   resize, process exit, stale-frame rejection and bounded queue tests pass.
+3. **Takeover presentation.** Build on the existing visible direct scanout path. Prove the
+   completed GPU source reaches each selected display without a simultaneous WindowServer
+   drawable present, sustained across frames and with a tested flick/recovery route. Measure
+   remaining Apple UI flashes and CPU copies; do not call this complete while they remain.
 4. **Authenticated session.** Disposable Arch root boots an installed display manager (first
    reference: greetd), logs in a throwaway user via PAM, starts an installed Hyprland session,
    launches an app, logs out and returns to the greeter. A failed password does not start a
@@ -218,11 +223,10 @@ the Linux session.
 5. **Lock and recovery.** Lock/unlock is authenticated; VT round-trip remains locked; compositor
    crash and logout clear old pixels and release device/input ownership. Test both screens and
    window resize/hotplug without changing the live Mac display configuration.
-6. **Windowed readiness.** Repeat the cycle on the installed root with the user's participation
-   for password entry, then a cold boot. Compare performance and power to the baseline and
-   document known unsupported apps/operations. Plasma reuses the presenter and session
-   contract rather than receiving a separate host integration. Update the README and
-   `docs/HOW_IT_WORKS.md` to describe only paths proven by these gates.
+6. **Windowed recovery.** Keep a reliable windowed presentation of the same boot and session
+   for debugging and safe return from takeover. A second guest process cannot open its own
+   desktop window. Test input, resize, exit and stale-frame rejection; this is a supporting
+   mode, not the main product experience.
 7. **Full display takeover.** Extend the same session and virtual DRM device across selected
    physical displays. Verify real per-display modes, scale, refresh, hotplug, VT switching,
    lock, crash recovery and sustained GPU presentation. Suppress macOS UI on those displays
@@ -235,6 +239,11 @@ the Linux session.
    evidence for each additional advertised graphics API, including Vulkan, desktop OpenGL,
    video acceleration and compute where implemented. Record performance and unsupported
    features per API rather than treating a working compositor as proof of full compatibility.
+
+Before product readiness, repeat the takeover cycle on the installed root with the user's
+participation for password entry, then a cold boot. Compare performance and power to the
+baseline; test Plasma through the same device/session contract; update the README and
+`docs/HOW_IT_WORKS.md` to describe only paths proven by these gates.
 
 Use disposable copy-on-write roots for service, package and credential tests. Do not change
 the live root or restart the user's current GUI merely to run a test. Keep the current TTY

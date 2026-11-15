@@ -765,6 +765,15 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
     // that cannot reach the compositor. The top-level invocation worked only because RDDRM was in
     // the launch environment; the exec'd child got a fresh environment without it.
     "RDDRM", "RDDRM_TRACE", "RDGPU_PRESENT_STATS", "RDNATIVE_SESSION",
+    // A systemd-started compositor is a re-exec'd host shim. The scanout and output
+    // selection flags must survive that boundary or PID 1 can start in takeover while
+    // the compositor silently falls back to an ordinary Mac window.
+    "RDGPU_SCANOUT", "RDGPU_SCANOUT_DISPLAY", "RDGPU_SCANOUT_DISPLAY2",
+    "RDGPU_SCANOUT_DIRECT_SOURCE", "RDNATIVE_MODE", "RDNATIVE_SPLIT_OUTPUT",
+    "RDNATIVE_FIT_DISPLAY", "RDNATIVE_FIT_OUTPUT_1", "RDNATIVE_FIT_OUTPUT_2",
+    "RDNATIVE_TARGET_DISPLAY_ID", "RDNATIVE_EXTRA_TARGET_DISPLAY_ID",
+    "RDNATIVE_TARGET_ROLE", "RDNATIVE_KIOSK", "RDFLICK_KEY", "RDFLICK_ON",
+    "RDNATIVE_FLICK_KEY", "RDGPU_SCANOUT_SELFCHECK", "RDGPU_SCANOUT_TIMEOUT_MS",
     "RDX18_NOMT", "RDX18_NOTSD", "RDX18_NOPLAIN", "RDX18_MIXN", "RDX18_PARTIAL",
     "RDX18_BRPERSITE",
     "X11SRV_DEBUG", "X11SRV_DUMP", "WLSRV_DEBUG", "WLSRV_DUMP", "WLSRV_DUMP_MAX",

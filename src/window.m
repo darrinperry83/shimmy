@@ -239,7 +239,9 @@ static void flick_parse(const char* spec, NSEventModifierFlags* mods, unsigned s
   while (spec[i] && i < sizeof buf - 1) { buf[i] = spec[i]; i++; }
   buf[i] = 0;
   char* save = NULL;
-  for (char* tok = strtok_r(buf, "+", &save); tok; tok = strtok_r(NULL, "+", &save)) {
+  // The declarative config uses "ctrl-alt-f" while the older host knob uses
+  // "Ctrl+Alt+Shift+Space". Both spellings must reach the same physical key parser.
+  for (char* tok = strtok_r(buf, "+-", &save); tok; tok = strtok_r(NULL, "+-", &save)) {
     while (*tok == ' ' || *tok == '\t') tok++;
     size_t n = strlen(tok);
     while (n && (tok[n - 1] == ' ' || tok[n - 1] == '\t')) tok[--n] = 0;
@@ -253,6 +255,9 @@ static void flick_parse(const char* spec, NSEventModifierFlags* mods, unsigned s
 
 static void flick_init(void) {
   const char* spec = getenv("RDNATIVE_FLICK_KEY");
+  // bin/shimmy's declarative config emits RDFLICK_KEY. Accept it as the public spelling
+  // while retaining the older host-side RDNATIVE_FLICK_KEY override for existing runs.
+  if (!spec || !*spec) spec = getenv("RDFLICK_KEY");
   const int disabled = (spec && *spec == '0');
   const char* combo = (!disabled && spec && *spec) ? spec : NULL;
   gFlickEnabled = 0;
@@ -1844,7 +1849,43 @@ static void rdgpu_scanout_selfcheck(IOSurfaceRef surface) {
 static long present_source(id<MTLTexture> src, id<MTLCommandQueue> q, int may_block,
                            dispatch_block_t done, uint64_t feedbackSequence) {
   CAMetalLayer* layer = gLayer;                    // assigned once, on main, before we get here
-  if (!layer || !gPipe || !q) return -19;
+  if (!q) return -19;
+
+  // Takeover proof arm: present the composited IOSurface directly. The legacy arm below
+  // acquires a CAMetalLayer drawable and schedules it with WindowServer before requesting
+  // scanout; that extra host present can put the Mac desktop back over the Linux frame.
+  // Keep this opt-in until a sustained live scanout and recovery test has passed. On a
+  // failed handoff the old window-present path remains available as a fallback.
+  const char* directSource = getenv("RDGPU_SCANOUT_DIRECT_SOURCE");
+  if (gpuwin_takeover_active() && directSource && *directSource && *directSource != '0' &&
+      src.iosurface) {
+    // The producer and this fence use the same command queue. Waiting for the fence
+    // finishes prior Metal draws into src before the scanout service reads its IOSurface.
+    id<MTLCommandBuffer> fence = [q commandBuffer];
+    if (fence) {
+      [fence commit];
+      [fence waitUntilCompleted];
+      if (fence.status == MTLCommandBufferStatusCompleted) {
+        rdgpu_scanout_selfcheck(src.iosurface);  // opt-in first-frame diagnostics only
+        int sr = rdgpu_scanout_present(src.iosurface, RDGPU_SCANOUT_ROLE_PRIMARY);
+        static unsigned directFrames;
+        unsigned n = ++directFrames;
+        if (n <= 3 || n % 120 == 0 || sr != 0)
+          fprintf(stderr, "[rdgpu-scanout] direct-source frame=%u id=%u %zux%zu rc=%d "
+                          "windowserver_present=0\n", n, (unsigned)IOSurfaceGetID(src.iosurface),
+                  IOSurfaceGetWidth(src.iosurface), IOSurfaceGetHeight(src.iosurface), sr);
+        if (sr == 0) {
+          if (done) done();
+          if (feedbackSequence) rd_feedback_finish(0, feedbackSequence);
+          return 0;
+        }
+      } else {
+        fprintf(stderr, "[rdgpu-scanout] direct-source Metal fence failed status=%ld; "
+                        "using window fallback\n", (long)fence.status);
+      }
+    }
+  }
+  if (!layer || !gPipe) return -19;
 
   if (dynamic_regions_enabled()) {
     NSArray<RDRegionFrame*>* regions = region_frames_snapshot();
