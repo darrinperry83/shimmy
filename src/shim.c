@@ -28,6 +28,7 @@
 #include <sys/stat.h>
 #include <dirent.h>
 #include <errno.h>
+#include <limits.h>
 #include <fcntl.h>
 #include <fcntl.h>
 #include <mach/mach_vm.h>
@@ -1219,16 +1220,21 @@ static long do_clone(const arm_thread_state64_t* ts);
 static long do_clone3(const arm_thread_state64_t* ts) {
   unsigned long args_ptr = (unsigned long)ts->__x[0];
   unsigned long size     = (unsigned long)ts->__x[1];
-  if (!args_ptr || size < 16) return -22;             // -EINVAL (need flags+pidfd at minimum)
+  if (!args_ptr || size < 64) return -22;             // -EINVAL (CLONE_ARGS_SIZE_VER0)
   unsigned long flags      = *(unsigned long*)(uintptr_t)(args_ptr + 0);
   unsigned long pidfd      = *(unsigned long*)(uintptr_t)(args_ptr + 8);
   unsigned long child_tid  = *(unsigned long*)(uintptr_t)(args_ptr + 16);
   unsigned long parent_tid = *(unsigned long*)(uintptr_t)(args_ptr + 24);
   unsigned long stack      = *(unsigned long*)(uintptr_t)(args_ptr + 40);
+  unsigned long stack_size = *(unsigned long*)(uintptr_t)(args_ptr + 48);
   unsigned long tls        = *(unsigned long*)(uintptr_t)(args_ptr + 56);
+  // clone3 names the *lowest* byte and a length. Raw aarch64 clone takes the
+  // initial SP at the top of a downward-growing stack instead.
+  if (stack && (!stack_size || stack_size > ULONG_MAX - stack)) return -22;
+  if (!stack && stack_size) return -22;
   arm_thread_state64_t synth = *ts;
   synth.__x[0] = flags;
-  synth.__x[1] = stack;
+  synth.__x[1] = stack ? stack + stack_size : 0;
   synth.__x[2] = (flags & LX_CLONE_PIDFD) ? pidfd : parent_tid;
   synth.__x[3] = tls;
   synth.__x[4] = child_tid;

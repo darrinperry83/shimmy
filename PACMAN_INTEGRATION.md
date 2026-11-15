@@ -30,14 +30,31 @@ the shim from a changed working directory.
   in the private clone, its download worker stopped at `Landlock is not
   supported by the kernel` / `switching to sandbox user 'alpm' failed`.
   No sandbox or pacman security setting was disabled to make the test pass.
-- Guest curl's ordinary asynchronous DNS path aborted in glibc's
-  `allocatestack.c:335`; direct use of an IP returned by guest `getent` worked.
-  This is a workaround for the test, not a general DNS fix.
+- Guest curl's ordinary asynchronous DNS path initially aborted in glibc's
+  `allocatestack.c:335`. Shimmy was passing the *lowest* byte from
+  `clone3.stack` as the initial SP and ignoring `clone3.stack_size`. Linux's
+  aarch64 child SP is the top of that downward-growing region. After correcting
+  the translation, guest curl resolved both mirror hosts itself, followed the
+  HTTP redirect, and downloaded the same 37,000-byte package with the matching
+  SHA-256. No manual IP override was needed. This fixes the tested curl path;
+  other threaded guest programs still need their own regression checks.
 - The clone's preexisting pacman configuration uses `SigLevel = Never` for
   repositories. This test did not change it. Matching the package hash to
   `extra.db` checks consistency with that database, but does not establish a
   signed chain of trust.
 
+Landlock is a kernel-enforced, inherited restriction on the calling thread's
+filesystem access. Pacman creates rules, adds allowed paths, then restricts its
+download worker. Returning success for these syscalls without an equivalent
+host-enforced policy would falsely report a sandbox while allowing ordinary
+host-user filesystem access. Shimmy therefore leaves the syscall unsupported;
+`pacman -Sy` was retested after the curl fix and still reports the Landlock
+error. A future implementation needs a defined policy translation and negative
+tests proving that denied reads and writes really fail across child processes.
+
 The result proves a real, isolated network download and local pacman
 install/removal. It does not establish unattended `pacman -S` operation or a
-production-ready package-manager security model.
+production-ready package-manager security model. See [Linux's `clone(2)`
+contract](https://man7.org/linux/man-pages/man2/clone.2.html),
+[Landlock semantics](https://man7.org/linux/man-pages/man7/landlock.7.html),
+and [pacman's sandbox settings](https://man.archlinux.org/man/pacman.conf.5.en).
