@@ -6,9 +6,13 @@ claim that the desktop session or full rdmetal renderer already works.
 ## Product contract
 
 Boot `systemd` in the Arch root, authenticate a Linux user, start an installed Wayland desktop,
-lock and unlock it, log out, and return to the greeter. Keep the existing Shimmy host window
-throughout. Ctrl+Option+F1–F6 still shows text consoles; F7 returns to the graphical seat.
-Hyprland is the first compositor; Plasma must be able to use the same host contract later.
+lock and unlock it, log out, and return to the greeter or TTY that started the session. Keep
+the existing Shimmy host window throughout. Ctrl+Option+F1–F6 still shows text consoles;
+F7 returns to the graphical seat when one is active.
+Hyprland is the first compositor tested; Plasma and other compatible desktops must use the
+same host contract. Users choose and configure their display manager, greeter, desktop,
+session and locker with ordinary Arch packages, configuration and systemd services.
+Shimmy must not hardcode greetd, a particular greeter UI or Hyprland as its only session.
 
 The Mac supplies physical display, keyboard, pointer and GPU services. Linux owns accounts,
 PAM authentication, systemd services, logind sessions, the Wayland compositor and its lock
@@ -41,12 +45,13 @@ Mac: one persistent shim_gui host process
      └─ systemd guest PID 1 on its Linux execution thread
              ├─ getty@tty1..6
              ├─ logind + D-Bus + user manager
-             └─ greetd → authenticated user session → Hyprland
-                           ├─ Linux Wayland apps
-                           ├─ hyprlock (session lock protocol + PAM)
-                           └─ rdmetal → host Metal broker → IOSurface
-                                          ↓ authenticated surface handoff
-                              persistent shim_gui presenter
+             └─ installed greeter or TTY → authenticated Linux session
+                    └─ installed compositor (Hyprland is the first test)
+                         ├─ Linux Wayland apps
+                         ├─ installed session locker
+                         └─ rdmetal → host Metal broker → IOSurface
+                                        ↓ authenticated surface handoff
+                            persistent shim_gui presenter
 ```
 
 The presenter must be a host service owned by the original GUI process. The first target is
@@ -68,14 +73,29 @@ or TTY. Reject stale frames and input from an earlier session.
 
 ## GPU contract
 
+The virtual DRM device exposes the usual Linux division of work. Its render side provides
+buffer and GPU interfaces to Mesa/rdmetal; its KMS side reports connectors, modes and
+framebuffers and accepts presentation requests. DRM does not render the scene. Mesa/rdmetal
+must run the compositor and GLES draw work on Metal, then hand the completed GPU surface and
+its completion signal to the persistent Mac-window presenter. A KMS page flip should select
+that completed surface for presentation; it should not copy a CPU dumb buffer into a Metal
+texture. Windowed mode still uses this virtual display contract, with modes derived from
+the current host window and scale. Full-screen and later multi-display modes extend it.
+
+Keep the existing CPU-backed framebuffer path as a compatibility and recovery path while
+developing the GPU surface path. It does not qualify as full rdmetal. The target method is
+GPU-backed surfaces shared across Shimmy processes, with explicit buffer ownership and
+fences, then presentation through the original host window's Metal layer. A separate direct
+scan-out path is optional later; it is not a prerequisite for the first real desktop mode.
+
 “Full rdmetal” means the compositor's required GLES operations and the representative app
 set perform their rendering on the Apple GPU through Metal. A Metal final blit of a CPU
 rasterized desktop does not satisfy it. CPU work for ordinary application logic is fine;
 software *graphics* fallback must be disabled for the acceptance run.
 
-Work from the actual Gallium operations used by Hyprland, the greeter, hyprlock and the test
-apps. Complete shader/state, texture sampling/upload, render targets, vertex and index data,
-blending, clipping, clears and synchronization needed by that workload. Replace the mock
+Work from the actual Gallium operations used by the selected compositor, greeter, locker and
+test apps. Complete shader/state, texture sampling/upload, render targets, vertex and index
+data, blending, clipping, clears and synchronization needed by that workload. Replace the mock
 broker/session and test-only dma-buf carrier with a production, authorized IOSurface path.
 The compositor's KMS framebuffer must resolve to the GPU surface, not a CPU dumb BO copied
 into `gpuwin_present_fmt`.
@@ -96,17 +116,20 @@ in the call stack.
 
 ## Linux session contract
 
-Use a standard Arch display manager. First candidate: greetd. Its text greeter can establish
-the authentication/session plumbing during development; the product gate includes a graphical
-greeter rendered through the same GPU and window path. Authenticate through the root's PAM stack;
-no host-side stored password, autologin or Shimmy-specific fake login. Start Hyprland through
-its installed session entry as the selected Linux user, with a real `XDG_RUNTIME_DIR`, user
+Let Arch's installed and enabled display manager own the greeter and session selection when
+the user chooses one; a session started from a TTY must also work. Use greetd as one
+reference test fixture, not a runtime dependency or mandatory product choice. Also test a
+graphical greeter rendered through the same GPU and window path. Authenticate through the
+root's PAM stack; no host-side stored password, autologin or Shimmy-specific fake login.
+Start Hyprland through its installed session entry as the selected Linux user, with a real
+`XDG_RUNTIME_DIR`, user
 D-Bus and systemd/logind session. Remove the shim's default `WAYLAND_DISPLAY=wayland-0`
 from the greeter/compositor environment so it selects its native display backend; clients
 receive the compositor's Wayland socket after the session starts. Use the real seat/device
 grant and revoke path; treat `LIBSEAT_BACKEND=noop` only as a diagnostic until that is proven.
 
-Install a standard locker such as hyprlock, using its session-lock protocol and Linux PAM.
+Install a standard locker appropriate to the chosen session, using its session-lock protocol
+and Linux PAM.
 While locked, Linux apps cannot receive keyboard/pointer input or expose their old surface
 through the presenter. Switching to a text TTY is allowed as on Linux, but returning to the
 graphical VT must show the locked session. Logout stops the user compositor, revokes its
@@ -140,9 +163,11 @@ the Linux session.
 3. **Single-window bridge.** An isolated systemd boot moves VT → test GPU surface → VT in one
    persistent NSWindow. A second guest process cannot open another desktop window. Input,
    resize, process exit, stale-frame rejection and bounded queue tests pass.
-4. **Authenticated session.** Disposable Arch root boots greetd, logs in a throwaway user via
-   PAM, starts Hyprland, launches an app, logs out and returns to greetd. A failed password
-   does not start a session. No personal credentials enter tests or logs.
+4. **Authenticated session.** Disposable Arch root boots an installed display manager (first
+   reference: greetd), logs in a throwaway user via PAM, starts an installed Hyprland session,
+   launches an app, logs out and returns to the greeter. A failed password does not start a
+   session. No personal credentials enter tests or logs. Then repeat with an independently
+   configured graphical greeter to prove the choice is not hardcoded.
 5. **Lock and recovery.** Lock/unlock is authenticated; VT round-trip remains locked; compositor
    crash and logout clear old pixels and release device/input ownership. Test both screens and
    window resize/hotplug without changing the live Mac display configuration.
@@ -165,9 +190,11 @@ Otherwise a passing Shimmy commit can still ship a different graphics driver.
 
 ## Decisions made and open technical proofs
 
-The host window stays in the original process; Linux owns the greeter/session/lock lifecycle.
+The host window stays in the original process; Linux owns the greeter/session/lock lifecycle
+and its package and configuration choices.
 Hyprland is first, but the transport is compositor-independent. Full GPU rendering and
 same-window presentation are separate gates; both are required before calling the desktop
 complete. The open proofs are the Gallium operation coverage, production surface/fence
 transport, logind seat/device behavior, and input ownership across child processes. Choose
-the final greeter UI only after those foundations pass; it must use the same session path.
+a reference graphical greeter for validation only after those foundations pass; it must use
+the same session path available to other installed greeters.
