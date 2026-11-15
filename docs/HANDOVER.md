@@ -105,7 +105,7 @@ both routes: it runs standalone as `shim_windowserver` (the boot-time fallback) 
 | `/Users/dperry/Documents/Codex/2026-11-07/task/hyprland-stage/metal-wayland-next/shim-metal-clear` | **The SHIM C source** — `src/*.c`, `build.sh`, `run.sh`, `install.sh`, `vaapi/` (media engine), built binaries `shim_cli` / `shim_gui` / `shim_windowserver` | ❌ **NOT git-tracked (local only)** |
 | `/Users/dperry/Documents/Codex/2026-11-07/task/linux-shim-integration-next/repo/integration/rdmetal` | **scanout / WindowServer reverse-engineering tree** — `payload_scanout_server*.m`, injectors, `SKYLIGHT_SCANOUT_*.md`, `WINDOWSERVER_*.md`, `CGS_*.md` | ✅ local repo · branch `integration/rdmetal-dmabuf` · remote `origin = /Users/dperry/linux-shim` |
 | `/Users/dperry/Documents/Codex/2026-11-07/task/hyprland-stage/metal-wayland-next/rootfs-arch` | **Arch aarch64 rootfs** — systemd 261, Hyprland, DSH + Codex + toolchain | ❌ build artifact (gitignored) |
-| `/Users/dperry/linux-shim` | The "mother" source tree; `shim-metal-clear/src/*` has **symlinks into it** for shared files | ⚠️ **DO NOT MODIFY** (read-only for all current work) |
+| `/Users/dperry/linux-shim` | The "mother" source tree (historical reference); `shim-metal-clear/src/*` is now **self-contained** (all symlinks were replaced with real copies) | ⚠️ **DO NOT MODIFY** (read-only) |
 
 ### GitHub repos
 
@@ -135,9 +135,9 @@ both routes: it runs standalone as `shim_windowserver` (the boot-time fallback) 
 
 ### Inside `shim-metal-clear` (the live shim source)
 
-`src/` holds 133 entries; **symlinks point into `/Users/dperry/linux-shim/src`** for the shared
-files (`bootstrap.c`, `elfload.c`, `vdso.c`, `wlsrv.h`, `x11srv.c`, `test_*.c`, …), while the
-**regular (non-symlink) files are the live, actively-edited** ones:
+`src/` holds 133 entries; it is **fully self-contained** — all former symlinks into
+`/Users/dperry/linux-shim/src` were replaced with real copies, and the stale `rootfs` symlink was
+removed (the real rootfs is `../rootfs-arch`). The live, actively-edited files are:
 
 - `syscalls.c` (205 KB), `syscalls_ext.c` (91 KB), `shim.c` (122 KB), `net.c` (111 KB),
   `gmem.c` (227 KB), `fastcall.c`, `vt.c`, `console.c`, `window.m`, `drmasahi.c`, `snd_alsa.c`,
