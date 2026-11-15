@@ -74,7 +74,7 @@ in a separate session before treating this as a usable installed boot.
 
 ## Isolated normal-boot result (2026-11-15)
 
-`python3 tests/run-login-boot.py` boots the private Arch fixture with
+`RD_LOGIN_ROOT=build/<private-arch-clone> python3 tests/run-login-boot.py` boots the private Arch fixture with
 `/sbin/init --system` and captures a fresh `localhost login:` prompt. The
 fixture now uses its original `group: files [SUCCESS=merge] systemd` NSS rule;
 the temporary local-only group workaround has been removed. The test deletes
@@ -104,6 +104,19 @@ This proves a login milestone, not a clean desktop boot. The journal still
 shows other unit failures, including network resolution. Interactive login is
 tested below; GUI boot remains unverified. Only the isolated fixture and test
 binary were used; the installed rootfs was not modified.
+
+The isolated boot runners now require a private clone beneath `build/` and
+match both the absolute Shimmy executable path and absolute clone path when
+counting or stopping child processes. A previous relative-path match missed
+re-exec'd guest services, reported zero brokers, and left nine test services
+running after a prompt capture. A fresh test captured `localhost login:`,
+observed both `dbus-broker` and `dbus-broker-launch` after a five-second
+settle, and left zero processes for that disposable root. The interactive
+throwaway-account test also reached Bash, passed Ctrl-C/Ctrl-Z job control,
+and left zero disposable processes. These checks do not claim a clean boot:
+`systemd-resolved` still fails. Its standalone guest trace shows requests for
+`SOL_NETLINK` options 11, 12 and 3 returning `ENOPROTOOPT`; Shimmy does not
+implement those netlink options, so the service failure remains honest.
 
 ## Isolated interactive terminal result (2026-11-15)
 

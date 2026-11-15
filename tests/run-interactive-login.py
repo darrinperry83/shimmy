@@ -12,9 +12,11 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+from boot_process_scope import boot_processes
 
 base = Path.cwd()
 root = Path(os.environ["RD_LOGIN_ROOT"]).resolve()
+binary = (base / "shim_cli").resolve(strict=True)
 if not root.is_relative_to((base / "build").resolve()) or not (root / "usr/bin/login").is_file():
     raise SystemExit("RD_LOGIN_ROOT must be a private clone under build/")
 user = "shimtest"
@@ -75,7 +77,7 @@ ok = False
 proc = None
 try:
     with log.open("w") as output:
-        proc = subprocess.Popen(["./shim_cli", str(root), "/sbin/init", "--system"],
+        proc = subprocess.Popen([str(binary), str(root), "/sbin/init", "--system"],
                                 env=env, stdout=output, stderr=output,
                                 start_new_session=True, preexec_fn=no_core)
         if not wait_text("login:", 90):
@@ -113,12 +115,9 @@ try:
 finally:
     # Exact binary + private root match prevents interference with a live Shimmy session.
     listing = subprocess.check_output(["ps", "-axo", "pid=,command="], text=True)
-    prefix = f"./shim_cli {root} "
-    for line in listing.splitlines():
-        fields = line.strip().split(None, 1)
-        if len(fields) == 2 and fields[1].startswith(prefix):
-            try: os.kill(int(fields[0]), signal.SIGKILL)
-            except ProcessLookupError: pass
+    for pid, _ in boot_processes(listing, binary, root):
+        try: os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError: pass
     if proc is not None:
         try: proc.wait(timeout=3)
         except subprocess.TimeoutExpired: proc.kill(); proc.wait()
