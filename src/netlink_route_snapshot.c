@@ -209,7 +209,8 @@ int rd_route_encode_address(const struct rd_route_address* address, uint32_t seq
   size_t size = address->family == 2 ? 4 : 16;
   size_t label_length = address->family == 2 ? strlen(address->label) + 1 : 0;
   size_t label_attr = label_length ? align4(sizeof(struct rd_rtattr) + label_length) : 0;
-  size_t total = sizeof(struct rd_nlmsghdr) + 8 + 2 * align4(sizeof(struct rd_rtattr) + size) + label_attr;
+  size_t total = sizeof(struct rd_nlmsghdr) + 8 + 2 * align4(sizeof(struct rd_rtattr) + size) +
+                 label_attr + align4(sizeof(struct rd_rtattr) + sizeof(uint32_t));
   if (capacity < total) { errno = ENOSPC; return -1; }
   unsigned char* dst = output; memset(dst, 0, total);
   struct rd_nlmsghdr header = { (uint32_t)total, 20 /*RTM_NEWADDR*/, 2 /*NLM_F_MULTI*/,
@@ -232,6 +233,13 @@ int rd_route_encode_address(const struct rd_route_address* address, uint32_t seq
     attr.type = 3 /*IFA_LABEL*/;
     memcpy(dst + offset, &attr, sizeof attr);
     memcpy(dst + offset + sizeof attr, address->label, label_length);
+    offset += label_attr;
   }
+  // systemd-resolved reads the 32-bit IFA_FLAGS attribute, not only the
+  // legacy 8-bit ifa_flags field. Carry only flags justified by host data.
+  struct rd_rtattr flags = { sizeof flags + sizeof(uint32_t), 8 /*IFA_FLAGS*/ };
+  uint32_t value = address->flags;
+  memcpy(dst + offset, &flags, sizeof flags);
+  memcpy(dst + offset + sizeof flags, &value, sizeof value);
   return (int)total;
 }

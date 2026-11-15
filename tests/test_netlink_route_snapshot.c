@@ -46,22 +46,26 @@ int main(void) {
   errno = 0;
   assert(rd_route_collect_links(NULL, 0) == -1 && errno == ENOSPC);
   struct rd_route_address ipv4 = { .index = 7, .family = 2, .prefix_length = 24,
+                                   .flags = 0x80,
                                    .label = "en0", .local = {192, 0, 2, 8},
                                    .peer = {192, 0, 2, 8} };
-  assert(rd_route_encode_address(&ipv4, 77, 500, packet, sizeof packet) == 48);
-  assert(u32(packet) == 48 && u16(packet + 4) == 20 && u32(packet + 8) == 77);
-  assert(u32(packet + 12) == 500 && packet[16] == 2 && packet[17] == 24);
+  assert(rd_route_encode_address(&ipv4, 77, 500, packet, sizeof packet) == 56);
+  assert(u32(packet) == 56 && u16(packet + 4) == 20 && u32(packet + 8) == 77);
+  assert(u32(packet + 12) == 500 && packet[16] == 2 && packet[17] == 24 && packet[18] == 0x80);
   assert(u32(packet + 20) == 7 && u16(packet + 26) == 1);
   assert(memcmp(packet + 28, ipv4.peer, 4) == 0 && u16(packet + 34) == 2);
   assert(memcmp(packet + 36, ipv4.local, 4) == 0 && u16(packet + 42) == 3);
   assert(strcmp((char*)packet + 44, "en0") == 0);
+  assert(u16(packet + 48) == 8 && u16(packet + 50) == 8 && u32(packet + 52) == 0x80);
+  assert(rd_route_encode_address(&ipv4, 77, 500, packet, 55) == -1);
   struct rd_route_address ipv6 = { .index = 8, .family = 10, .prefix_length = 64,
                                    .local = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 1},
                                    .peer = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 1} };
-  assert(rd_route_encode_address(&ipv6, 78, 500, packet, sizeof packet) == 64);
+  assert(rd_route_encode_address(&ipv6, 78, 500, packet, sizeof packet) == 72);
   assert(packet[16] == 10 && packet[17] == 64 && u16(packet + 26) == 1);
   assert(memcmp(packet + 28, ipv6.peer, 16) == 0 && u16(packet + 46) == 2);
   assert(memcmp(packet + 48, ipv6.local, 16) == 0);
+  assert(u16(packet + 64) == 8 && u16(packet + 66) == 8 && u32(packet + 68) == 0);
   struct rd_route_address host_addr[128];
   int count = rd_route_collect_addresses(host_addr, 128, 0);
   assert(count > 0);

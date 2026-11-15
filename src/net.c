@@ -863,6 +863,10 @@ static const struct optmap k_sol_socket[] = {
 // SOL_TCP 3 TCP_CORK was a hint with a real analogue and is now mapped to TCP_NOPUSH.
 static const struct optmap k_sol_ip[] = {
   {  1, IP_TOS }, {  2, IP_TTL }, {  3, IP_HDRINCL }, {  4, IP_OPTIONS },
+  // Darwin's IP_PKTINFO delivers the same 12-byte in_pktinfo payload as
+  // Linux; the socket option and ancillary message numbers differ.
+  {  8, IP_PKTINFO },
+  { 12, IP_RECVTTL },
   // 11 = IP_RECVERR. Darwin has no equivalent, and NOOP (not BAD) is load-bearing: glibc's
   // resolv/res_send.c reopen() treats setsockopt(IP_RECVERR) failing as FATAL -- it calls
   // __res_iclose() and returns 0, so the socket is closed before any bind/connect/sendto and
@@ -1319,7 +1323,9 @@ static long cmsg_l2h(const uint8_t* lc, size_t llen, uint8_t** out, size_t* outl
     struct lin_cmsghdr h; memcpy(&h, p, sizeof h);
     if (h.cmsg_len < LCMSG_HDRLEN || h.cmsg_len > left) break;
     size_t dlen = (size_t)h.cmsg_len - LCMSG_HDRLEN;
-    if (h.cmsg_level == L_SOL_SOCKET && h.cmsg_type == L_SCM_RIGHTS) total += CMSG_SPACE(dlen);
+    if ((h.cmsg_level == L_SOL_SOCKET && h.cmsg_type == L_SCM_RIGHTS) ||
+        (h.cmsg_level == L_SOL_IP && h.cmsg_type == 8 && dlen == sizeof(struct in_pktinfo)))
+      total += CMSG_SPACE(dlen);
     size_t adv = LCMSG_ALIGN(h.cmsg_len);
     if (adv >= left) break;
     p += adv; left -= adv;
@@ -1342,6 +1348,12 @@ static long cmsg_l2h(const uint8_t* lc, size_t llen, uint8_t** out, size_t* outl
       hc->cmsg_level = SOL_SOCKET;                     // 1 -> 0xffff
       hc->cmsg_type = SCM_RIGHTS;
       memcpy(CMSG_DATA(hc), p + LCMSG_HDRLEN, dlen);   // guest fds ARE host fds here
+      hc = CMSG_NXTHDR(&shim, hc);
+    } else if (h.cmsg_level == L_SOL_IP && h.cmsg_type == 8 && dlen == sizeof(struct in_pktinfo)) {
+      hc->cmsg_len = CMSG_LEN(dlen);
+      hc->cmsg_level = IPPROTO_IP;
+      hc->cmsg_type = IP_PKTINFO;
+      memcpy(CMSG_DATA(hc), p + LCMSG_HDRLEN, dlen);
       hc = CMSG_NXTHDR(&shim, hc);
     }
     // SCM_CREDENTIALS and anything else is dropped: no Darwin equivalent.
@@ -1399,6 +1411,20 @@ static size_t cmsg_h2l(int fd, struct msghdr* hm, uint8_t* lc, size_t lcap, int 
       continue;
     } else if (hc->cmsg_level == SOL_SOCKET) {
       continue;                                 // genuinely no Linux analog (SCM_CREDS, ...)
+    } else if (hc->cmsg_level == IPPROTO_IP && hc->cmsg_type == IP_RECVTTL && dlen == 1) {
+      // Darwin reports one TTL byte; Linux IP_RECVTTL yields an IP_TTL
+      // ancillary message containing a native 32-bit integer.
+      if (used + LCMSG_HDRLEN + sizeof(int32_t) > lcap) { *truncated = 1; break; }
+      struct lin_cmsghdr lh = { LCMSG_HDRLEN + sizeof(int32_t), L_SOL_IP, 2 /*IP_TTL*/ };
+      int32_t ttl = *(const uint8_t*)CMSG_DATA(hc);
+      memcpy(lc + used, &lh, sizeof lh);
+      memcpy(lc + used + LCMSG_HDRLEN, &ttl, sizeof ttl);
+      used += LCMSG_ALIGN(LCMSG_HDRLEN + sizeof ttl);
+      if (used > lcap) used = lcap;
+      continue;
+    } else if (hc->cmsg_level == IPPROTO_IP && hc->cmsg_type == IP_PKTINFO &&
+               dlen == sizeof(struct in_pktinfo)) {
+      ltype = 8; // Linux IP_PKTINFO
     }
     if (used + LCMSG_HDRLEN + dlen > lcap) { *truncated = 1; break; }
     struct lin_cmsghdr lh;

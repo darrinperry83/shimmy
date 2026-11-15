@@ -226,3 +226,28 @@ only to Shimmy-owned VT slaves; ordinary ptys continue using host tty calls.
 Console Ctrl-C and Ctrl-Z target the registered foreground guest process group.
 This validates the tested Bash interaction on the isolated headless boot; GUI
 input and a complete desktop session remain unverified.
+
+## Resolver address flags and IPv4 ancillary data (2026-11-15)
+
+The Linux `RTM_NEWADDR` encoder now supplies the 32-bit `IFA_FLAGS`
+attribute alongside the legacy byte in `ifaddrmsg`. systemd v261's
+`link_address_update_rtnl()` requires that attribute. A previous direct
+resolver run exited `Could not create manager: No data available` after its
+address dump. In the isolated run with the new attribute, that error did not
+recur; initialization advanced to LLMNR socket setup and later failed to
+connect to the system bus. This is evidence of progress, not a working DNS
+service.
+
+Linux IPv4 `IP_PKTINFO` and `IP_RECVTTL` socket options are now translated to
+their real Darwin counterparts. Received Darwin packet info uses the Linux
+12-byte payload with a different control-message number. Darwin supplies a
+one-byte TTL; Shimmy converts it to Linux's 32-bit `IP_TTL` control message.
+The focused loopback test verifies both options, incoming packet-info and TTL,
+and outgoing packet-info. A bounded direct resolver run confirmed that the
+former LLMNR common-socket-options failure cleared. Its next LLMNR failure is
+`IP_MTU_DISCOVER: Protocol not available`; no path-MTU behavior has been
+claimed or emulated. The standalone run also lacks a live system bus and
+therefore exits after that. The separate isolated full boot reached a fresh
+login prompt with D-Bus settled, but `systemd-resolved` still failed and no
+DNS query through it passed. The installed root and live network settings were
+not changed.
