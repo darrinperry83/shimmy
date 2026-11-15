@@ -34,11 +34,12 @@ def no_core() -> None:
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 
 
-def make_profile(binary: Path, root: Path, group: Path) -> str:
-    # This is a *test* profile. It intentionally allows non-filesystem
-    # operations by default and should not be reused as a package sandbox.
-    return (
-        '(version 1)(allow default)(deny file-read*)(deny file-write*)'
+def make_profile(binary: Path, root: Path, group: Path,
+                 network: bool = False) -> str:
+    # This is a *test* profile. Package-manager completeness is unproven;
+    # even a passing file probe must not be used as a pacman fallback.
+    profile = (
+        '(version 1)(deny default)(allow process-exec)'
         '(allow file-read-metadata (subpath "/"))'
         '(allow file-read* (literal "/"))'
         '(allow file-read* (subpath "/System"))'
@@ -54,6 +55,12 @@ def make_profile(binary: Path, root: Path, group: Path) -> str:
         f'(allow file-read* (literal "{quote_profile_path(binary)}"))'
         f'(allow file-read* (subpath "{quote_profile_path(root)}"))'
     )
+    if network:
+        # DNS and HTTP are intentionally broad for this diagnostic probe.
+        profile += (f'(allow network-bind (subpath "{quote_profile_path(group)}"))'
+                    '(allow network-outbound)'
+                    '(allow mach-lookup (global-name "com.apple.system.opendirectoryd.libinfo"))')
+    return profile
 
 
 def run_guest(binary: Path, root: Path, args: list[str], profile: str | None,
@@ -98,7 +105,7 @@ def main() -> int:
         secret.write_text("SHIMMY_TEST_SECRET\n")
         write_target.write_text("unchanged\n")
         group = Path("/private/tmp") / f"shimmy-sandbox-test-{os.getpid()}"
-        profile = make_profile(binary, root, group)
+        profile = make_profile(binary, root, group, bool(args.network_url))
         try:
             baseline_rc, baseline = run_guest(binary, root,
                 ["/bin/cat", str(secret)], None, group)
