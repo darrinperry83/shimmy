@@ -766,7 +766,7 @@ static void drm_present_fb(uint32_t fb_id, uint32_t crtc_id) {
           crtc_id, n, w, h, nonblack ? "non-black" : "black", f->pitch);
 
   if (f->pitch == tight) {
-    gpuwin_present_crtc(px, w, h, /*bgra=*/1, crtc_id);   // zero-copy: already tightly packed BGRA
+    gpuwin_present_crtc(px, w, h, /*bgra=*/1, crtc_id);   // no row repack; host presenter still copies/uploads
   } else if (f->pitch >= tight) {
     uint8_t* tmp = (uint8_t*)malloc(tight * h);
     if (!tmp) return;

@@ -100,7 +100,13 @@ if [ "$BOOT_INIT" = 1 ]; then
   # systemd must believe it is uid 0. (A full systemd-as-PID-1 boot additionally needs the
   # shim to report getpid()==1 to the init process — see the live-boot notes. That mapping
   # lives in the shim's syscall layer, not here; this script only wires the exec path.)
-  RDUID0=1 exec "$SHIM" "$ROOT" /sbin/init "$@"
+  # A booted display manager must establish its own seat, runtime directory and display
+  # socket. build_guest_env() otherwise injects the nested shim defaults (wayland-0,
+  # DISPLAY=:0, XDG_RUNTIME_DIR=/tmp and indirect GL) into PID 1 and every service it
+  # starts. Empty RDENV_* entries shadow those defaults and are then removed from the
+  # guest environment; the display manager can set the real values for its user session.
+  RDENV_WAYLAND_DISPLAY= RDENV_DISPLAY= RDENV_XDG_RUNTIME_DIR= \
+  RDENV_LIBGL_ALWAYS_INDIRECT= RDUID0=1 exec "$SHIM" "$ROOT" /sbin/init "$@"
 fi
 
 # ---- Omarchy desktop ------------------------------------------------------------------

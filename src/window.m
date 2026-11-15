@@ -2236,10 +2236,38 @@ long gpuwin_present(const uint8_t* rgba, uint64_t w, uint64_t h) {
   return gpuwin_present_fmt(rgba, w, h, /*bgra=*/0);
 }
 
+enum cpu_present_path {
+  CPU_PRESENT_DESKTOP,
+  CPU_PRESENT_CONSOLE,
+  CPU_PRESENT_DRM_PRIMARY,
+  CPU_PRESENT_DRM_SECONDARY,
+  CPU_PRESENT_PATH_COUNT
+};
+
+// Count only successful CPU-backed presentation work. This is an opt-in diagnostic for the
+// GPU migration gate; a visible Metal window alone does not reveal that replaceRegion: or
+// CGImage still copied a complete CPU framebuffer each frame.
+static void record_cpu_present(enum cpu_present_path path, uint64_t w, uint64_t h) {
+  if (!getenv("RDGPU_PRESENT_STATS")) return;
+  static const char* names[CPU_PRESENT_PATH_COUNT] = {
+    "desktop_metal_upload", "tty_metal_upload", "drm_primary_metal_upload",
+    "drm_secondary_cgimage_copy"
+  };
+  static atomic_uint_fast64_t frames[CPU_PRESENT_PATH_COUNT];
+  static atomic_uint_fast64_t bytes[CPU_PRESENT_PATH_COUNT];
+  uint64_t count = atomic_fetch_add(&frames[path], 1) + 1;
+  uint64_t total = atomic_fetch_add(&bytes[path], w * h * 4) + w * h * 4;
+  if (count == 1 || count % 120 == 0)
+    fprintf(stderr, "[present-stats] path=%s frames=%llu frame_payload_bytes=%llu total_payload_bytes=%llu\n",
+            names[path], (unsigned long long)count, (unsigned long long)(w * h * 4),
+            (unsigned long long)total);
+}
+
 // Shared present body for the desktop path (gpuwin_present_fmt) and the text-console path
 // (gpuwin_present_console). The console calls this DIRECTLY so its frames do not trip the
 // "a desktop frame arrived" switch in gpuwin_present_fmt -> vt_graphics_frame().
-static long present_fb(const uint8_t* rgba, uint64_t w, uint64_t h, int bgra) {
+static long present_fb(const uint8_t* rgba, uint64_t w, uint64_t h, int bgra,
+                       enum cpu_present_path path) {
   if (!rgba || w == 0 || h == 0 || w > 16384 || h > 16384) return -22;
   refresh_dynamic_regions((NSUInteger)w, (NSUInteger)h);
   refresh_split_width((NSUInteger)w, (NSUInteger)h);
@@ -2291,6 +2319,7 @@ static long present_fb(const uint8_t* rgba, uint64_t w, uint64_t h, int bgra) {
     rc = present_source(stage, q, /*may_block=*/1, ^{ dispatch_semaphore_signal(sem); }, 0);
     if (rc < 0) dispatch_semaphore_signal(sem);    // nothing was queued; take the slot back
     if (rc < 0) return rc;
+    record_cpu_present(path, w, h);
   }
 
   refresh_rect_occasionally();
@@ -2301,13 +2330,13 @@ long gpuwin_present_fmt(const uint8_t* rgba, uint64_t w, uint64_t h, int bgra) {
   // A desktop (X11/Wayland) frame means the GUI console owns the screen and the keyboard from
   // here on; the text consoles yield until Ctrl+Alt+F1..F6 switches back.
   vt_graphics_frame();
-  return present_fb(rgba, w, h, bgra);
+  return present_fb(rgba, w, h, bgra, CPU_PRESENT_DESKTOP);
 }
 
 // The text-console present path. Presenting a console frame must NOT mark the GUI active, so it
 // bypasses gpuwin_present_fmt's vt_graphics_frame() call and goes straight to the shared body.
 long gpuwin_present_console(const uint8_t* rgba, uint64_t w, uint64_t h, int bgra) {
-  return present_fb(rgba, w, h, bgra);
+  return present_fb(rgba, w, h, bgra, CPU_PRESENT_CONSOLE);
 }
 
 // Register the console present hook with vt.c. Called once from shim.c's main (GUI build only);
@@ -2379,6 +2408,7 @@ static long present_secondary_fb(const uint8_t* bgra, uint64_t w, uint64_t h) {
     win.contentView.layer.contents = (__bridge id)image;
     CGImageRelease(image);
   }});
+  if (rc == 0) record_cpu_present(CPU_PRESENT_DRM_SECONDARY, w, h);
   return rc;
 }
 
@@ -2397,7 +2427,8 @@ long gpuwin_present_crtc(const uint8_t* px, uint64_t w, uint64_t h, int bgra, ui
               crtc_id, drmFlipScanoutFrames, (unsigned)w, (unsigned)h, bgra);
   }
   if (crtc_id == 2) return present_secondary_fb(px, w, h);   // BGRA (drm_present_fb passes bgra=1)
-  return gpuwin_present_fmt(px, w, h, bgra);
+  vt_graphics_frame();
+  return present_fb(px, w, h, bgra, CPU_PRESENT_DRM_PRIMARY);
 }
 
 // ---------------------------------------------------------------- evdev input pump

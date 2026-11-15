@@ -141,6 +141,10 @@ zero fallback calls and zero CPU framebuffer staging during ordinary composition
 multiple windows, text, textures, animation, resizing, screen lock and resume. Then measure
 frame time, CPU use, memory and power against the current hybrid path.
 
+`RDGPU_PRESENT_STATS=1` now reports CPU-backed host presentation paths and the framebuffer
+payload bytes handed to Metal upload or a CGImage copy. These counters establish a CPU
+presentation baseline; they do not measure GPU draw coverage or total memory traffic.
+
 Performance acceptance is comparative and trace-based: ordinary composition must have no
 per-frame CPU framebuffer readback/upload, no unbounded waits on the UI thread, and a bounded
 surface pool. Record median and 95th-percentile frame latency at the actual display refresh
