@@ -43,6 +43,46 @@ the shim from a changed working directory.
   `extra.db` checks consistency with that database, but does not establish a
   signed chain of trust.
 
+## Isolated signature verification test
+
+In a separate clone on 2026-11-15, `pacman-key --init` generated a test-root
+master key and `pacman-key --populate archlinuxarm` imported the bundled Arch
+Linux ARM keys. The clone's general and local-file signature settings were
+changed to `Required TrustedOnly`; the live root and repository configuration
+were not changed.
+
+Under those mandatory settings, guest pacman installed a locally signed
+throwaway package. The same package with a changed byte and its original
+detached signature was rejected as `invalid or corrupted package (PGP
+signature)`. An unsigned copy was rejected as `package missing required
+signature`. The previously installed file remained unchanged after both
+rejections.
+
+An official `tree 2.1.0-1` package and its detached signature were downloaded
+from an Arch Linux ARM mirror. Guest `pacman-key --verify` reported a good
+signature from `Arch Linux ARM Build System <builder@archlinuxarm.org>` with
+full trust in the clone's populated keyring. Guest pacman installed the signed
+package with `-Udd`, while signature checks remained mandatory. The double
+dependency bypass was needed because this particular source root lacks a
+pacman local package database; it does not prove normal dependency resolution.
+The package SHA-256 matched the earlier `extra.db` value:
+`e20cb58900b735f3cc79f87c60609e9cdf267fb7139725c9f3816c60efa07856`.
+
+The tool's own execution sandbox initially blocked the test GnuPG agent's
+Unix socket bind. `pacman-key --init` still exited zero despite GnuPG reporting
+that no master key was created. A native socket bind to the same temporary
+path failed under that tool sandbox and succeeded outside it; rerunning only
+the isolated clone test there generated the key. This was a test-harness
+restriction, not evidence of a Shimmy socket defect. Future keyring checks
+must inspect key presence and GnuPG output, not `pacman-key --init`'s exit
+status alone.
+
+These tests demonstrate that Shimmy can run GnuPG and libalpm's local package
+signature checks. They do not authenticate the origin of the pre-bundled
+keyring or turn the live root's `SigLevel = Never` into a trusted configuration.
+Repository sync still stops at Landlock; see
+[LANDLOCK_COMPATIBILITY.md](LANDLOCK_COMPATIBILITY.md).
+
 Landlock is a kernel-enforced, inherited restriction on the calling thread's
 filesystem access. Pacman creates rules, adds allowed paths, then restricts its
 download worker. Returning success for these syscalls without an equivalent
