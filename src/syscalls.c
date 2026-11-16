@@ -2391,11 +2391,60 @@ static long do_futex(unsigned long uaddr, int op, unsigned int val,
 }
 
 // ===========================================================================================
-// signals (recorded, never installed — the shim does not deliver signals to guest code)
+// Virtual standard signals. Linux signal masks are still process-wide in this shim;
+// real per-thread delivery and realtime queues need separate work. A blocked self-signal
+// or parent-death signal can be consumed by rt_sigtimedwait without touching host PIDs.
 // ===========================================================================================
 
 static struct linux_sigaction g_sigacts[65];
 static uint64_t g_sigmask;
+static uint64_t g_sigpending;
+static int g_pdeathsig;
+static pid_t g_pdeath_host_parent;
+static int g_pdeath_fired;
+
+long syscalls_signal_set_pdeathsig(int linux_signo) {
+  if (linux_signo < 0 || linux_signo > 64) return -LX_EINVAL;
+  if (linux_signo && sig_l2m(linux_signo) < 0) return -LX_ENOSYS;
+  // The shim can currently deliver this signal only to a blocked synchronous waiter.
+  // Reject other uses rather than claiming Linux's asynchronous delivery works.
+  if (linux_signo && !(__atomic_load_n(&g_sigmask, __ATOMIC_ACQUIRE) &
+                       (1ULL << (linux_signo - 1)))) return -LX_ENOSYS;
+  g_pdeathsig = linux_signo;
+  g_pdeath_host_parent = linux_signo ? getppid() : 0;
+  g_pdeath_fired = 0;
+  return 0;
+}
+int syscalls_signal_get_pdeathsig(void) { return g_pdeathsig; }
+void syscalls_signal_after_fork(void) {
+  // Linux inherits the mask but not pending signals or PR_SET_PDEATHSIG.
+  __atomic_store_n(&g_sigpending, 0, __ATOMIC_RELEASE);
+  g_pdeathsig = 0;
+  g_pdeath_host_parent = 0;
+  g_pdeath_fired = 0;
+}
+static void virtual_signal_check_parent(void) {
+  int signo = g_pdeathsig;
+  if (signo && !g_pdeath_fired && getppid() != g_pdeath_host_parent) {
+    g_pdeath_fired = 1;
+    __atomic_fetch_or(&g_sigpending, 1ULL << (signo - 1), __ATOMIC_ACQ_REL);
+  }
+}
+unsigned long long syscalls_signal_pending(void) {
+  virtual_signal_check_parent();
+  return __atomic_load_n(&g_sigpending, __ATOMIC_ACQUIRE);
+}
+static int virtual_signal_take(uint64_t wanted) {
+  for (;;) {
+    uint64_t old = __atomic_load_n(&g_sigpending, __ATOMIC_ACQUIRE);
+    uint64_t hit = old & wanted;
+    if (!hit) return 0;
+    uint64_t bit = hit & (~hit + 1);
+    if (__atomic_compare_exchange_n(&g_sigpending, &old, old & ~bit, 0,
+                                    __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+      return __builtin_ctzll(bit) + 1;
+  }
+}
 
 // ===========================================================================================
 // ioctl
@@ -4645,12 +4694,12 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   case 135: {
     int howv = (int)a0;                         // SIG_BLOCK 0, SIG_UNBLOCK 1, SIG_SETMASK 2
     if (a3 && a3 != 8) return -LX_EINVAL;
-    uint64_t old = g_sigmask;
+    uint64_t old = __atomic_load_n(&g_sigmask, __ATOMIC_ACQUIRE);
     if (a1) {
       uint64_t set = *(const uint64_t*)a1;
-      if      (howv == 0) g_sigmask |=  set;
-      else if (howv == 1) g_sigmask &= ~set;
-      else if (howv == 2) g_sigmask  =  set;
+      if      (howv == 0) __atomic_fetch_or(&g_sigmask, set, __ATOMIC_ACQ_REL);
+      else if (howv == 1) __atomic_fetch_and(&g_sigmask, ~set, __ATOMIC_ACQ_REL);
+      else if (howv == 2) __atomic_store_n(&g_sigmask, set, __ATOMIC_RELEASE);
       else return -LX_EINVAL;
     }
     if (a2) *(uint64_t*)a2 = old;
@@ -4660,12 +4709,40 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   // ---------- 137 rt_sigtimedwait ----------
   // Nothing ever queues a signal to the guest, so the honest answer is "timed out".
   case 137: {
+    if (!a0) return -LX_EFAULT;
+    if (a3 != 8) return -LX_EINVAL;
+    uint64_t wanted = *(const uint64_t*)a0;
+    // SIGKILL and SIGSTOP cannot be caught, blocked or synchronously waited for.
+    wanted &= ~((1ULL << (9 - 1)) | (1ULL << (19 - 1)));
     const struct linux_timespec* to = (const struct linux_timespec*)a2;
-    if (to && (to->tv_sec > 0 || to->tv_nsec > 0)) {
-      struct timespec t = { (time_t)to->tv_sec, (long)to->tv_nsec };
-      nanosleep(&t, 0);
+    if (to && (to->tv_sec < 0 || to->tv_nsec < 0 || to->tv_nsec >= 1000000000L))
+      return -LX_EINVAL;
+    struct timespec begin;
+    clock_gettime(CLOCK_MONOTONIC, &begin);
+    for (;;) {
+      virtual_signal_check_parent();
+      int signo = virtual_signal_take(wanted);
+      if (signo) {
+        if (a1) {
+          memset((void*)a1, 0, 128); // Linux aarch64 siginfo_t
+          *(int*)a1 = signo;
+        }
+        return signo;
+      }
+      struct timespec sleep_for = {0, 20000000}; // bounded parent-liveness poll
+      if (to) {
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        int64_t elapsed = (int64_t)(now.tv_sec - begin.tv_sec) * 1000000000LL +
+                          (int64_t)(now.tv_nsec - begin.tv_nsec);
+        int64_t total = to->tv_sec > INT64_MAX / 1000000000LL ? INT64_MAX :
+                        (int64_t)to->tv_sec * 1000000000LL + to->tv_nsec;
+        if (elapsed >= total) return -LX_EAGAIN;
+        int64_t left = total - elapsed;
+        if (left < sleep_for.tv_nsec) sleep_for.tv_nsec = (long)left;
+      }
+      if (nanosleep(&sleep_for, NULL) < 0 && errno == EINTR) return -LX_EINTR;
     }
-    return -LX_EAGAIN;
   }
 
   // ---------- 139 rt_sigreturn ----------

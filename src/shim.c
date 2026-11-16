@@ -1186,6 +1186,7 @@ static long do_fork(const arm_thread_state64_t* ts) {
   t_cur = NULL;
   syscalls_set_init(0);          // a forked child is a new guest process: not PID 1
   syscalls_set_guest_ppid(parent_guest_pid);   // ...whose parent is the process that forked it
+  syscalls_signal_after_fork(); // Linux inherits the mask, not pending signals or PDEATHSIG
   g_next_tid = (int)syscalls_guest_pid();
 
   // Before the guest runs again: it may connect to its display on the very next instruction, and

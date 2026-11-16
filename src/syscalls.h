@@ -52,6 +52,14 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
 // macOS errno -> Linux errno (they differ above ~34). Shared with the other modules.
 int  linux_errno_from_host(int host_errno);
 
+// Virtual standard-signal state used by rt_sigtimedwait and PR_SET_PDEATHSIG.
+// The parent-death signal is observed through the real host parent relationship;
+// no host signal is sent to an unrelated process.
+long syscalls_signal_set_pdeathsig(int linux_signo);
+int  syscalls_signal_get_pdeathsig(void);
+void syscalls_signal_after_fork(void);
+unsigned long long syscalls_signal_pending(void);
+
 // ---------------------------------------------------------------------------------------------
 // SHIM-OWNED DESCRIPTORS
 //

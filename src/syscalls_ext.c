@@ -605,7 +605,6 @@ static long do_memfd_create(const char* name, unsigned flags) {
 // prctl state
 // ---------------------------------------------------------------------------
 static char g_procname[16] = "guest";
-static int  g_pdeathsig;
 static int  g_dumpable = 1;
 static int  g_securebits;
 static int  g_thp_disable;
@@ -630,14 +629,10 @@ static long do_prctl(int opt, unsigned long a1, unsigned long a2,
       memcpy((void*)a1, g_procname, strnlen(g_procname, 15));
       return 0;
     case LX_PR_SET_PDEATHSIG:
-      // macOS has no parent-death signal. Remember it so PR_GET_PDEATHSIG round-trips; the
-      // guest gets no notification, which is strictly better than failing its init.
-      if (a1 > 64) return -LX_EINVAL;
-      g_pdeathsig = (int)a1;
-      return 0;
+      return syscalls_signal_set_pdeathsig((int)a1);
     case LX_PR_GET_PDEATHSIG:
       if (!a1) return -LX_EFAULT;
-      *(int*)a1 = g_pdeathsig; return 0;
+      *(int*)a1 = syscalls_signal_get_pdeathsig(); return 0;
     case LX_PR_SET_DUMPABLE:   g_dumpable = (int)a1; return 0;
     case LX_PR_GET_DUMPABLE:   return g_dumpable;
     case LX_PR_SET_KEEPCAPS:   return 0;
@@ -1239,8 +1234,10 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     struct timespec ts = { 3600, 0 };
     for (;;) nanosleep(&ts, &ts);
   }
-  case 136:                                                    // rt_sigpending: nothing pending
-    if (a0) memset((void*)a0, 0, a1 ? (size_t)a1 : 8);
+  case 136:                                                    // rt_sigpending
+    if (!a0) return -LX_EFAULT;
+    if (a1 != 8) return -LX_EINVAL;
+    *(uint64_t*)a0 = (uint64_t)syscalls_signal_pending();
     return 0;
   case 137: return -LX_EAGAIN;                                 // rt_sigtimedwait: timed out
   case 138: case 240: {                                        // rt_sigqueueinfo/rt_tgsigqueueinfo
