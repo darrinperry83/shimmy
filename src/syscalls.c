@@ -3047,7 +3047,7 @@ static long do_fcntl(int fd, int cmd, unsigned long arg) {
       int nf = fcntl(fd, cmd == LF_DUPFD ? F_DUPFD : F_DUPFD_CLOEXEC, (int)arg);
       if (nf >= 0) rd_rtnl_dup(fd, nf);
       if (nf >= 0 && pidfd_shim_pid(fd) > 0) pidfd_shim_register(nf, pidfd_shim_pid(fd));
-      if (nf >= 0 && drm_owns_fd(fd)) drm_register_fd(nf);   // a dup is still the render node
+      if (nf >= 0 && drm_owns_fd(fd)) drm_register_fd_copy(nf, fd);
       if (nf >= 0 && snd_owns_fd(fd)) snd_dup_fd(fd, nf);    // a dup of a snd node keeps its role
       if (nf >= 0 && evdev_owns_fd(fd)) evdev_register_fd(nf, evdev_device_of_fd(fd));
       return herr(nf);
@@ -3677,12 +3677,26 @@ static void drm_materialize_udev(void) {
       if (strstr(db, "E:SHIMMY_VIRTUAL_DRM=1\n")) {
         for (size_t i = 0; i < sizeof files / sizeof files[0]; i++)
           if (guest_to_host(files[i], host, sizeof host) == 0) unlink(host);
+        if (guest_to_host("/run/udev/data/c226:128", host, sizeof host) == 0) {
+          char render_db[512] = {0};
+          int render_fd = open(host, O_RDONLY);
+          if (render_fd >= 0) { (void)read(render_fd, render_db, sizeof render_db - 1); close(render_fd); }
+          if (strstr(render_db, "E:SHIMMY_VIRTUAL_DRM=1\n")) unlink(host);
+        }
         if (guest_to_host("/sys/dev/char/226:0", host, sizeof host) == 0) {
           char target[64];
           ssize_t n = readlink(host, target, sizeof target - 1);
           if (n >= 0) {
             target[n] = 0;
             if (strcmp(target, "../../class/drm/card0") == 0) unlink(host);
+          }
+        }
+        if (guest_to_host("/sys/dev/char/226:128", host, sizeof host) == 0) {
+          char target[64];
+          ssize_t n = readlink(host, target, sizeof target - 1);
+          if (n >= 0) {
+            target[n] = 0;
+            if (strcmp(target, "../../class/drm/renderD128") == 0) unlink(host);
           }
         }
       }
@@ -3738,6 +3752,40 @@ static void drm_materialize_udev(void) {
     int fd = open(host, O_WRONLY | O_CREAT, 0644);
     if (fd >= 0) close(fd);
   }
+  // Render nodes have a separate devnum and udev identity. They do not own a seat or serve as
+  // master-of-seat; the primary card above remains the graphical seat device.
+  if (guest_to_host("/sys/dev/char/226:128", host, sizeof host) != 0) return;
+  if (symlink("../../class/drm/renderD128", host) < 0 && errno != EEXIST) return;
+  target_len = readlink(host, target, sizeof target - 1);
+  if (target_len < 0) return;
+  target[target_len] = 0;
+  if (strcmp(target, "../../class/drm/renderD128") != 0) return;
+  if (guest_to_host("/run/udev/data/c226:128", host, sizeof host) != 0) return;
+  char prior[512] = {0};
+  int old_fd = open(host, O_RDONLY);
+  if (old_fd >= 0) {
+    (void)read(old_fd, prior, sizeof prior - 1);
+    close(old_fd);
+    if (!strstr(prior, "E:SHIMMY_VIRTUAL_DRM=1\n")) return;
+  }
+  struct timespec ts;
+  if (clock_gettime(CLOCK_MONOTONIC, &ts) < 0) return;
+  unsigned long long usec = (unsigned long long)ts.tv_sec * 1000000ULL +
+                            (unsigned long long)ts.tv_nsec / 1000ULL;
+  char db[384];
+  int len = snprintf(db, sizeof db,
+                     "I:%llu\nE:DEVNAME=/dev/dri/renderD128\nE:DEVPATH=/class/drm/renderD128\n"
+                     "E:SUBSYSTEM=drm\nE:DEVTYPE=drm_minor\nE:SHIMMY_VIRTUAL_DRM=1\n", usec);
+  if (len < 0 || len >= (int)sizeof db) return;
+  char tmp[PATH_MAX];
+  int tmp_len = snprintf(tmp, sizeof tmp, "%s.shimmy-%d", host, (int)getpid());
+  if (tmp_len < 0 || tmp_len >= (int)sizeof tmp) return;
+  int fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL, 0644);
+  if (fd < 0) return;
+  ssize_t n = write(fd, db, (size_t)len);
+  close(fd);
+  if (n == (ssize_t)len && rename(tmp, host) == 0) return;
+  unlink(tmp);
 }
 
 // Materialize every synthesized directory in the rootfs, once, at startup. Eager (not lazy in each
@@ -4151,7 +4199,7 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
       // page-flip events arrive via read() and poll correctly), and every ioctl on it is
       // answered by drmasahi.c.
       int dfd = drm_open_fd();
-      if (dfd >= 0) { drm_register_fd(dfd); return dfd; }
+      if (dfd >= 0) { drm_register_fd_path(dfd, gabs); return dfd; }
       return herrno();
     }
     // /sys/firmware/qemu_fw_cfg/by_name/opt/io.systemd.credentials — the qemu VM credential store.
@@ -4166,7 +4214,7 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     // /sys/dev/char/226:*/uevent — libdrm's drmGetDeviceNameFromFd2() reads DEVNAME= here to
     // name the GPU. An empty guest /sys makes it return NULL, which aquamarine dereferences.
     if (drm_sysfs_kind(gabs) == 2) {
-      const char* c = drm_sysfs_uevent();
+      const char* c = drm_sysfs_uevent(gabs);
       int ufd = mem_fd(c, strlen(c));
       if (ufd >= 0) return ufd;
       return herrno();
@@ -4532,7 +4580,8 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
       return (long)n;
     }
     if (drm_sysfs_kind(gabs) == 12) {
-      const char* t = "../../class/drm/card0";
+      const char* t = strstr(gabs, "226:128") ? "../../class/drm/renderD128" :
+                                                    "../../class/drm/card0";
       size_t n = strlen(t);
       if (n > sz) n = sz;
       memcpy(buf, t, n);
@@ -4682,7 +4731,8 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     if (stat_m2l(&st, (struct linux_stat*)a1)<0) return herrno();
     if (drm_owns_fd((int)a0)) {
       struct linux_stat* o = (struct linux_stat*)a1;
-      drm_fake_stat(&o->st_mode, &o->st_rdev, "renderD128");
+      drm_fake_stat(&o->st_mode, &o->st_rdev,
+                    drm_minor_of_fd((int)a0) == 0 ? "/dev/dri/card0" : "/dev/dri/renderD128");
     }
     if (snd_owns_fd((int)a0)) {
       struct linux_stat* o = (struct linux_stat*)a1;

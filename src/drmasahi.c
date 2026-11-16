@@ -470,7 +470,7 @@ _Static_assert(sizeof(struct asahi_params_global_old) == 400, "asahi_params_glob
 static int g_on = -1, g_trace = -1;
 static int tracing(void);
 #define MAXFD 64
-static int g_fds[MAXFD];
+static struct { int fd, minor; } g_fds[MAXFD];
 static int g_nfd;
 
 // GEM slot: a synthetic DRM handle bound to the imported dma-buf carrier's
@@ -810,19 +810,30 @@ int drm_is_node(const char* p) {
   return hit;
 }
 
-void drm_register_fd(int fd) {
+void drm_register_fd_path(int fd, const char* path) {
   if (fd < 0 || g_nfd >= MAXFD) return;
-  g_fds[g_nfd++] = fd;
+  g_fds[g_nfd++] = (typeof(*g_fds)){fd, path && strstr(path, "renderD128") ? 128 : 0};
   if (tracing()) fprintf(stderr, "[drm] opened render node as fd %d\n", fd);
+}
+
+void drm_register_fd(int fd) { drm_register_fd_path(fd, "/dev/dri/renderD128"); }
+
+void drm_register_fd_copy(int fd, int from_fd) {
+  drm_register_fd_path(fd, drm_minor_of_fd(from_fd) == 0 ? "/dev/dri/card0" : "/dev/dri/renderD128");
+}
+
+int drm_minor_of_fd(int fd) {
+  for (int i = 0; i < g_nfd; i++) if (g_fds[i].fd == fd) return g_fds[i].minor;
+  return -1;
 }
 
 void drm_forget_fd(int fd) {
   for (int i = 0; i < g_nfd; i++)
-    if (g_fds[i] == fd) { g_fds[i] = g_fds[--g_nfd]; return; }
+    if (g_fds[i].fd == fd) { g_fds[i] = g_fds[--g_nfd]; return; }
 }
 
 int drm_owns_fd(int fd) {
-  for (int i = 0; i < g_nfd; i++) if (g_fds[i] == fd) return 1;
+  for (int i = 0; i < g_nfd; i++) if (g_fds[i].fd == fd) return 1;
   return 0;
 }
 
@@ -894,7 +905,7 @@ int drm_sysfs_kind(const char* path) {
     const char* leaf = p;
     while (*p && *p != '/') p++;
     int is_card = (p - leaf == 5 && strncmp(leaf, "card0", 5) == 0);
-    int is_rnd  = (p - leaf == 9 && strncmp(leaf, "renderD128", 9) == 0);
+    int is_rnd  = (p - leaf == 10 && strncmp(leaf, "renderD128", 10) == 0);
     if (!is_card && !is_rnd) return 0;
     if (*p == 0) return 8;                                   // /sys/class/drm/<name>
     if (strcmp(p, "/uevent") == 0)    return 9;
@@ -905,7 +916,7 @@ int drm_sysfs_kind(const char* path) {
   const char* p = path + sizeof pre - 1;
   // sd-device resolves a character device number through this sysfs symlink.
   // Without it udev's tag index cannot turn c226:0 into a seat device.
-  if (strcmp(p, "0") == 0) return 12;
+  if (strcmp(p, "0") == 0 || strcmp(p, "128") == 0) return 12;
   while (*p >= '0' && *p <= '9') p++;                 // skip the minor digits
   if (strcmp(p, "/device/drm") == 0) return 1;
   if (strcmp(p, "/uevent") == 0)     return 2;
@@ -933,7 +944,9 @@ static int drm_class_minor(const char* path) {
 // Content served for /sys/dev/char/226:*/uevent. libdrm reads DEVNAME and prepends "/dev/",
 // so the value must be the path relative to /dev ("dri/card0") for the returned name to be an
 // openable devnode (aquamarine reopens it with open(name) in reopenDRMNode()).
-const char* drm_sysfs_uevent(void) { return "DEVNAME=dri/card0\n"; }
+const char* drm_sysfs_uevent(const char* path) {
+  return path && strstr(path, "226:128") ? "DEVNAME=dri/renderD128\n" : "DEVNAME=dri/card0\n";
+}
 
 // Full DRM uevent body for /sys/class/drm/<name>/uevent (libudev scanGPUs reads this).
 const char* drm_sysfs_uevent_for(const char* path) {

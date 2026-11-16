@@ -543,7 +543,9 @@ static long do_statx(int lx_dirfd, const char* gpath, int lxflags, unsigned mask
   if ((gpath && gpath[0] == '/' && drm_is_node(gpath)) ||
       ((lxflags & LX_AT_EMPTY_PATH) && (!gpath || !gpath[0]) && drm_owns_fd(lx_dirfd))) {
     unsigned mode = sx->stx_mode; unsigned long rdev = 0;
-    drm_fake_stat(&mode, &rdev, "renderD128");
+    const char* node = (gpath && gpath[0] == '/') ? gpath :
+                       drm_minor_of_fd(lx_dirfd) == 0 ? "/dev/dri/card0" : "/dev/dri/renderD128";
+    drm_fake_stat(&mode, &rdev, node);
     sx->stx_mode       = (unsigned short)mode;
     sx->stx_rdev_major = (unsigned)((rdev >> 8) & 0xfff);
     sx->stx_rdev_minor = (unsigned)(rdev & 0xff);
@@ -743,7 +745,7 @@ static long do_dup3(int oldfd, int newfd, int flags) {
   if (getenv("IDLE_PIPE_TRACE") && (oldfd == 11 || newfd == 11))
     fprintf(stderr, "[idle-socket] pid=%d op=dup3 old=%d new=%d flags=%d\n",
             getpid(), oldfd, newfd, flags);
-  if (drm_owns_fd(oldfd) && newfd >= 0) drm_register_fd(newfd);
+  if (drm_owns_fd(oldfd) && newfd >= 0) drm_register_fd_copy(newfd, oldfd);
   if (snd_owns_fd(oldfd) && newfd >= 0) snd_dup_fd(oldfd, newfd);
   if (evdev_owns_fd(oldfd) && newfd >= 0) evdev_register_fd(newfd, evdev_device_of_fd(oldfd));
   if (oldfd == newfd) return -LX_EINVAL;         // this is the whole point of dup3 vs dup2
@@ -892,7 +894,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     // the copy reported /dev/null's device numbers and Mesa went looking for /sys/dev/char/0:12290.
     if (r >= 0 && pidfd_shim_pid((int)a0) > 0) pidfd_shim_register(r, pidfd_shim_pid((int)a0));
     if (r >= 0) rd_rtnl_dup((int)a0, r);
-    if (r >= 0 && drm_owns_fd((int)a0)) drm_register_fd(r);
+    if (r >= 0 && drm_owns_fd((int)a0)) drm_register_fd_copy(r, (int)a0);
     if (r >= 0 && snd_owns_fd((int)a0)) snd_dup_fd((int)a0, r);
     if (r >= 0 && evdev_owns_fd((int)a0)) evdev_register_fd(r, evdev_device_of_fd((int)a0));
     return r < 0 ? eret() : r;
