@@ -51,6 +51,11 @@ console.unlink(missing_ok=True)
 env = os.environ.copy()
 env.update(RDUID0="1", RDCONS_DUMP="1", RDCONS_DUMPFILE=str(console),
            RDVT_TEST_INPUT_FIFO=str(fifo), RDSOCKETGROUP=str(tmp / "sockets"))
+if os.environ.get("RD_TEST_PLASMA") == "1":
+    # Match run.sh --init: the display manager/session establishes these itself.
+    env.update(RDNATIVE_SESSION="1", RDENV_WAYLAND_DISPLAY="",
+               RDENV_DISPLAY="", RDENV_XDG_RUNTIME_DIR="",
+               RDENV_LIBGL_ALWAYS_INDIRECT="", LIBGL_ALWAYS_INDIRECT="")
 (tmp / "sockets").mkdir(mode=0o700)
 
 def no_core():
@@ -94,6 +99,21 @@ try:
                     type_keys("id -un; id -u\n")
                     ok = wait_text("\nshimtest\n", 8) and wait_text("\n22001\n", 3)
                 print("LOGIN_SHELL_AND_ID" if ok else "LOGIN_SHELL_MISSING", flush=True)
+                if ok and os.environ.get("RD_TEST_PLASMA") == "1":
+                    type_keys("printf 'PLASMA_RUNTIME=%s\\n' \"$XDG_RUNTIME_DIR\"\n")
+                    runtime_seen = wait_text("PLASMA_RUNTIME=/run/user/22001", 8)
+                    type_keys("/usr/lib/plasma-dbus-run-session-if-needed /usr/bin/startplasma-wayland\n")
+                    time.sleep(15)
+                    listing = subprocess.check_output(["ps", "-axo", "pid=,command="], text=True)
+                    programs = [args.split(None, 1)[0]
+                                for _, args in boot_processes(listing, binary, root)]
+                    print("PLASMA_RUNTIME_OK" if runtime_seen else "PLASMA_RUNTIME_MISSING", flush=True)
+                    print("PLASMA_PROGRAMS", ",".join(sorted(set(programs))), flush=True)
+                    # This is only a process-start probe. A visible desktop and a working
+                    # greeter/logout cycle require a separate GUI integration test.
+                    kwin_seen = any("kwin_wayland" in p for p in programs)
+                    print("KWIN_PROCESS_SEEN" if kwin_seen else "KWIN_PROCESS_MISSING", flush=True)
+                    ok = runtime_seen and kwin_seen
                 if ok and os.environ.get("RD_TEST_JOB_CONTROL") == "1":
                     if console.exists() and "no job control in this shell" in console.read_text(errors="replace"):
                         ok = False
