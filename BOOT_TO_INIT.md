@@ -380,3 +380,22 @@ The responder captured two packets. This proves a controlled DNS request and
 reply through `systemd-resolved` for that fixture. It does not establish
 external DNS reliability, hot-plug timing, or that all host link types are
 represented. No live network setting or installed root was changed.
+
+## Virtual DRM graphical seat (2026-11-16)
+
+The virtual DRM card previously appeared at `/dev/dri/card0` and
+`/sys/class/drm/card0`, but logind's `seat0` reported `CAN_GRAPHICAL=0`.
+systemd v261 enumerates processed udev devices tagged `master-of-seat` and
+resolves their device IDs through `/sys/dev/char`. Shimmy now gives its card
+the `c226:0` sysfs identity and a private guest udev database/tag record with
+the standard `seat` and `master-of-seat` tags. Only the guest PID1 boot owner
+writes the record atomically; a `RDDRM=0` boot removes Shimmy's own record and
+tags. Other guest processes do not modify that shared seat state.
+
+In an isolated Arch clone, `udevadm info --export-db
+--tag-match=master-of-seat` enumerated card0, and a full normal systemd boot
+reached the login prompt with `CAN_GRAPHICAL=1`. A second isolated boot with
+`RDDRM=0` reached the prompt with `CAN_GRAPHICAL=0`. CLI and GUI builds and
+`tests/test_graphical_seat.py` passed. This proves logind's seat discovery,
+not a visible SDDM greeter, display mode selection, or a functioning Plasma
+session. The live root and session were not changed.

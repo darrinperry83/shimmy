@@ -903,6 +903,9 @@ int drm_sysfs_kind(const char* path) {
     return 0;
   }
   const char* p = path + sizeof pre - 1;
+  // sd-device resolves a character device number through this sysfs symlink.
+  // Without it udev's tag index cannot turn c226:0 into a seat device.
+  if (strcmp(p, "0") == 0) return 12;
   while (*p >= '0' && *p <= '9') p++;                 // skip the minor digits
   if (strcmp(p, "/device/drm") == 0) return 1;
   if (strcmp(p, "/uevent") == 0)     return 2;
@@ -980,7 +983,7 @@ void drm_fake_stat(unsigned int* mode, unsigned long* rdev, const char* path) {
   if (k == 1) { *mode = 0020000u; *rdev = ((unsigned long)DRM_MAJOR << 8); return; } // S_IFCHR
   if (k == 2 || k == 5 || k == 6 || k == 9 || k == 10) { *mode = 0100000u; *rdev = 0; return; } // S_IFREG
   if (k == 3 || k == 7 || k == 8) { *mode = 0040000u; *rdev = 0; return; }                    // S_IFDIR
-  if (k == 4 || k == 11) { *mode = 0120000u; *rdev = 0; return; }                             // S_IFLNK
+  if (k == 4 || k == 11 || k == 12) { *mode = 0120000u; *rdev = 0; return; }                  // S_IFLNK
   int render = path && strstr(path, "renderD") != NULL;
   *mode = (*mode & 0777u) | 0020000u;                       // S_IFCHR
   *rdev = ((unsigned long)DRM_MAJOR << 8) | (render ? 128u : 0u);

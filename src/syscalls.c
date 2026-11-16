@@ -376,6 +376,7 @@ void syscalls_set_guest_ppid(long ppid) { g_guest_ppid = ppid; }
 long syscalls_get_guest_ppid(void) { return g_guest_ppid; }
 
 static void synth_materialize_all(void);   // defined with the /proc,/sys,/dev synthesis below
+static void drm_materialize_udev(void);     // only the actual guest PID1 boot owner updates seat state
 static int  cgroup_dir_path(int fd, char* out, size_t cap);  // defined with the cgroup synthesis below
 
 void syscalls_set_root(const char* root) {
@@ -447,6 +448,9 @@ static int guest_path_is_init(const char* p) {
 void syscalls_set_exe(const char* guest_path) {
   if (guest_path && *guest_path) snprintf(g_exe, sizeof g_exe, "%s", guest_path);
   g_is_init = guest_path_is_init(guest_path);
+  const char* owner = getenv("RDVT_ROOT_PID");
+  if (g_is_init && g_rootlen && owner && strtol(owner, NULL, 10) == (long)getpid())
+    drm_materialize_udev();
 }
 
 // Scoped PID-1 identity. syscalls_set_exe() sets it for the init process; the fork() child clears
@@ -3402,6 +3406,95 @@ static int mkdir_p(const char* path) {
   return 0;
 }
 
+// The DRM card is supplied by Shimmy, so udev has no kernel add event from which to build its
+// database. logind enumerates /run/udev/tags/master-of-seat and resolves c226:0 through sysfs;
+// a /dev/dri/card0 placeholder alone never makes seat0 graphical. Keep these records in the
+// private guest root. The tag describes the virtual card, not a host GPU device.
+static void drm_materialize_udev(void) {
+  static const char* const dirs[] = {
+    "/sys/dev/char", "/run/udev/data", "/run/udev/tags/seat",
+    "/run/udev/tags/master-of-seat",
+  };
+  char host[PATH_MAX];
+  for (size_t i = 0; i < sizeof dirs / sizeof dirs[0]; i++)
+    if (guest_to_host(dirs[i], host, sizeof host) == 0) mkdir_p(host);
+
+  static const char* const files[] = {
+    "/run/udev/data/c226:0", "/run/udev/tags/seat/c226:0",
+    "/run/udev/tags/master-of-seat/c226:0",
+  };
+  if (!drm_enabled()) {
+    // RDDRM=0 must not leave a graphical seat from an earlier launch of this root.
+    if (guest_to_host(files[0], host, sizeof host) == 0) {
+      char db[512] = {0};
+      int fd = open(host, O_RDONLY);
+      if (fd >= 0) { (void)read(fd, db, sizeof db - 1); close(fd); }
+      if (strstr(db, "E:SHIMMY_VIRTUAL_DRM=1\n")) {
+        for (size_t i = 0; i < sizeof files / sizeof files[0]; i++)
+          if (guest_to_host(files[i], host, sizeof host) == 0) unlink(host);
+        if (guest_to_host("/sys/dev/char/226:0", host, sizeof host) == 0) {
+          char target[64];
+          ssize_t n = readlink(host, target, sizeof target - 1);
+          if (n >= 0) {
+            target[n] = 0;
+            if (strcmp(target, "../../class/drm/card0") == 0) unlink(host);
+          }
+        }
+      }
+    }
+    return;
+  }
+
+  if (guest_to_host("/sys/dev/char/226:0", host, sizeof host) != 0) return;
+  if (symlink("../../class/drm/card0", host) < 0 && errno != EEXIST) return;
+  char target[64];
+  ssize_t target_len = readlink(host, target, sizeof target - 1);
+  if (target_len < 0) return;
+  target[target_len] = 0;
+  if (strcmp(target, "../../class/drm/card0") != 0) return;
+
+  int db_ready = 0;
+  if (guest_to_host(files[0], host, sizeof host) == 0) {
+    // Do not replace a database entry authored by the guest's actual udev service.
+    char prior[512] = {0};
+    int old_fd = open(host, O_RDONLY);
+    if (old_fd >= 0) {
+      (void)read(old_fd, prior, sizeof prior - 1);
+      close(old_fd);
+      if (!strstr(prior, "E:SHIMMY_VIRTUAL_DRM=1\n")) return;
+    }
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) < 0) return;
+    unsigned long long usec = (unsigned long long)ts.tv_sec * 1000000ULL +
+                              (unsigned long long)ts.tv_nsec / 1000ULL;
+    char db[384];
+    int len = snprintf(db, sizeof db,
+                       "I:%llu\nE:DEVNAME=/dev/dri/card0\nE:DEVPATH=/class/drm/card0\n"
+                       "E:SUBSYSTEM=drm\nE:DEVTYPE=drm_minor\nE:ID_SEAT=seat0\n"
+                       "E:SHIMMY_VIRTUAL_DRM=1\nG:seat\nG:master-of-seat\n"
+                       "Q:seat\nQ:master-of-seat\n", usec);
+    if (len < 0 || len >= (int)sizeof db) return;
+    // Readers must never observe a partially written udev record during parallel service starts.
+    char tmp[PATH_MAX];
+    int tmp_len = snprintf(tmp, sizeof tmp, "%s.shimmy-%d", host, (int)getpid());
+    if (tmp_len > 0 && tmp_len < (int)sizeof tmp) {
+      int fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL, 0644);
+      if (fd >= 0) {
+        ssize_t n = write(fd, db, (size_t)len);
+        close(fd);
+        if (n == (ssize_t)len && rename(tmp, host) == 0) db_ready = 1;
+        else unlink(tmp);
+      }
+    }
+  }
+  if (!db_ready) return;
+  for (size_t i = 1; i < sizeof files / sizeof files[0]; i++) {
+    if (guest_to_host(files[i], host, sizeof host) != 0) continue;
+    int fd = open(host, O_WRONLY | O_CREAT, 0644);
+    if (fd >= 0) close(fd);
+  }
+}
+
 // Materialize every synthesized directory in the rootfs, once, at startup. Eager (not lazy in each
 // syscall) so statx/newfstatat/openat/faccessat all find the dirs and F_GETPATH maps their fds back
 // to the guest path for do_getdents64. The set is static plus the live pid/cpu counts, all known
@@ -4193,6 +4286,13 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
       memcpy(buf, t, n);                          // readlink does NOT NUL-terminate
       return (long)n;
     }
+    if (drm_sysfs_kind(gabs) == 12) {
+      const char* t = "../../class/drm/card0";
+      size_t n = strlen(t);
+      if (n > sz) n = sz;
+      memcpy(buf, t, n);
+      return (long)n;
+    }
     // /sys/class/sound/card0/subsystem — libudev's subsystem probe for the synthetic sound card.
     if (snd_sysfs_kind(gabs) == 3) {
       const char* t = snd_sysfs_link();
@@ -4247,6 +4347,8 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     if (drm_sysfs_kind(gabs)) {
       memset(out, 0, sizeof *out);
       drm_fake_stat(&out->st_mode, &out->st_rdev, gabs);
+      if (drm_sysfs_kind(gabs) == 12 && !(a3 & LX_AT_SYMLINK_NOFOLLOW))
+        out->st_mode = S_IFDIR | 0755;
       return 0;
     }
     // Synthetic /sys/class/sound/* and /run/udev/data/c116:0 — the ALSA card's sysfs/udev surface.
