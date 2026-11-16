@@ -123,6 +123,11 @@ try:
                     manager = wait_text("SHIMMY_USER_MANAGER_READY", 12)
                     ok = runtime and manager
                     print("LOGIN_USER_SESSION_OK" if ok else "LOGIN_USER_SESSION_MISSING", flush=True)
+                    if ok:
+                        type_keys("busctl --user list >/dev/null && "
+                                  "printf 'SHIMMY_USER_BUS_%s\\n' READY\n")
+                        ok = wait_text("SHIMMY_USER_BUS_READY", 12)
+                        print("LOGIN_USER_BUS_OK" if ok else "LOGIN_USER_BUS_MISSING", flush=True)
                 if ok and os.environ.get("RD_TEST_JOB_CONTROL") == "1":
                     if console.exists() and "no job control in this shell" in console.read_text(errors="replace"):
                         ok = False
