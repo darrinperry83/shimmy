@@ -24,6 +24,8 @@ def main():
     parser.add_argument('--seconds', type=int, default=45)
     parser.add_argument('--logs', type=Path, required=True)
     args = parser.parse_args()
+    if args.root.is_symlink():
+        parser.error('--root must be a disposable directory, not a symlink to a live root')
     root, gui, cli = (p.resolve(strict=True) for p in (args.root, args.gui, args.cli))
     if not root.is_dir() or not all(p.is_file() and os.access(p, os.X_OK) for p in (gui, cli)):
         parser.error('root must be a directory and both shim binaries must be executable')
@@ -65,7 +67,7 @@ def main():
             print(f'foot_pid={foot.pid} kwin_running={kwin.poll() is None}', flush=True)
             time.sleep(args.seconds)
             print(f'foot_exit={foot.poll()} kwin_exit={kwin.poll()}', flush=True)
-            return 0
+            return 0 if kwin.poll() is None and (foot.poll() is None or foot.returncode == 0) else 1
     finally:
         for proc in (foot, kwin):
             if proc and proc.poll() is None:
