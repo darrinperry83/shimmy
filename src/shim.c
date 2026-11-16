@@ -55,6 +55,7 @@
 #include "guestthread.h"
 #include "execve.h"
 #include "vt.h"
+#include "evdev.h"
 // PID-1 identity lives in syscalls.c (set from syscalls_set_exe); the fork child clears it because
 // it is a new guest process, not PID 1. Declared here because syscalls.h is a symlink into the
 // shared linux-shim tree that this task must not modify.
@@ -2415,10 +2416,15 @@ int main(int argc, char** argv) {
       wlsrv_start(sock);
       g_display_up = 1;             // fork() rebuilds only a server we actually started
     }
-    // This in-process pump only reaches a DRM compositor in standalone mode. A compositor
-    // launched by systemd is a different host process and needs the planned seat input
-    // channel from the persistent GUI owner; per-service pumps would only wake pointlessly.
-    if (!getenv("RDNATIVE_SESSION")) gpuwin_start_evdev_pump();
+    if (getenv("RDNATIVE_SESSION")) {
+      // Only PID 1 owns AppKit input. Its pump sends bounded evdev records into
+      // the compositor process's private device pipes through the boot socket.
+      const char* rp = getenv("RDVT_ROOT_PID");
+      if (rp && atol(rp) == (long)getpid()) {
+        if (evdev_shared_host_init() == 0) gpuwin_start_evdev_pump();
+        else fprintf(stderr, "[evdev] native boot input bridge unavailable\n");
+      }
+    } else gpuwin_start_evdev_pump();
   }
 #endif
 #ifdef WL_HEADLESS

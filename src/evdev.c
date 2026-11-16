@@ -20,6 +20,16 @@
 #include <errno.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <pthread.h>
+#include <limits.h>
+#include <stddef.h>
+
+// Reserve private transport descriptors so guest close_range() and systemd's
+// fd packing cannot close or expose them. The native test supplies stubs.
+extern int shim_fd_reserve(int fd);
+extern void shim_fd_unreserve(int fd);
 
 // ---- evdev constants (linux/input.h, linux/input-event-codes.h) -------------------------
 #define EV_SYN         0x00
@@ -101,6 +111,154 @@ static int g_fds[EVDEV_MAXFD];    // guest-visible fd
 static int g_devf[EVDEV_MAXFD];   // device index for that fd
 static int g_nfd;
 
+// The standalone compositor shares a process with the window and uses g_devs
+// directly. In a systemd boot each Linux process is a separate host process:
+// the persistent GUI sends small input records to the currently registered
+// compositor's own evdev pipes. The socket lives in the existing per-boot,
+// mode-0700 /tmp/rdx-<root-pid> namespace, which the boot reaper already owns.
+#define INPUT_WIRE_MAGIC 0x5244494eu
+struct input_wire {
+  uint32_t magic;
+  uint16_t dev, type, code;
+  int32_t value;
+};
+static int g_input_socket = -1;
+static pid_t g_input_socket_pid;
+static int g_input_host;
+static struct sockaddr_un g_input_peer;
+static socklen_t g_input_peer_len;
+static char g_input_client_path[sizeof(((struct sockaddr_un*)0)->sun_path)];
+static pthread_once_t g_input_client_once = PTHREAD_ONCE_INIT;
+
+static int shared_input_mode(void) {
+  const char* mode = getenv("RDNATIVE_SESSION");
+  const char* root = getenv("RDVT_ROOT_PID");
+  return mode && *mode && *mode != '0' && root && *root;
+}
+
+static int input_path(char* out, size_t cap, const char* leaf) {
+  const char* root = getenv("RDVT_ROOT_PID");
+  if (!root || !*root) return -1;
+  for (const char* p = root; *p; p++)
+    if (*p < '0' || *p > '9') return -1;
+  int n = snprintf(out, cap, "/tmp/rdx-%s/%s", root, leaf);
+  return n > 0 && (size_t)n < cap ? 0 : -1;
+}
+
+static int input_namespace_valid(void) {
+  char dir[sizeof(((struct sockaddr_un*)0)->sun_path)];
+  if (input_path(dir, sizeof dir, "") != 0) return 0;
+  size_t n = strlen(dir);
+  if (n && dir[n - 1] == '/') dir[n - 1] = 0;
+  struct stat st;
+  return lstat(dir, &st) == 0 && S_ISDIR(st.st_mode) &&
+         st.st_uid == geteuid() && (st.st_mode & 0777) == 0700;
+}
+
+static int input_socket_new(void) {
+  int fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+  if (fd < 0) return -1;
+  fcntl(fd, F_SETFD, FD_CLOEXEC);
+  fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
+  return fd;
+}
+
+int evdev_shared_host_init(void) {
+  if (!shared_input_mode() || !input_namespace_valid()) return -1;
+  const char* root = getenv("RDVT_ROOT_PID");
+  if (!root || atoi(root) != (int)getpid()) return -1;
+  if (g_input_socket >= 0 && g_input_socket_pid == getpid() && g_input_host) return 0;
+  char path[sizeof(((struct sockaddr_un*)0)->sun_path)];
+  if (input_path(path, sizeof path, "input.sock") != 0) return -1;
+  int fd = input_socket_new();
+  if (fd < 0) return -1;
+  struct sockaddr_un addr = { .sun_family = AF_UNIX };
+  snprintf(addr.sun_path, sizeof addr.sun_path, "%s", path);
+  // A newly launched boot owns its private directory. Replace only a stale
+  // socket inside it; no other boot can share this path while root PID lives.
+  unlink(path);
+  if (bind(fd, (struct sockaddr*)&addr, sizeof addr) != 0) { close(fd); return -1; }
+  chmod(path, 0600);
+  g_input_socket = shim_fd_reserve(fd);
+  g_input_socket_pid = getpid();
+  g_input_host = 1;
+  return 0;
+}
+
+static void input_inject_local(int dev, uint16_t type, uint16_t code, int32_t value);
+
+static void* input_client_loop(void* unused) {
+  (void)unused;
+  for (;;) {
+    struct input_wire msg;
+    ssize_t n = recv(g_input_socket, &msg, sizeof msg, 0);
+    if (n == sizeof msg && msg.magic == INPUT_WIRE_MAGIC && msg.dev <= EVDEV_DEV_PTR)
+      input_inject_local(msg.dev, msg.type, msg.code, msg.value);
+    else if (n < 0 && errno != EINTR) break;
+  }
+  return NULL;
+}
+
+static void input_client_start(void) {
+  if (!shared_input_mode() || !input_namespace_valid()) return;
+  const char* root = getenv("RDVT_ROOT_PID");
+  if (root && atoi(root) == (int)getpid()) return;
+  if (g_input_socket >= 0 && g_input_socket_pid != getpid()) {
+    shim_fd_unreserve(g_input_socket);
+    close(g_input_socket); // inherited host endpoint after fork, never a child-owned listener
+    g_input_socket = -1;
+  }
+  char leaf[32];
+  snprintf(leaf, sizeof leaf, "input.%d", (int)getpid());
+  if (input_path(g_input_client_path, sizeof g_input_client_path, leaf) != 0) return;
+  int fd = input_socket_new();
+  if (fd < 0) return;
+  struct sockaddr_un addr = { .sun_family = AF_UNIX };
+  snprintf(addr.sun_path, sizeof addr.sun_path, "%s", g_input_client_path);
+  unlink(g_input_client_path); // same PID after guest exec; no other process owns it
+  if (bind(fd, (struct sockaddr*)&addr, sizeof addr) != 0) { close(fd); return; }
+  chmod(g_input_client_path, 0600);
+  char server_path[sizeof addr.sun_path];
+  if (input_path(server_path, sizeof server_path, "input.sock") != 0) {
+    close(fd); unlink(g_input_client_path); return;
+  }
+  struct sockaddr_un server = { .sun_family = AF_UNIX };
+  snprintf(server.sun_path, sizeof server.sun_path, "%s", server_path);
+  struct input_wire register_msg = { .magic = INPUT_WIRE_MAGIC, .dev = UINT16_MAX };
+  if (sendto(fd, &register_msg, sizeof register_msg, 0,
+             (struct sockaddr*)&server, sizeof server) != sizeof register_msg) {
+    close(fd); unlink(g_input_client_path); return;
+  }
+  // Only the root sender is polled. The guest listener sleeps in recv() until
+  // actual input arrives rather than waking a background thread every 1 ms.
+  fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK);
+  g_input_socket = shim_fd_reserve(fd);
+  g_input_socket_pid = getpid();
+  g_input_host = 0;
+  pthread_t thread;
+  if (pthread_create(&thread, NULL, input_client_loop, NULL) == 0) pthread_detach(thread);
+}
+
+static void input_host_receive_registration(void) {
+  if (g_input_socket < 0 || !g_input_host || g_input_socket_pid != getpid()) return;
+  for (;;) {
+    struct input_wire msg;
+    struct sockaddr_un peer;
+    socklen_t len = sizeof peer;
+    ssize_t n = recvfrom(g_input_socket, &msg, sizeof msg, 0,
+                         (struct sockaddr*)&peer, &len);
+    if (n < 0) { if (errno == EINTR) continue; break; }
+    if (n != sizeof msg || msg.magic != INPUT_WIRE_MAGIC || msg.dev != UINT16_MAX ||
+        peer.sun_family != AF_UNIX || len <= offsetof(struct sockaddr_un, sun_path) ||
+        !memchr(peer.sun_path, 0, sizeof peer.sun_path)) continue;
+    char prefix[sizeof peer.sun_path];
+    if (input_path(prefix, sizeof prefix, "input.") != 0 ||
+        strncmp(peer.sun_path, prefix, strlen(prefix)) != 0) continue;
+    g_input_peer = peer;
+    g_input_peer_len = len;
+  }
+}
+
 static int tracing(void) {
   static int t = -1;
   if (t < 0) { const char* e = getenv("RDEVDEV_TRACE"); t = (e && *e && *e != '0'); }
@@ -140,6 +298,7 @@ int evdev_open_node(const char* path) {
   int dev = dev_index_of_path(path);
   if (dev < 0) return -1;
   if (ensure_pipe(dev) != 0) return -1;
+  if (shared_input_mode()) pthread_once(&g_input_client_once, input_client_start);
   int fd = fcntl(g_devs[dev].pipe_rd, F_DUPFD_CLOEXEC, 0);
   if (fd < 0) return -1;
   evdev_register_fd(fd, dev);
@@ -214,7 +373,7 @@ static void put_string(void* dst, uint64_t len, const char* s) {
 }
 
 // ---- injection -------------------------------------------------------------------------
-void evdev_inject(int dev, uint16_t type, uint16_t code, int32_t value) {
+static void input_inject_local(int dev, uint16_t type, uint16_t code, int32_t value) {
   if (dev < 0 || dev > 1 || !g_devs[dev].created) return;
   struct linux_input_event e;
   memset(&e, 0, sizeof e);
@@ -227,6 +386,23 @@ void evdev_inject(int dev, uint16_t type, uint16_t code, int32_t value) {
   e.value   = value;
   ssize_t r = write(g_devs[dev].pipe_wr, &e, sizeof e);
   (void)r;                                             // EAGAIN (full) or EPIPE (closed): drop
+}
+
+void evdev_inject(int dev, uint16_t type, uint16_t code, int32_t value) {
+  if (dev < 0 || dev > EVDEV_DEV_PTR) return;
+  if (shared_input_mode() && g_input_host && g_input_socket_pid == getpid()) {
+    input_host_receive_registration();
+    if (!g_input_peer_len) return;
+    struct input_wire msg = { .magic = INPUT_WIRE_MAGIC, .dev = (uint16_t)dev,
+                              .type = type, .code = code, .value = value };
+    // SOCK_DGRAM and O_NONBLOCK bound this path: a stalled guest cannot block
+    // the AppKit input pump. A later registration replaces an exited session.
+    if (sendto(g_input_socket, &msg, sizeof msg, 0,
+               (struct sockaddr*)&g_input_peer, g_input_peer_len) != sizeof msg &&
+        (errno == ENOENT || errno == ECONNREFUSED)) g_input_peer_len = 0;
+    return;
+  }
+  input_inject_local(dev, type, code, value);
 }
 
 void evdev_syn(int dev) { evdev_inject(dev, EV_SYN, SYN_REPORT, 0); }

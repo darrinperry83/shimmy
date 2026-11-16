@@ -2489,7 +2489,11 @@ static void* evdev_pump_thread(void* arg) {
   (void)arg;
   int last_x = 0, last_y = 0;
   while (!atomic_load(&gEvdevStop)) {
-    if (drm_master_active()) {
+    // Standalone DRM has an in-process master. In a native systemd boot the
+    // master lives in another host process, so route only while the graphical
+    // VT owns input. Text VT keys remain on the console path in ev_handle().
+    if ((drm_master_active() || getenv("RDNATIVE_SESSION")) &&
+        (!vt_enabled() || vt_active() == 7)) {
       struct gpuwin_event e;
       while (gpuwin_next_event(&e)) {
         switch (e.type) {
@@ -2515,6 +2519,11 @@ static void* evdev_pump_thread(void* arg) {
         default: break;
         }
       }
+    } else if (vt_enabled() && vt_active() != 7) {
+      // Mouse movement can still enter the host ring while a text VT is shown.
+      // Discard it now so returning to the desktop cannot replay hidden input.
+      struct gpuwin_event ignored;
+      while (gpuwin_next_event(&ignored)) { }
     }
     usleep(1000);
   }

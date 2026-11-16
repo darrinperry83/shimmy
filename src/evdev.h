@@ -39,4 +39,9 @@ const char* evdev_sysfs_link(void);         // target for /sys/class/input/<name
 void evdev_inject(int dev, uint16_t type, uint16_t code, int32_t value);
 void evdev_syn(int dev);
 
+// In native systemd boot the GUI owner and the compositor are separate host
+// processes. Start the per-boot, nonblocking input sender in the GUI owner;
+// evdev_open_node registers the compositor's receiver automatically.
+int evdev_shared_host_init(void);
+
 #endif
