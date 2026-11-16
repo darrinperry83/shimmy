@@ -9,12 +9,16 @@
 #include <unistd.h>
 
 int main(void) {
+  if (prctl(PR_SET_PDEATHSIG, 65) != -1 || errno != EINVAL) return 16;
+  if (prctl(PR_SET_PDEATHSIG, SIGTERM) != -1 || errno != ENOSYS) return 17;
   sigset_t set, pending;
   sigemptyset(&set);
   sigaddset(&set, SIGTERM);
   if (sigprocmask(SIG_BLOCK, &set, NULL)) return 1;
   struct timespec short_wait = {.tv_sec = 0, .tv_nsec = 1000000};
   if (sigtimedwait(&set, NULL, &short_wait) != -1 || errno != EAGAIN) return 2;
+  struct timespec bad_wait = {.tv_sec = 0, .tv_nsec = 1000000000};
+  if (sigtimedwait(&set, NULL, &bad_wait) != -1 || errno != EINVAL) return 18;
   if (prctl(PR_SET_PDEATHSIG, SIGTERM)) return 3;
   int got = -1;
   if (prctl(PR_GET_PDEATHSIG, &got) || got != SIGTERM) return 4;
@@ -38,6 +42,7 @@ int main(void) {
       nanosleep(&pause, NULL);
       if (sigpending(&pending) || !sigismember(&pending, SIGTERM)) _exit(11);
       int signo = sigwaitinfo(&set, NULL);
+      if (sigpending(&pending) || sigismember(&pending, SIGTERM)) _exit(19);
       byte = signo == SIGTERM ? 'P' : 'F';
       write(result[1], &byte, 1);
       _exit(signo == SIGTERM ? 0 : 12);
