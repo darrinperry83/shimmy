@@ -794,7 +794,7 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
     // RDSEQPACKET must ride across execve for the same reason every RDX18_* knob does: WebKit's
     // socketpair is created by the UI process and USED by the exec'd WebKitWebProcess, so a child
     // that reverted to the default would make the A/B measure nothing.
-    "RDSEQPACKET", "RDCREDLOG", "RDSOCKETGROUP", "RDSHARE",
+    "RDSEQPACKET", "RDCREDLOG", "RDSOCKETGROUP", "RDSHARE", "RDPIDFD_SOCKET",
     "RDNETSOCK",
     // RDSND gates the synthetic ALSA card. PipeWire and WirePlumber are EXEC'D daemons: the ALSA
     // monitor runs inside the exec'd wireplumber, and without RDSND riding across execve it sees
@@ -1199,6 +1199,9 @@ static long do_fork(const arm_thread_state64_t* ts) {
   // the display it inherited belongs to a process that is about to exit.
   display_restart_in_fork_child();
   boot_root_watch_start();
+  // A fork retains descriptors but not the parent's pidfd receiver thread.
+  // Stand up this child's own receiver before its guest code can be watched.
+  if (pidfd_shim_target_init() < 0) _exit(127);
 
   mach_port_t np = MACH_PORT_NULL;
   mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &np);
@@ -2246,6 +2249,10 @@ int main(int argc, char** argv) {
       boot_lock_rootfs(g_rootfs_path) != 0) {
     fprintf(stderr, "[shim] another boot already owns rootfs %s (or boot lock failed): %s\n",
             g_rootfs_path, strerror(errno));
+    return 1;
+  }
+  if (pidfd_shim_target_init() < 0) {
+    fprintf(stderr, "[shim] failed to initialize target-owned pidfd receiver\n");
     return 1;
   }
   idle_trace_fd13("new-shim-entry", guestpath);

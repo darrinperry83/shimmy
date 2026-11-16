@@ -1,7 +1,9 @@
 # Transferable pidfd design for logind sessions
 
-This is a tested primitive, **not** a Shimmy pidfd implementation yet. Normal
-Arch login still fails to create `session-c1.scope` and a user manager.
+Shimmy now has an opt-in target-owned socket pidfd implementation under
+`RDPIDFD_SOCKET=1`. The default kqueue mode is unchanged. The socket mode has
+passed native lifetime tests and isolated login with a separate broker queue
+compatibility probe, but it is not complete Linux pidfd parity.
 
 ## Why the current path fails
 
@@ -27,7 +29,7 @@ When the target exits, the kernel closes that peer and the transferred read
 endpoint stays pollable at EOF. Its path carries the target PID and exact
 kernel-reported process birth seconds/microseconds; recovery must validate
 both against `proc_pidinfo()` and reject a dead or reused PID. The target
-would receive the peer over a private per-boot control socket and acknowledge
+receives the peer over a private per-boot control socket and acknowledges
 receipt before the creator closes its copy.
 
 `tests/test_transferable_pidfd_lifetime.c` verifies the primitive with three
@@ -35,9 +37,17 @@ host processes: creator exits, target still holds peer, observer's fd is not
 ready; target exits, observer sees EOF. It also checks retained pathname,
 exact birth matching, a wrong birth value, and rejection after target exit.
 
-Before integrating, the control socket needs authenticated per-boot access,
-descriptor retention across guest `execve()` and `close_range()`, target
-termination races, bounded fd accounting, and tests through real systemd
-`StartTransientUnit`. A same-host-user process is not isolated from Shimmy
-by this design. Until those checks pass, keep the kqueue pidfd and report
-that authenticated logind sessions are incomplete.
+The implemented `tests/test_target_owned_pidfd.c` checks target ownership,
+creator exit, SCM_RIGHTS handoff, exec/close_range retention, target exit,
+forged birth identity, and descriptor reuse. An isolated full Arch login
+created a logind scope and user manager only with this mode **and**
+`RDSOCKETOUTQ_COMPAT=1`; the latter is a separate experimental D-Bus broker
+compatibility probe.
+
+The control socket checks the kernel peer PID and same Shimmy image, and
+requires a private socket directory. This does not isolate another process
+running as the same macOS user. Nonzero `pidfd_send_signal` is unsupported in
+socket mode to avoid signaling a reused host PID. The registry has a fixed
+512-slot capacity, and some default kqueue-mode fallbacks do not match Linux
+errors. Keep this representation opt-in until those semantics and desktop
+sessions are verified.

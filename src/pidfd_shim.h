@@ -6,6 +6,9 @@
 // pidfd emulation: a kqueue fd that becomes readable when the target (host) process exits,
 // matching Linux pidfd semantics closely enough for systemd's sd-event child sources.
 long pidfd_open_shim(pid_t pid, unsigned int flags);
+// Start this host Shimmy process's private receiver for target-owned pidfd
+// peers before entering guest code. Harmless when RDSOCKETGROUP is unset.
+int pidfd_shim_target_init(void);
 void pidfd_shim_closed(int fd);
 // Look up the pid behind a pidfd, or 0 if unknown.
 pid_t pidfd_shim_pid(int fd);

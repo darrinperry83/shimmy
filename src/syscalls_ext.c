@@ -1731,6 +1731,8 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   }
   case 424: {                                                   // pidfd_send_signal(pidfd, sig, info, flags)
     (void)a2; (void)a3;
+    if ((int)a1 == 0 && getenv("RDPIDFD_SOCKET"))
+      return ok0(pidfd_shim_send_signal((int)a0, 0));
     int hsig = host_signo((int)a1);
     if (hsig <= 0) return hsig == 0 ? 0 : -LX_EINVAL;
     return ok0(pidfd_shim_send_signal((int)a0, hsig));
