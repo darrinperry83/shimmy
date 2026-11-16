@@ -956,14 +956,52 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return ok0(symlinkat((const char*)a0, hdirfd, host));
   }
   case 39: return 0;                                            // umount2: nothing is ever really mounted
-  // mount(): the shim has no real mounts. /proc, /sys, /dev, /run, /dev/shm, /dev/pts and the
-  // cgroupfs are all synthesized in-process (getdents64 + leaf files), so the boot mounts systemd
-  // performs are no-ops that must SUCCEED. systemd treats an EPERM here as "early API filesystems
-  // failed" and freezes the whole boot, so accepting the mount (and leaving the synthetic tree in
-  // place) is the correct, honest answer: the files are already there.
+  // mount(): early API filesystems are synthesized in-process, so systemd's
+  // mount calls for those existing trees can succeed without a host mount.
+  // The per-user tmpfs is different: claiming success for /run/user/<uid>
+  // makes systemd assume its uid=/gid= mount options took effect, skipping
+  // the container fallback that chmods and chowns the directory. Return
+  // EPERM only for that exact target. Earlier API tmpfs mounts still need
+  // their existing synthetic success to let PID1 boot.
   case 40: {
     // mount(source, target, fstype, mountflags, data)
-    (void)a0; (void)a1; (void)a2; (void)a3; (void)a4;
+    (void)a0; (void)a3; (void)a4;
+    const char *target = (const char*)a1;
+    const char *fstype = (const char*)a2;
+    if (!target) return -LX_EFAULT;
+    if (fstype && strcmp(fstype, "tmpfs") == 0) {
+      // systemd's mount_nofollow() passes /proc/self/fd/N, not the pathname.
+      // Match that fd against the actual guest runtime directory inode; PID1
+      // also mounts tmpfs through fd paths, so matching the fd syntax alone
+      // would break early boot.
+      const char *fdtext = NULL;
+      if (strncmp(target, "/proc/self/fd/", 14) == 0) fdtext = target + 14;
+      if (fdtext && *fdtext && strspn(fdtext, "0123456789") == strlen(fdtext)) {
+        char *end = NULL;
+        long n = strtol(fdtext, &end, 10);
+        if (n >= 0 && n <= INT_MAX && end && !*end) {
+          char fdpath[PATH_MAX];
+          if (fcntl((int)n, F_GETPATH, fdpath) == 0) {
+            const char *runtime = strstr(fdpath, "/run/user/");
+            if (runtime) {
+              const char *uid = runtime + 10;
+              if (*uid && strspn(uid, "0123456789") == strlen(uid)) {
+                char expected[PATH_MAX];
+                struct stat got, want;
+                if (resolve_path(runtime, expected, sizeof expected) >= 0 &&
+                    fstat((int)n, &got) == 0 && stat(expected, &want) == 0 &&
+                    got.st_dev == want.st_dev && got.st_ino == want.st_ino)
+                  return -LX_EPERM;
+              }
+            }
+          }
+        }
+      }
+      if (strncmp(target, "/run/user/", 10) == 0) {
+        const char *uid = target + 10;
+        if (*uid && strspn(uid, "0123456789") == strlen(uid)) return -LX_EPERM;
+      }
+    }
     return 0;                                   // no-op: the synthetic tree already serves the mount
   }
   case 41: return -LX_EPERM;                                   // pivot_root
