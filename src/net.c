@@ -54,6 +54,8 @@
 #include "pidfd_shim.h"
 #include "netlink_route_transport.h"
 #include "guest_cred_registry.h"
+// Standalone net tests do not link the optional virtual DRM backend.
+__attribute__((weak_import)) extern void drm_register_received_fd(int fd);
 
 // ---------------------------------------------------------------------------
 // Linux aarch64 syscall numbers we own
@@ -1337,6 +1339,11 @@ static size_t cmsg_h2l(int fd, struct msghdr* hm, uint8_t* lc, size_t lcap, int 
     int ltype = hc->cmsg_type;
     if (hc->cmsg_level == SOL_SOCKET && hc->cmsg_type == SCM_RIGHTS) {
       ltype = L_SCM_RIGHTS;
+      for (size_t i = 0; i + sizeof(int) <= dlen; i += sizeof(int)) {
+        int received;
+        memcpy(&received, CMSG_DATA(hc) + i, sizeof received);
+        if (drm_register_received_fd) drm_register_received_fd(received);
+      }
       if (cmsg_cloexec) {                       // MSG_CMSG_CLOEXEC
         int nfd = (int)(dlen / sizeof(int));
         for (int i = 0; i < nfd; i++) {

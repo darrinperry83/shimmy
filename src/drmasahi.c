@@ -32,6 +32,10 @@
 #include <string.h>
 #include <stdatomic.h>
 #include <sys/stat.h>
+#include <sys/file.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <limits.h>
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -69,6 +73,8 @@ __attribute__((weak)) long gpuwin_present_crtc(const uint8_t* px, uint64_t w, ui
 #define DRM_COMMAND_BASE  0x40
 #define DRM_NR_VERSION    0x00
 #define DRM_NR_GEM_CLOSE  0x09
+#define DRM_NR_SET_MASTER 0x1e
+#define DRM_NR_DROP_MASTER 0x1f
 #define DRM_NR_PRIME_HANDLE_TO_FD 0x2D
 #define DRM_NR_PRIME_FD_TO_HANDLE 0x2E
 #define DRM_NR_MODE_CREATE_DUMB   0xb2
@@ -472,6 +478,63 @@ static int tracing(void);
 #define MAXFD 64
 static struct { int fd, minor; } g_fds[MAXFD];
 static int g_nfd;
+static int g_master_owner_fd = -1, g_master_lock_fd = -1;
+__attribute__((weak_import)) extern int shim_fd_reserve(int fd);
+__attribute__((weak_import)) extern void shim_fd_unreserve(int fd);
+
+static int drm_fd_identity(int fd, unsigned long long* dev, unsigned long long* ino) {
+  struct stat st;
+  if (fstat(fd, &st)) return -1;
+  *dev = (unsigned long long)st.st_dev;
+  *ino = (unsigned long long)st.st_ino;
+  return 0;
+}
+
+static void drm_master_release(void) {
+  if (g_master_lock_fd >= 0) {
+    (void)flock(g_master_lock_fd, LOCK_UN);
+    if (shim_fd_unreserve) shim_fd_unreserve(g_master_lock_fd);
+    close(g_master_lock_fd);
+    g_master_lock_fd = -1;
+  }
+  g_master_owner_fd = -1;
+}
+
+static long drm_master_ioctl(int fd, unsigned nr) {
+  if (drm_minor_of_fd(fd) != 0) return -22;
+  if (nr == DRM_NR_DROP_MASTER) {
+    if (g_master_owner_fd < 0) return -22;
+    unsigned long long dev, ino, owner_dev, owner_ino;
+    if (drm_fd_identity(fd, &dev, &ino) ||
+        drm_fd_identity(g_master_owner_fd, &owner_dev, &owner_ino) ||
+        dev != owner_dev || ino != owner_ino) return -22;
+    drm_master_release();
+    return 0;
+  }
+  if (g_master_owner_fd >= 0) {
+    unsigned long long dev, ino, owner_dev, owner_ino;
+    if (!drm_fd_identity(fd, &dev, &ino) &&
+        !drm_fd_identity(g_master_owner_fd, &owner_dev, &owner_ino) &&
+        dev == owner_dev && ino == owner_ino) return 0;
+    return -16; // EBUSY: another DRM open currently owns this virtual card.
+  }
+  const char* group = getenv("RDSOCKETGROUP");
+  if (!group || !*group) return -95; // no shared namespace: cannot enforce exclusive master
+  {
+    char path[PATH_MAX];
+    if (snprintf(path, sizeof path, "%s/drm-master.lock", group) >= (int)sizeof path) return -36;
+    int lockfd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    if (lockfd < 0) return -errno;
+    if (flock(lockfd, LOCK_EX | LOCK_NB)) {
+      int err = errno;
+      close(lockfd);
+      return err == EWOULDBLOCK ? -16 : -err;
+    }
+    g_master_lock_fd = shim_fd_reserve ? shim_fd_reserve(lockfd) : lockfd;
+  }
+  g_master_owner_fd = fd;
+  return 0;
+}
 
 // GEM slot: a synthetic DRM handle bound to the imported dma-buf carrier's
 // fstat(st_dev, st_ino) identity and, once resolved, to the backing IOSurface.
@@ -812,7 +875,24 @@ int drm_is_node(const char* p) {
 
 void drm_register_fd_path(int fd, const char* path) {
   if (fd < 0 || g_nfd >= MAXFD) return;
-  g_fds[g_nfd++] = (typeof(*g_fds)){fd, path && strstr(path, "renderD128") ? 128 : 0};
+  int minor = path && strstr(path, "renderD128") ? 128 : 0;
+  g_fds[g_nfd++] = (typeof(*g_fds)){fd, minor};
+  // The virtual card fd travels through logind and D-Bus via SCM_RIGHTS. Record its pipe
+  // identity in this boot's private namespace so the receiving Shimmy process can classify it.
+  const char* group = getenv("RDSOCKETGROUP");
+  unsigned long long dev, ino;
+  if (group && *group && !drm_fd_identity(fd, &dev, &ino)) {
+    char name[PATH_MAX];
+    if (snprintf(name, sizeof name, "%s/drm-fd-%llx-%llx", group, dev, ino) < (int)sizeof name) {
+      int meta = open(name, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+      if (meta >= 0) {
+        char value[8];
+        int n = snprintf(value, sizeof value, "%d\n", minor);
+        if (write(meta, value, (size_t)n) != n) unlink(name);
+        close(meta);
+      }
+    }
+  }
   if (tracing()) fprintf(stderr, "[drm] opened render node as fd %d\n", fd);
 }
 
@@ -822,12 +902,52 @@ void drm_register_fd_copy(int fd, int from_fd) {
   drm_register_fd_path(fd, drm_minor_of_fd(from_fd) == 0 ? "/dev/dri/card0" : "/dev/dri/renderD128");
 }
 
+void drm_register_received_fd(int fd) {
+  if (fd < 0 || drm_owns_fd(fd)) return;
+  const char* group = getenv("RDSOCKETGROUP");
+  unsigned long long dev, ino;
+  if (!group || !*group || drm_fd_identity(fd, &dev, &ino)) return;
+  int type = 0;
+  socklen_t type_len = sizeof type;
+  if (getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &type_len) || type != SOCK_DGRAM) return;
+  struct sockaddr_un peer = {0};
+  socklen_t peer_len = sizeof peer;
+  if (getpeername(fd, (struct sockaddr*)&peer, &peer_len) || peer.sun_family != AF_UNIX) return;
+  char prefix[PATH_MAX];
+  if (snprintf(prefix, sizeof prefix, "%s/drm-event-", group) >= (int)sizeof prefix ||
+      strncmp(peer.sun_path, prefix, strlen(prefix)) != 0) return;
+  char name[PATH_MAX];
+  if (snprintf(name, sizeof name, "%s/drm-fd-%llx-%llx", group, dev, ino) >= (int)sizeof name) return;
+  int meta = open(name, O_RDONLY | O_CLOEXEC);
+  if (meta < 0) return;
+  char value[8] = {0};
+  ssize_t n = read(meta, value, sizeof value - 1);
+  close(meta);
+  if (n <= 0) return;
+  if (!strcmp(value, "0\n")) drm_register_fd_path(fd, "/dev/dri/card0");
+  else if (!strcmp(value, "128\n")) drm_register_fd_path(fd, "/dev/dri/renderD128");
+}
+
 int drm_minor_of_fd(int fd) {
   for (int i = 0; i < g_nfd; i++) if (g_fds[i].fd == fd) return g_fds[i].minor;
   return -1;
 }
 
 void drm_forget_fd(int fd) {
+  if (g_master_owner_fd == fd) {
+    unsigned long long dev, ino;
+    int replacement = -1;
+    if (!drm_fd_identity(fd, &dev, &ino))
+      for (int i = 0; i < g_nfd; i++) if (g_fds[i].fd != fd) {
+        unsigned long long d, in;
+        if (!drm_fd_identity(g_fds[i].fd, &d, &in) && d == dev && in == ino) {
+          replacement = g_fds[i].fd;
+          break;
+        }
+      }
+    if (replacement >= 0) g_master_owner_fd = replacement;
+    else drm_master_release();
+  }
   for (int i = 0; i < g_nfd; i++)
     if (g_fds[i].fd == fd) { g_fds[i] = g_fds[--g_nfd]; return; }
 }
@@ -1135,29 +1255,39 @@ static void blob_destroy(uint32_t id) {
   if (s) memset(s, 0, sizeof *s);
 }
 
-// Page-flip / atomic-completion events. The shim never waits for a real vblank; a flip
-// is "complete" immediately, so we write a DRM_EVENT_FLIP_COMPLETE into the event pipe on
-// every commit carrying DRM_MODE_PAGE_FLIP_EVENT. Every DRM fd handed to the guest is a
-// dup of g_ev_read_fd, so read()/poll() on it behave like a real DRM fd: readable only
-// while an event is pending, and read() returns the event bytes. aquamarine's async
-// commit thread consumes these via drmHandleEvent().
-static int g_ev_read_fd = -1, g_ev_write_fd = -1;
+// A self-connected datagram carrier gives each DRM open its own stable fd identity and event
+// queue. SCM_RIGHTS preserves both across logind's FD handoff. The private pathname is removed
+// after connect; only holders of the descriptor can send or receive its flip events.
+static atomic_uint g_event_seq;
 static int g_flip_seq;
 
-// Create the event pipe lazily and hand the guest a dup of the read end.
 int drm_open_fd(void) {
-  if (g_ev_read_fd < 0) {
-    int p[2];
-    if (pipe(p) != 0) return -1;
-    g_ev_read_fd = p[0]; g_ev_write_fd = p[1];
-    fcntl(g_ev_read_fd, F_SETFD, FD_CLOEXEC);
-    fcntl(g_ev_write_fd, F_SETFD, FD_CLOEXEC);
+  const char* group = getenv("RDSOCKETGROUP");
+  if (!group || !*group) group = "/tmp";
+  int fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+  if (fd < 0) return -1;
+  (void)fcntl(fd, F_SETFD, FD_CLOEXEC);
+  struct sockaddr_un addr = { .sun_family = AF_UNIX };
+  unsigned seq = atomic_fetch_add(&g_event_seq, 1);
+  if (snprintf(addr.sun_path, sizeof addr.sun_path, "%s/drm-event-%d-%u",
+               group, (int)getpid(), seq) >= (int)sizeof addr.sun_path) {
+    close(fd); errno = ENAMETOOLONG; return -1;
   }
-  return fcntl(g_ev_read_fd, F_DUPFD_CLOEXEC, 0);
+  addr.sun_len = (unsigned char)(offsetof(struct sockaddr_un, sun_path) + strlen(addr.sun_path) + 1);
+  if (bind(fd, (struct sockaddr*)&addr, addr.sun_len)) {
+    int err = errno;
+    close(fd); errno = err; return -1;
+  }
+  if (connect(fd, (struct sockaddr*)&addr, addr.sun_len)) {
+    int err = errno;
+    unlink(addr.sun_path);
+    close(fd); errno = err; return -1;
+  }
+  unlink(addr.sun_path);
+  return fd;
 }
 
-static void event_enqueue(uint64_t user_data, uint32_t crtc_id) {
-  if (g_ev_write_fd < 0) return;
+static void event_enqueue(int fd, uint64_t user_data, uint32_t crtc_id) {
   struct drm_event_vblank e;
   memset(&e, 0, sizeof e);
   e.base.type   = DRM_EVENT_FLIP_COMPLETE;
@@ -1166,8 +1296,8 @@ static void event_enqueue(uint64_t user_data, uint32_t crtc_id) {
   e.tv_sec      = 0; e.tv_usec = 0;
   e.sequence    = (uint32_t)++g_flip_seq;
   e.crtc_id     = crtc_id ? crtc_id : 1;
-  // Best-effort: a full pipe (the compositor stopped draining) is not fatal.
-  ssize_t r = write(g_ev_write_fd, &e, sizeof e);
+  // Best-effort: a full event queue (the compositor stopped draining) is not fatal.
+  ssize_t r = send(fd, &e, sizeof e, 0);
   (void)r;
 }
 
@@ -1248,6 +1378,13 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
   unsigned dir = IOC_DIR(req), type = IOC_TYPE(req), nr = IOC_NR(req), sz = IOC_SIZE(req);
   const char* kind = "unknown";
   if (type == DRM_TYPE) kind = (nr >= DRM_COMMAND_BASE) ? "ASAHI" : "drm-core";
+
+  if (type == DRM_TYPE && (nr == DRM_NR_SET_MASTER || nr == DRM_NR_DROP_MASTER)) {
+    long result = drm_master_ioctl(fd, nr);
+    if (tracing()) fprintf(stderr, "[drm] %s_MASTER fd=%d -> %ld\n",
+                           nr == DRM_NR_SET_MASTER ? "SET" : "DROP", fd, result);
+    return result;
+  }
 
   if (type == DRM_TYPE && nr == DRM_NR_VERSION && arg) {
     struct drm_version_64* v = (struct drm_version_64*)arg;
@@ -1931,7 +2068,7 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
     cr->fb_id = pf->fb_id;
     pl->fb_id = pf->fb_id;
     pl->crtc_id = crtc;
-    if (pf->flags & DRM_MODE_PAGE_FLIP_EVENT) event_enqueue(pf->user_data, crtc);
+    if (pf->flags & DRM_MODE_PAGE_FLIP_EVENT) event_enqueue(fd, pf->user_data, crtc);
     if (pf->fb_id) drm_present_fb(pf->fb_id, crtc);
     if (tracing())
       fprintf(stderr, "[drm] MODE_PAGE_FLIP crtc_id=%u fb_id=0x%x flags=0x%x user_data=0x%llx%s\n",
@@ -2036,7 +2173,7 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
       }
     }
     if (!test_only && (a->flags & DRM_MODE_PAGE_FLIP_EVENT))
-      event_enqueue(a->user_data, event_crtc);
+      event_enqueue(fd, a->user_data, event_crtc);
     if (tracing())
       fprintf(stderr, "[drm] MODE_ATOMIC flags=0x%x objs=%u%s%s%s fb_id=0x%x/0x%x mode_blob=%u "
               "crtc=%u/%u -> ok\n",

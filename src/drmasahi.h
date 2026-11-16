@@ -10,6 +10,7 @@ void drm_register_fd(int fd);
 void drm_register_fd_path(int fd, const char* path);
 int  drm_minor_of_fd(int fd);
 void drm_register_fd_copy(int fd, int from_fd);
+void drm_register_received_fd(int fd); // recover virtual node identity after SCM_RIGHTS
 void drm_forget_fd(int fd);
 int  drm_owns_fd(int fd);
 int  drm_master_active(void);           // guest issued a KMS-master ioctl (DRM backend running)

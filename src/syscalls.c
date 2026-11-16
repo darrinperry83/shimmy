@@ -3691,7 +3691,7 @@ static void evdev_materialize_udev(void) {
         if (k == 2) {
           if (symlink("/sys/bus/input", host) && errno != EEXIST) return;
         } else {
-          int fd = open(host, O_WRONLY | O_CREAT, 0444);
+          int fd = open(host, O_RDONLY | O_CREAT, 0444);
           if (fd < 0) return;
           close(fd);
         }
