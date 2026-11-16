@@ -2756,6 +2756,9 @@ static long do_ioctl(int fd, unsigned long req, unsigned long arg) {
 #define LF_GETLK          5
 #define LF_SETLK          6
 #define LF_SETLKW         7
+#define LF_OFD_GETLK      36
+#define LF_OFD_SETLK      37
+#define LF_OFD_SETLKW     38
 #define LF_SETOWN         8
 #define LF_GETOWN         9
 #define LF_DUPFD_CLOEXEC  1030
@@ -2813,9 +2816,16 @@ static long do_fcntl(int fd, int cmd, unsigned long arg) {
       if (arg & LO_ASYNC)    mf |= O_ASYNC;
       return herr(fcntl(fd, F_SETFL, mf));
     }
-    case LF_GETLK: case LF_SETLK: case LF_SETLKW: {
+    case LF_GETLK: case LF_SETLK: case LF_SETLKW:
+    case LF_OFD_GETLK: case LF_OFD_SETLK: case LF_OFD_SETLKW: {
       struct linux_flock* lf = (struct linux_flock*)arg;
       if (!lf) return -LX_EFAULT;
+      // Linux OFD locks belong to the open file description rather than a PID.
+      // macOS provides matching F_OFD_* operations; do not map these to POSIX
+      // process locks, which would release at different times after dup/fork.
+      const int ofd = cmd == LF_OFD_GETLK || cmd == LF_OFD_SETLK || cmd == LF_OFD_SETLKW;
+      if (ofd && lf->l_pid != 0) return -LX_EINVAL;
+      if (lf->l_type != 0 && lf->l_type != 1 && lf->l_type != 2) return -LX_EINVAL;
       struct flock mf;
       memset(&mf, 0, sizeof mf);
       mf.l_start  = lf->l_start;
@@ -2823,9 +2833,17 @@ static long do_fcntl(int fd, int cmd, unsigned long arg) {
       mf.l_pid    = lf->l_pid;
       mf.l_type   = (short)flock_type_l2m(lf->l_type);
       mf.l_whence = lf->l_whence;
-      int mcmd = cmd == LF_GETLK ? F_GETLK : (cmd == LF_SETLK ? F_SETLK : F_SETLKW);
+      int mcmd;
+      switch (cmd) {
+        case LF_GETLK: mcmd = F_GETLK; break;
+        case LF_SETLK: mcmd = F_SETLK; break;
+        case LF_SETLKW: mcmd = F_SETLKW; break;
+        case LF_OFD_GETLK: mcmd = F_OFD_GETLK; break;
+        case LF_OFD_SETLK: mcmd = F_OFD_SETLK; break;
+        default: mcmd = F_OFD_SETLKW; break;
+      }
       if (fcntl(fd, mcmd, &mf) < 0) return herrno();
-      if (cmd == LF_GETLK) {
+      if (cmd == LF_GETLK || cmd == LF_OFD_GETLK) {
         lf->l_type   = (int16_t)flock_type_m2l(mf.l_type);
         lf->l_whence = (int16_t)mf.l_whence;
         lf->l_start  = mf.l_start;
