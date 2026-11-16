@@ -128,17 +128,17 @@ try:
                                   "printf 'SHIMMY_USER_BUS_%s\\n' READY\n")
                         ok = wait_text("SHIMMY_USER_BUS_READY", 12)
                         print("LOGIN_USER_BUS_OK" if ok else "LOGIN_USER_BUS_MISSING", flush=True)
-                    if ok and os.environ.get("RD_TEST_LOGOUT") == "1":
-                        before = len(console.read_text(errors="replace"))
-                        type_keys("exit\n")
-                        deadline = time.monotonic() + 15
-                        while time.monotonic() < deadline:
-                            if "localhost login:" in console.read_text(errors="replace")[before:]:
-                                break
-                            time.sleep(0.2)
-                        else:
-                            ok = False
-                        print("LOGIN_LOGOUT_OK" if ok else "LOGIN_LOGOUT_MISSING", flush=True)
+                if ok and os.environ.get("RD_TEST_LOGOUT") == "1":
+                    before = len(console.read_text(errors="replace"))
+                    type_keys("exit\n")
+                    deadline = time.monotonic() + 15
+                    while time.monotonic() < deadline:
+                        if "localhost login:" in console.read_text(errors="replace")[before:]:
+                            break
+                        time.sleep(0.2)
+                    else:
+                        ok = False
+                    print("LOGIN_LOGOUT_OK" if ok else "LOGIN_LOGOUT_MISSING", flush=True)
                 if ok and os.environ.get("RD_TEST_JOB_CONTROL") == "1":
                     if console.exists() and "no job control in this shell" in console.read_text(errors="replace"):
                         ok = False
