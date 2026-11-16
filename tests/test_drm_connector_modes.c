@@ -39,6 +39,25 @@ static void check_connector(uint32_t id, uint32_t expected_width,
 }
 
 int main(void) {
+  // libdrm realpath()s /sys/dev/char/226:* to /sys/class/drm/<node>.
+  // Both spellings must report one PCI identity before Mesa selects a driver.
+  for (int minor = 0; minor <= 128; minor += 128) {
+    const char* node = minor ? "renderD128" : "card0";
+    char char_path[128], class_path[128];
+    const char* leaves[] = { "drm", "uevent", "vendor", "device",
+                             "subsystem_vendor", "subsystem_device" };
+    for (size_t i = 0; i < sizeof leaves / sizeof leaves[0]; i++) {
+      snprintf(char_path, sizeof char_path, "/sys/dev/char/226:%d/device/%s", minor, leaves[i]);
+      snprintf(class_path, sizeof class_path, "/sys/class/drm/%s/device/%s", node, leaves[i]);
+      assert(drm_sysfs_kind(char_path) == drm_sysfs_kind(class_path));
+      if (drm_sysfs_kind(char_path) == 5 || drm_sysfs_kind(char_path) == 6)
+        assert(strcmp(drm_sysfs_pci_content(char_path),
+                      drm_sysfs_pci_content(class_path)) == 0);
+    }
+    snprintf(class_path, sizeof class_path, "/sys/class/drm/%s/device", node);
+    assert(drm_sysfs_kind(class_path) == 3);
+  }
+  assert(drm_sysfs_kind("/sys/class/drm/card1/device/vendor") == 0);
   check_connector(1, 2560, 1440, 1);
   check_connector(2, 3024, 1964, 1);
   external_width = 10240; external_height = 4320;

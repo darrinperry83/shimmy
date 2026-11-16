@@ -3192,6 +3192,17 @@ static const struct synth_ent SYS_CLASS_DRM_ENTS[] = {  // /sys/class/drm
   { "renderD128", DT_DIR },
 };
 
+static const struct synth_ent SYS_CLASS_DRM_NODE_ENTS[] = {
+  { "device", DT_DIR }, { "dev", DT_REG }, { "uevent", DT_REG },
+  { "subsystem", DT_LNK },
+};
+
+static const struct synth_ent SYS_CLASS_DRM_DEVICE_ENTS[] = {
+  { "drm", DT_CHR }, { "subsystem", DT_LNK }, { "uevent", DT_REG },
+  { "vendor", DT_REG }, { "device", DT_REG }, { "revision", DT_REG },
+  { "subsystem_vendor", DT_REG }, { "subsystem_device", DT_REG },
+};
+
 static const struct synth_ent SYS_CLASS_SOUND_ENTS[] = { // /sys/class/sound
   { "card0", DT_DIR },
 };
@@ -3602,6 +3613,10 @@ static const struct synth_ent* synth_entries(const char* g, int* count) {
   if (strcmp(g, "/proc/sys") == 0) RET(PROC_SYS_ENTS);
   if (strcmp(g, "/sys/class") == 0) RET(SYS_CLASS_ENTS);
   if (strcmp(g, "/sys/class/drm") == 0) RET(SYS_CLASS_DRM_ENTS);
+  if (strcmp(g, "/sys/class/drm/card0") == 0 ||
+      strcmp(g, "/sys/class/drm/renderD128") == 0) RET(SYS_CLASS_DRM_NODE_ENTS);
+  if (strcmp(g, "/sys/class/drm/card0/device") == 0 ||
+      strcmp(g, "/sys/class/drm/renderD128/device") == 0) RET(SYS_CLASS_DRM_DEVICE_ENTS);
   if (strcmp(g, "/sys/class/sound") == 0) RET(SYS_CLASS_SOUND_ENTS);
   if (strcmp(g, "/sys/class/input") == 0) RET(SYS_CLASS_INPUT_ENTS);
   if (strcmp(g, "/sys/class/block") == 0) RET(SYS_CLASS_BLOCK_ENTS);
@@ -3809,6 +3824,13 @@ static void synth_materialize_all(void) {
   };
   for (size_t i = 0; i < sizeof dirs / sizeof dirs[0]; i++)
     if (guest_to_host(dirs[i], host, sizeof host) == 0) mkdir_p(host);
+  if (drm_enabled()) {
+    static const char* const drm_dirs[] = {
+      "/sys/class/drm/card0/device", "/sys/class/drm/renderD128/device",
+    };
+    for (size_t i = 0; i < sizeof drm_dirs / sizeof drm_dirs[0]; i++)
+      if (guest_to_host(drm_dirs[i], host, sizeof host) == 0) mkdir_p(host);
+  }
 
   snprintf(p, sizeof p, "/proc/%d", (int)getpid());
   if (guest_to_host(p, host, sizeof host) == 0) mkdir_p(host);

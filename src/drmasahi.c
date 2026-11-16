@@ -911,6 +911,18 @@ int drm_sysfs_kind(const char* path) {
     if (strcmp(p, "/uevent") == 0)    return 9;
     if (strcmp(p, "/dev") == 0)       return 10;
     if (strcmp(p, "/subsystem") == 0) return 11;
+    // /sys/dev/char/226:<minor> is a symlink to this class node. libdrm's
+    // get_pci_path() calls realpath() before reading device identity, so both
+    // spellings must expose the same device tree.
+    if (strcmp(p, "/device") == 0) return 3;
+    if (strcmp(p, "/device/drm") == 0) return 1;
+    if (strcmp(p, "/device/subsystem") == 0) return 4;
+    if (strcmp(p, "/device/uevent") == 0) return 5;
+    if (strcmp(p, "/device/vendor") == 0 ||
+        strcmp(p, "/device/device") == 0 ||
+        strcmp(p, "/device/revision") == 0 ||
+        strcmp(p, "/device/subsystem_vendor") == 0 ||
+        strcmp(p, "/device/subsystem_device") == 0) return 6;
     return 0;
   }
   const char* p = path + sizeof pre - 1;
