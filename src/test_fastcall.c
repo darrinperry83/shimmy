@@ -223,6 +223,13 @@ static uint64_t now_ns(void)
 typedef long (*fn6_t)(long, long, long, long, long, long);
 typedef long (*fn1_t)(long);
 
+static void* stack_cycle(void* arg)
+{
+    if (!fastcall_thread_init()) return (void*)1;
+    if (arg) fastcall_thread_cleanup();
+    return NULL;
+}
+
 int main(void)
 {
     printf("=== fastcall test ===\n");
@@ -242,6 +249,25 @@ int main(void)
     unsigned long thunk = fastcall_build_thunk();
     CHECK(thunk != 0, "thunk built at 0x%lx", thunk);
     if (!thunk) return 1;
+
+    // exit_group(94) can terminate a vfork child via pthread_exit. Running it on the
+    // fastcall native stack lets its TSD destructor unmap the stack under libpthread.
+    uint32_t exit_group_site[] = { E_movz(8, 94, 0), E_svc0() };
+    CHECK(fastcall_denied_site(exit_group_site, 2, 1) == 1,
+          "exit_group(94) remains on the trap path");
+    unsigned long before_alloc = 0, before_free = 0, after_alloc = 0, after_free = 0;
+    fastcall_stack_counts(&before_alloc, &before_free);
+    for (int i = 0; i < 64; i++) {
+        pthread_t t;
+        void* result = (void*)1;
+        int ok = pthread_create(&t, NULL, stack_cycle, (void*)(uintptr_t)(i & 1)) == 0;
+        if (ok) ok = pthread_join(t, &result) == 0 && result == NULL;
+        if (!ok) { CHECK(0, "fastcall stack cycle %d", i); break; }
+    }
+    fastcall_stack_counts(&after_alloc, &after_free);
+    CHECK(after_alloc - before_alloc == 64 && after_free - before_free == 64,
+          "64 native stacks reclaimed across explicit cleanup and TSD exit (allocated=%lu reclaimed=%lu)",
+          after_alloc - before_alloc, after_free - before_free);
 
     // -----------------------------------------------------------------------------------------
     // (A) a guest-like NON-LEAF syscall wrapper: x30 is spilled before the site and reloaded

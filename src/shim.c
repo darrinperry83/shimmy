@@ -201,11 +201,11 @@ static long route_syscall(unsigned long nr, unsigned long a0, unsigned long a1, 
 static long route_syscall_fc(unsigned long nr, unsigned long a0, unsigned long a1,
                              unsigned long a2, unsigned long a3, unsigned long a4,
                              unsigned long a5) {
-  if (nr == 220 || nr == 435 || nr == 93) {
+  if (nr == 220 || nr == 435 || nr == 93 || nr == 94) {
     static int said;
     if (!said) { said = 1;
       fprintf(stderr, "[fastcall] syscall %lu reached the fast path but must not: clone(220)/clone3(435) need "
-                      "the register file, exit(93) unwinds off the thunk's native stack. Refusing "
+                      "the register file, exit(93/94) unwinds off the thunk's native stack. Refusing "
                       "(-ENOSYS); the site should have been excluded statically.\n", nr); }
     return -38;                                    // -ENOSYS
   }
@@ -979,6 +979,7 @@ void guest_vfork_finish(long host_pid, int status) {
     pthread_mutex_unlock(&v->mu);
   }
   if (t_cur) { t_cur->used = 0; t_cur = NULL; }
+  fastcall_thread_cleanup();
   pthread_exit(NULL);
 }
 

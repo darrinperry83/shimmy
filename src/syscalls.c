@@ -27,6 +27,7 @@
 #include <fcntl.h>
 #include <dirent.h>
 #include <pthread.h>
+#include "fastcall.h"
 #include <crt_externs.h>
 #include <stdarg.h>
 #include "guestthread.h"
@@ -4860,6 +4861,7 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     if (guest_is_vfork_child()) guest_vfork_finish(-1, (int)a0);   // never returns
     if (guest_is_child()) {
       guest_thread_exiting();          // CLONE_CHILD_CLEARTID + futex wake, so join() completes
+      fastcall_thread_cleanup();
       pthread_exit(NULL);
     }
     fflush(NULL);

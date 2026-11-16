@@ -116,10 +116,35 @@ static int emit_imm64(uint32_t* b, int n, unsigned rd, uint64_t v)
 // switch stays three instructions and costs nothing.
 static pthread_key_t g_fc_key;
 static unsigned      g_fc_tsd_off;          // 0 = not available; fastcall then refuses to build
+static unsigned long g_fc_stack_allocated, g_fc_stack_reclaimed;
 
 static void fc_free_stack(void* p) {
-    if (p) munmap((char*)p - (FC_GUARD_BYTES + FC_NATIVE_STACK_BYTES), 
-                  FC_GUARD_BYTES + FC_NATIVE_STACK_BYTES);
+    if (!p) return;
+    uintptr_t sp;
+    __asm__ volatile("mov %0, sp" : "=r"(sp));
+    uintptr_t top = (uintptr_t)p;
+    uintptr_t bottom = top - (FC_GUARD_BYTES + FC_NATIVE_STACK_BYTES);
+    // Never unmap a stack while pthread's TSD cleanup is still executing on it.
+    // Explicit guest-thread exits call fastcall_thread_cleanup() from the trap stack.
+    if (sp >= bottom && sp < top) return;
+    if (munmap((void*)bottom, FC_GUARD_BYTES + FC_NATIVE_STACK_BYTES) == 0)
+        __atomic_add_fetch(&g_fc_stack_reclaimed, 1, __ATOMIC_RELAXED);
+}
+
+void fastcall_thread_cleanup(void) {
+    if (!g_fc_tsd_off) return;
+    void* p = pthread_getspecific(g_fc_key);
+    if (!p) return;
+    uintptr_t sp;
+    __asm__ volatile("mov %0, sp" : "=r"(sp));
+    uintptr_t bottom = (uintptr_t)p - (FC_GUARD_BYTES + FC_NATIVE_STACK_BYTES);
+    if (sp >= bottom && sp < (uintptr_t)p) return;
+    if (pthread_setspecific(g_fc_key, NULL) == 0) fc_free_stack(p);
+}
+
+void fastcall_stack_counts(unsigned long* allocated, unsigned long* reclaimed) {
+    if (allocated) *allocated = __atomic_load_n(&g_fc_stack_allocated, __ATOMIC_RELAXED);
+    if (reclaimed) *reclaimed = __atomic_load_n(&g_fc_stack_reclaimed, __ATOMIC_RELAXED);
 }
 
 // Give THIS thread a native stack. Must run on every guest thread before it executes any guest
@@ -131,9 +156,10 @@ int fastcall_thread_init(void) {
     size_t total = FC_GUARD_BYTES + FC_NATIVE_STACK_BYTES;
     void* p = mmap(NULL, total, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
     if (p == MAP_FAILED) return 0;
-    mprotect(p, FC_GUARD_BYTES, PROT_NONE);         // guard page under the stack
+    if (mprotect(p, FC_GUARD_BYTES, PROT_NONE) != 0) { munmap(p, total); return 0; }
     uintptr_t top = ((uintptr_t)p + total) & ~(uintptr_t)15;
-    pthread_setspecific(g_fc_key, (void*)top);
+    if (pthread_setspecific(g_fc_key, (void*)top) != 0) { munmap(p, total); return 0; }
+    __atomic_add_fetch(&g_fc_stack_allocated, 1, __ATOMIC_RELAXED);
     return 1;
 }
 
@@ -508,8 +534,8 @@ static int fc_x30_live(const uint32_t* c, long n, long site)
 //
 // The thunk supports exactly one shape: compute a value and return. These do not.
 //   220 clone    do_clone() needs the register file the thunk cannot supply
-//    93 exit     ends the thread via pthread_exit(), which UNWINDS -- and the thunk has already
-//                switched SP to its private native stack, so the unwinder walks the wrong stack
+//  93/94 exit/exit_group may end a vfork child via pthread_exit(). The thunk has already
+//                switched SP to its private native stack, so pthread cleanup would run there.
 //   221 execve   replaces the image / finishes a vfork child
 //   260 wait4    blocks on a CHILD PROCESS
 //    95 waitid   ditto
@@ -535,7 +561,8 @@ int fastcall_denied_site(const void* code, long nwords, long idx)
         int movz64 = (u & 0xFFE0001Fu) == (0xD2800000u | 8u);   // movz x8, #imm16
         if (movz32 || movz64) {
             unsigned nr = (u >> 5) & 0xFFFFu;
-            return (nr == 220u || nr == 435u || nr == 93u || nr == 221u || nr == 260u || nr == 95u);
+            return (nr == 220u || nr == 435u || nr == 93u || nr == 94u ||
+                    nr == 221u || nr == 260u || nr == 95u);
         }
     }
     // No provable immediate: the syscall number is dynamic (glibc's generic syscall() loads x8

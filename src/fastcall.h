@@ -41,6 +41,10 @@ unsigned long fastcall_thunk_once(void);
 // Give THIS guest thread its native stack. Call from every guest thread entry, before any
 // guest instruction runs: the thunk reads the slot with no null check, by design.
 int fastcall_thread_init(void);
+// Call before a guest pthread exits on the trap/host stack. Reclaims its separate native
+// fastcall stack while it is no longer executing on that mapping.
+void fastcall_thread_cleanup(void);
+void fastcall_stack_counts(unsigned long* allocated, unsigned long* reclaimed);
 
 // Patch one executable image IN PLACE at its FINAL address (after it is in JIT). For every
 // `brk #0` (already-rewritten svc) whose site has x30 dead, replace it with `bl thunk`.
