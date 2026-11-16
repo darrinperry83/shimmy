@@ -55,7 +55,27 @@ try:
             [str(binary), str(root), "/sbin/init", "--system"], env=env,
             stdout=output, stderr=output, start_new_session=True, preexec_fn=no_core,
         )
-        time.sleep(22)
+        # A greeter can start and crash before the final process snapshot. Record
+        # that separately from a process that remains up long enough to be useful.
+        kwin_seen = False
+        kwin_first_seen = None
+        kwin_longest_streak = 0.0
+        kwin_streak_start = None
+        deadline = time.monotonic() + 22
+        while time.monotonic() < deadline:
+            programs = [args.split(None, 1)[0] for _, args in scoped()]
+            kwin_now = "/usr/bin/kwin_wayland" in programs
+            now = time.monotonic()
+            if kwin_now:
+                kwin_seen = True
+                if kwin_first_seen is None:
+                    kwin_first_seen = now
+                if kwin_streak_start is None:
+                    kwin_streak_start = now
+                kwin_longest_streak = max(kwin_longest_streak, now - kwin_streak_start)
+            else:
+                kwin_streak_start = None
+            time.sleep(0.25)
         seat = subprocess.run(
             [str(binary), str(root), "/usr/bin/loginctl", "show-seat", "seat0",
              "-p", "CanTTY", "-p", "CanGraphical"],
@@ -67,6 +87,8 @@ try:
         print("SEAT_QUERY_EXIT", seat.returncode, flush=True)
         print("SEAT_PROPERTIES", seat.stdout.strip().replace("\n", " "), flush=True)
         print("SDDM_PROCESS", sddm, "KWIN_GREETER_PROCESS", kwin, flush=True)
+        print("KWIN_GREETER_SEEN", kwin_seen,
+              "LONGEST_OBSERVED_SECONDS", round(kwin_longest_streak, 2), flush=True)
         print("BOOT_LOG", log, flush=True)
         passed = (seat.returncode == 0 and "CanGraphical=yes" in seat.stdout
                   and sddm and kwin)

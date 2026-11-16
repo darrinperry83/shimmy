@@ -27,7 +27,21 @@ CanGraphical=no
 ```
 
 Thus a logind seat exists, but it is not advertised as graphical. The virtual
-DRM/udev seat representation is under separate investigation. Re-test SDDM
-after `CanGraphical=yes` is backed by a real guest DRM device. SDDM service
-startup alone does not prove a greeter, PAM login, Plasma, Hyprland, or GPU
-presentation. No live root, Mac display, or existing session was changed.
+DRM/udev seat representation was investigated separately. With the graphical
+seat change from branch `agent/graphical-seat` (commit `81db090`) applied to
+this isolated branch, a fresh boot returned `CanGraphical=yes`. SDDM advanced:
+it logged `Adding new display`, `Using VT 1`, `Display server started`, and
+`Greeter starting`. Its helper opened a PAM session for the clone-only `sddm`
+user (UID 962), then `pam_systemd` failed its `CreateSession` varlink call with
+`Invalid argument`. The helper did launch KWin Wayland, but reported
+`XDG_RUNTIME_DIR not set`; KWin reported `Could not determine the active
+graphical session`, `Failed to find a free display socket`, and then faulted
+in libkwin. This was a transient process, not a sustained greeter. The exact
+socket bind was not observed; the missing runtime directory is consistent
+with the failed logind session, but its cause is not independently proven.
+
+The remaining milestone is a real logind-backed greeter session with a valid
+runtime directory, sustained KWin and SDDM greeter processes, and then visual
+frame and session-selection tests. Neither service startup nor transient KWin
+launch proves a usable greeter, Plasma or Hyprland login, or GPU presentation.
+No live root, Mac display, or existing session was changed.
