@@ -28,7 +28,7 @@ CanGraphical=no
 
 Thus a logind seat exists, but it is not advertised as graphical. The virtual
 DRM/udev seat representation was investigated separately. With the graphical
-seat change from branch `agent/graphical-seat` (commit `81db090`) applied to
+seat change now on `development` (commit `2e5eaaa`) applied to
 this isolated branch, a fresh boot returned `CanGraphical=yes`. SDDM advanced:
 it logged `Adding new display`, `Using VT 1`, `Display server started`, and
 `Greeter starting`. Its helper opened a PAM session for the clone-only `sddm`
