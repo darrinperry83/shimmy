@@ -62,6 +62,7 @@ static int g_idle_saw_address;
 #include "signalfd_shim.h"
 #include "timerfd_shim.h"
 #include "pidfd_shim.h"
+#include "unix_outq_peer.h"
 // net.c owns the kqueue-backed epoll; on close(2) it must drop the fd from every epoll set
 // (Linux drops a watched fd from epoll automatically on close; kqueue does not).
 extern void net_fd_closed(int fd);
@@ -2920,8 +2921,21 @@ static long do_ioctl(int fd, unsigned long req, unsigned long arg) {
     case L_TIOCSCTTY: { int rc=vt_owns_fd(fd) ? vt_claim_ctty(fd) : ioctl(fd,TIOCSCTTY,0);
                         return herr(rc); }
     case L_TIOCNOTTY: return herr(ioctl(fd, TIOCNOTTY));
-    case L_TIOCOUTQ:  { int n = 0; if (ioctl(fd, TIOCOUTQ, &n) < 0) return herrno();
-                        *(int*)arg = n; return 0; }
+    case L_TIOCOUTQ: {
+      if (!arg) return -LX_EFAULT;
+      int n = 0;
+      if (ioctl(fd, TIOCOUTQ, &n) < 0) {
+        int saved = errno;
+        // Darwin rejects this on AF_UNIX sockets. Inspect the kernel peer's
+        // receive-buffer charge, which includes queued SCM_RIGHTS descriptors.
+        // Fail closed when the peer cannot be identified or inspected.
+        if (saved != EOPNOTSUPP || !getenv("RDSOCKETOUTQ_COMPAT"))
+          return -(long)linux_errno_from_host(saved);
+        if (rd_unix_peer_outq(fd, &n) < 0) return herrno();
+      }
+      *(int*)arg = n;
+      return 0;
+    }
     // Current Linux PIDFD_GET_INFO uses _IOWR(0xFF, 11, struct pidfd_info) with an
     // 88-byte layout. Older builds used the 124-byte command below. Both must answer
     // from the same pidfd registry; forwarding either to Darwin returns ENOTTY.

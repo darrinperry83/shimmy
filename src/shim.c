@@ -757,7 +757,7 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
     // "RDX18_NOTSD=1 ./shim_gui ... qmlscene" measured the DEFAULT and looked like a null result.
     // (This is about the shim's own MODE. The guest's x18 VALUE deliberately does not survive
     // execve — a new program image gets a new x18 by definition.)
-    "RDVERBOSE", "RDEXECDBG", "RDNOVDSO", "RDFASTCALL", "RDPOLLLOG", "RDUID0", "RDEXECDBG", "RDSCENTER", "RDENOENTDBG", "RDFUTEX", "RDTIMERFD_TRACE", "RDDESERDBG",
+    "RDVERBOSE", "RDEXECDBG", "RDNOVDSO", "RDFASTCALL", "RDPOLLLOG", "RDUID0", "RDEXECDBG", "RDSCENTER", "RDSOCKETOUTQ_COMPAT", "RDENOENTDBG", "RDFUTEX", "RDTIMERFD_TRACE", "RDDESERDBG",
     "RDGUEST_RUID", "RDGUEST_EUID", "RDGUEST_SUID", "RDGUEST_RGID", "RDGUEST_EGID", "RDGUEST_SGID",
     // RDDRM gates the rdmetal DRM render node (drmasahi.c). It MUST ride across execve for the
     // same reason RDSOCKETGROUP does: a compositor launched by startplasma-wayland (kwin_wayland)
