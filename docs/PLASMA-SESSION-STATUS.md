@@ -76,3 +76,36 @@ softpipe despite the rdmetal driver being present. The direct diagnostic
 also reported DRM magic-authentication and EDID warnings and had no session
 D-Bus/PipeWire connection. The shared logind/session fix and full GUI run
 remain necessary.
+
+## Authenticated Plasma and Plasmashell JIT diagnostic (2026-11-16)
+
+In a disposable Arch root, real systemd boot, getty/password login as a
+throwaway UID 22001, and the installed `startplasma-wayland` entry now start
+KWin and a Wayland `foot` client. In a bounded 85-second windowed GUI probe,
+KWin and foot kept the same PIDs and the builtin virtual CRTC presented
+nonblack frames. This does not establish a fully working Plasma session or
+hardware-backed guest rendering.
+
+`plasma-plasmashell.service` is a D-Bus-name service with a 40-second start
+timeout. Without a workaround, its process faults before owning
+`org.kde.plasmashell`: `libpcre2-16.so.0.15.0` branches into anonymous JIT
+memory at page offset `+0x10`, where the instruction is `00000000`.
+Repeated service timeouts follow that process failure.
+
+A **clone-only diagnostic** `QT_ENABLE_REGEXP_JIT=0` for the Plasmashell unit
+eliminated the fault in the bounded GUI run: KWin, foot, and Plasmashell kept
+their PIDs, and systemd logged `Started KDE Plasma Workspace`. This was not
+added to the product. A simple standalone `pcre2test -16 -jit` succeeded,
+so the fault depends on the actual Plasmashell JIT path.
+
+A second clone-only test carried `RDNOJITREWRITE=1` across guest exec and
+traced JIT bytes before and after the skipped rewrite. The same Plasmashell
+fault occurred twice. On the faulting page, the first executable flip had
+valid ARM64 words at `+0x10` (`a9b97bfd,a90653f3,a9055bf5,f90027f7`);
+before a later executable flip the same words were all zero, and skipping
+the rewrite left them zero. No overlapping guest `mmap(MAP_FIXED)`, `munmap`,
+or `mprotect`, nor a logged W^X write flip, appeared between those two
+samples. This rules out Shimmy's runtime instruction rewrite as the direct
+source of those zero words. It does **not** yet identify how the page was
+cleared or why PCRE2 called its stale entry. JIT byte and syscall tracing
+were temporary local instrumentation and were removed after this test.
