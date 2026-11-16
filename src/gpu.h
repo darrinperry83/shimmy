@@ -41,6 +41,7 @@ int  gpuwin_takeover_active(void);
 int  gpuwin_poll(void);                                            // pump events; !=0 if closed
 // Start the native-DRM evdev input pump (drains gpuwin_next_event -> /dev/input/event*).
 void gpuwin_start_evdev_pump(void);
+int gpuwin_start_session_frame_bridge(void); // PID 1 receives child DRM flips in its one window
 // Live cursor in window-local X11 coords (top-left origin), clamped to the content rect.
 // MUST NOT depend on gpuwin_poll() being called: under [NSApp run] it never is.
 void gpuwin_cursor(int* x, int* y);

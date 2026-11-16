@@ -62,6 +62,7 @@
 #include "rdgpu_scanout_client.h"
 #include "vt.h"
 #include "evdev.h"
+#include "session_frame.h"
 #include "drmasahi.h"
 #include <unistd.h>
 #include <strings.h>
@@ -2462,6 +2463,14 @@ static long present_secondary_fb(const uint8_t* bgra, uint64_t w, uint64_t h) {
 
 // Strong override of drmasahi.c's weak per-CRTC hook. CRTC 1 = primary, CRTC 2 = secondary.
 long gpuwin_present_crtc(const uint8_t* px, uint64_t w, uint64_t h, int bgra, uint32_t crtc_id) {
+  // A systemd-launched compositor is another host shim process. It must hand
+  // its DRM framebuffer to PID 1's existing GUI, never create an AppKit window
+  // of its own. This CPU carrier is a boot milestone, not full rdmetal proof.
+  const char* root = getenv("RDVT_ROOT_PID");
+  if (getenv("RDNATIVE_SESSION") && root && atol(root) != (long)getpid()) {
+    if (!bgra || w > UINT32_MAX || h > UINT32_MAX) return -22;
+    return session_frame_child_present(px, (uint32_t)w, (uint32_t)h, crtc_id);
+  }
   // RDGPU_SCANOUT=1 takeover: this hook is ONLY reached from drmasahi.c's DRM flip present
   // (drm_present_fb) — the native DRM-master compositor has just flipped its GBM framebuffer.
   // Log it distinctly so a headless run can prove the flip is what feeds the direct-scanout
@@ -2477,6 +2486,22 @@ long gpuwin_present_crtc(const uint8_t* px, uint64_t w, uint64_t h, int bgra, ui
   if (crtc_id == 2) return present_secondary_fb(px, w, h);   // BGRA (drm_present_fb passes bgra=1)
   vt_graphics_frame();
   return present_fb(px, w, h, bgra, CPU_PRESENT_DRM_PRIMARY);
+}
+
+static long session_frame_present_owned(const uint8_t* bgra, uint32_t w,
+                                        uint32_t h, uint32_t crtc) {
+  vt_graphics_frame(); // first compositor frame selects VT7; later text switches remain explicit
+  if (vt_enabled() && vt_active() != 7) return 0;
+  return gpuwin_present_crtc(bgra, w, h, /*bgra=*/1, crtc);
+}
+
+static void session_frame_producer_lost(void) {
+  vt_graphics_session_lost(); // clear old unlocked pixels and allow a new greeter to select VT7
+}
+
+int gpuwin_start_session_frame_bridge(void) {
+  return session_frame_host_start_with_lost(session_frame_present_owned,
+                                             session_frame_producer_lost);
 }
 
 // ---------------------------------------------------------------- evdev input pump

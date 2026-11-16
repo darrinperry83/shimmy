@@ -234,6 +234,12 @@ void vt_graphics_frame(void) {
     }
 }
 
+void vt_graphics_session_lost(void) {
+    if (!vt_enabled()) return;
+    atomic_store(&g_graphics_seen, 0);
+    vt_switch_to(1);
+}
+
 void vt_feed_key(const char* utf8, size_t n) {
     if (!n) return;
     int act = atomic_load(&g_active);

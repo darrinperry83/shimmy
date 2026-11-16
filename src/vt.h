@@ -47,6 +47,7 @@ int  vt_active(void);                     // current console number (1..7)
 int  vt_text_input_active(void);          // keyboard should go to the console, not the GUI
 void vt_feed_key(const char* utf8, size_t n);  // feed bytes into the active VT's pty master
 void vt_graphics_frame(void);             // a desktop frame was presented -> switch to GUI console
+void vt_graphics_session_lost(void);      // producer exited -> clear old frame, allow next greeter
 
 #ifdef __cplusplus
 }

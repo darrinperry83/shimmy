@@ -2421,6 +2421,8 @@ int main(int argc, char** argv) {
       // the compositor process's private device pipes through the boot socket.
       const char* rp = getenv("RDVT_ROOT_PID");
       if (rp && atol(rp) == (long)getpid()) {
+        if (gpuwin_start_session_frame_bridge() != 0)
+          fprintf(stderr, "[frame-bridge] native boot presenter unavailable\n");
         if (evdev_shared_host_init() == 0) gpuwin_start_evdev_pump();
         else fprintf(stderr, "[evdev] native boot input bridge unavailable\n");
       }
