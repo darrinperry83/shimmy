@@ -3671,6 +3671,19 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     return 0;
   }
   case 44: {
+    // Virtual pidfds are kqueues on Darwin, where fstatfs(kqueue) fails with EINVAL.
+    // Linux pidfds predating pidfs live on anon_inodefs. Report that filesystem,
+    // rather than inventing pidfs inode identity that this shim cannot provide.
+    if (pidfd_shim_pid((int)a0) > 0) {
+      if (!a1) return -LX_EFAULT;
+      struct linux_statfs* out = (struct linux_statfs*)a1;
+      memset(out, 0, sizeof *out);
+      out->f_type = 0x09041934; // ANON_INODE_FS_MAGIC
+      out->f_bsize = 4096;
+      out->f_namelen = 255;
+      out->f_frsize = 4096;
+      return 0;
+    }
     struct statfs s;
     if (fstatfs((int)a0, &s) < 0) return herrno();
     if (!a1) return -LX_EFAULT;
