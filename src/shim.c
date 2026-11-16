@@ -837,12 +837,18 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
   char ppidenv[64];
   snprintf(ppidenv, sizeof ppidenv, "RDGUESTPPID=%ld", syscalls_get_guest_ppid());
 
-  char** henv = (char**)calloc((size_t)genvc + ncarry + 4, sizeof *henv);
+  char signalenv[128];
+  syscalls_signal_exec_snapshot(signalenv, sizeof signalenv, guest_is_vfork_child());
+  char signalcarry[144];
+  snprintf(signalcarry, sizeof signalcarry, "RDGUESTSIGNAL=%s", signalenv);
+
+  char** henv = (char**)calloc((size_t)genvc + ncarry + 5, sizeof *henv);
   if (!henv) { free(hargv); return -12; }
   int m = 0;
   henv[m++] = (char*)"RDGUESTENV=1";
   henv[m++] = cwdenv;
   henv[m++] = ppidenv;
+  henv[m++] = signalcarry;
   for (int i = 0; i < genvc; i++) henv[m++] = envp[i];
   for (int i = 0; kCarry[i]; i++) {
     const char* v = getenv(kCarry[i]);
@@ -2355,6 +2361,7 @@ int main(int argc, char** argv) {
   { const char* pp = getenv("RDGUESTPPID");
     if (pp && *pp) syscalls_set_guest_ppid(atol(pp));
   }
+  syscalls_signal_exec_restore(getenv("RDGUESTSIGNAL"));
   // Restore the cwd an exec'ing parent shim handed us (see guest_execve). Must come after
   // syscalls_set_root, which does not touch g_cwd but owns everything else about resolution.
   { const char* cw = getenv("RDGUESTCWD");

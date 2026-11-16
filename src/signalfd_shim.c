@@ -78,6 +78,19 @@ static void delivered(int host, siginfo_t* info, void* context) {
     break; // a pending signal is consumed by one signalfd, not broadcast
   }
 }
+int signalfd_shim_queue_linux(int signo) {
+  if (signo < 1 || signo > 64) return 0;
+  uint64_t bit = 1ULL << (signo - 1);
+  int n = atomic_load_explicit(&count, memory_order_acquire);
+  for (int i = 0; i < n; i++) {
+    if (!(atomic_load_explicit(&slots[i].mask, memory_order_relaxed) & bit)) continue;
+    int fd = atomic_load_explicit(&slots[i].write_fd, memory_order_relaxed);
+    if (fd < 0) continue;
+    struct linux_sigfd_info rec = {.signo = (uint32_t)signo};
+    if (write(fd, &rec, sizeof rec) == sizeof rec) return 1;
+  }
+  return 0;
+}
 static int supported(uint64_t mask) {
   (void)mask;
   return 1;   // accept any mask; signals we cannot map are simply never delivered

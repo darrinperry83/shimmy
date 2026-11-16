@@ -27,6 +27,10 @@ int main(void) {
   assert(*(uint32_t*)(record + 12) == (uint32_t)getpid());
   assert(read(fd, record, sizeof record) == -1 && errno == EAGAIN);
   assert(signalfd4_shim(fd, &term, 8, 0x80800) == fd);
+  assert(signalfd_shim_queue_linux(12) == 0);
+  assert(signalfd_shim_queue_linux(15) == 1);
+  assert(read(fd, record, sizeof record) == sizeof record);
+  assert(*(uint32_t*)record == 15);
   assert(kill(getpid(), SIGTERM) == 0);
   int ready;
   do { ready = poll(&p, 1, 1000); } while (ready < 0 && errno == EINTR);

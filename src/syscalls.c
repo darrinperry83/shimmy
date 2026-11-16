@@ -42,6 +42,7 @@
 #include <sys/mount.h>
 #include <sys/file.h>
 #include <sys/ioctl.h>
+#include <sys/event.h>
 #include <poll.h>
 #include "drmasahi.h"
 #include "v4l2cam.h"
@@ -2402,18 +2403,112 @@ static uint64_t g_sigpending;
 static int g_pdeathsig;
 static pid_t g_pdeath_host_parent;
 static int g_pdeath_fired;
+static uint64_t g_pdeath_generation;
+static int g_pdeath_watch_fd = -1;
 
+struct pdeath_watch {
+  int fd, signo;
+  pid_t parent;
+  uint64_t generation;
+  int ready;
+};
+
+static void virtual_signal_default(int signo) {
+  // Custom guest handlers are rejected for a parent-death signal below. SIG_IGN
+  // discards generation; default disposition is delegated to the real host signal.
+  uint64_t action = g_sigacts[signo].handler;
+  if (action == 1) return;
+  int host = sig_l2m(signo);
+  if (host > 0) {
+    struct sigaction sa = {.sa_handler = SIG_DFL};
+    sigemptyset(&sa.sa_mask);
+    sigaction(host, &sa, NULL);
+    sigset_t unblocked;
+    sigemptyset(&unblocked);
+    sigaddset(&unblocked, host);
+    pthread_sigmask(SIG_UNBLOCK, &unblocked, NULL);
+    raise(host);
+  }
+}
+static void virtual_signal_emit_parent(int signo, uint64_t generation) {
+  if (__atomic_load_n(&g_pdeath_generation, __ATOMIC_ACQUIRE) != generation ||
+      !__sync_bool_compare_and_swap(&g_pdeath_fired, 0, 1)) return;
+  if (g_sigacts[signo].handler == 1) return; // SIG_IGN discards at generation
+  uint64_t bit = 1ULL << (signo - 1);
+  if (__atomic_load_n(&g_sigmask, __ATOMIC_ACQUIRE) & bit) {
+    if (!signalfd_shim_queue_linux(signo))
+      __atomic_fetch_or(&g_sigpending, bit, __ATOMIC_ACQ_REL);
+  }
+  else virtual_signal_default(signo);
+}
+static void* virtual_signal_parent_watch(void* arg) {
+  struct pdeath_watch* watch = arg;
+  while (!__atomic_load_n(&watch->ready, __ATOMIC_ACQUIRE)) {
+    struct timespec brief = {0, 1000000};
+    nanosleep(&brief, NULL);
+  }
+  struct kevent event;
+  struct timespec timeout = {0, 250000000};
+  for (;;) {
+    if (__atomic_load_n(&g_pdeath_generation, __ATOMIC_ACQUIRE) != watch->generation) break;
+    int n = kevent(watch->fd, NULL, 0, &event, 1, &timeout);
+    if (n == 1 && (event.fflags & NOTE_EXIT)) {
+      virtual_signal_emit_parent(watch->signo, watch->generation);
+      break;
+    }
+    if (n < 0 && errno != EINTR) break;
+    if (getppid() != watch->parent) {
+      virtual_signal_emit_parent(watch->signo, watch->generation);
+      break;
+    }
+  }
+  if (__atomic_load_n(&g_pdeath_watch_fd, __ATOMIC_ACQUIRE) == watch->fd)
+    __sync_bool_compare_and_swap(&g_pdeath_watch_fd, watch->fd, -1);
+  shim_fd_unreserve(watch->fd);
+  close(watch->fd);
+  free(watch);
+  return NULL;
+}
+static long virtual_signal_arm_parent(int signo, pid_t parent) {
+  int fd = kqueue();
+  if (fd < 0) return -linux_errno_from_host(errno);
+  fd = shim_fd_reserve(fd);
+  struct kevent event;
+  EV_SET(&event, parent, EVFILT_PROC, EV_ADD | EV_ENABLE, NOTE_EXIT, 0, NULL);
+  if (kevent(fd, &event, 1, NULL, 0, NULL) < 0) {
+    int err = linux_errno_from_host(errno);
+    shim_fd_unreserve(fd);
+    close(fd);
+    return -err;
+  }
+  struct pdeath_watch* watch = calloc(1, sizeof *watch);
+  if (!watch) { shim_fd_unreserve(fd); close(fd); return -LX_ENOMEM; }
+  watch->fd = fd; watch->signo = signo; watch->parent = parent;
+  pthread_t thread;
+  int rc = pthread_create(&thread, NULL, virtual_signal_parent_watch, watch);
+  if (rc) {
+    shim_fd_unreserve(fd); close(fd); free(watch);
+    return -linux_errno_from_host(rc);
+  }
+  watch->generation = __atomic_add_fetch(&g_pdeath_generation, 1, __ATOMIC_ACQ_REL);
+  g_pdeathsig = signo;
+  g_pdeath_host_parent = parent;
+  g_pdeath_fired = 0;
+  __atomic_store_n(&g_pdeath_watch_fd, fd, __ATOMIC_RELEASE);
+  __atomic_store_n(&watch->ready, 1, __ATOMIC_RELEASE);
+  pthread_detach(thread);
+  return 0;
+}
 long syscalls_signal_set_pdeathsig(int linux_signo) {
   if (linux_signo < 0 || linux_signo > 64) return -LX_EINVAL;
   if (linux_signo && sig_l2m(linux_signo) < 0) return -LX_ENOSYS;
-  // The shim can currently deliver this signal only to a blocked synchronous waiter.
-  // Reject other uses rather than claiming Linux's asynchronous delivery works.
-  if (linux_signo && !(__atomic_load_n(&g_sigmask, __ATOMIC_ACQUIRE) &
-                       (1ULL << (linux_signo - 1)))) return -LX_ENOSYS;
-  g_pdeathsig = linux_signo;
-  g_pdeath_host_parent = linux_signo ? getppid() : 0;
-  g_pdeath_fired = 0;
-  return 0;
+  if (linux_signo && g_sigacts[linux_signo].handler > 1) return -LX_ENOSYS;
+  if (!linux_signo) {
+    __atomic_add_fetch(&g_pdeath_generation, 1, __ATOMIC_ACQ_REL);
+    g_pdeathsig = 0; g_pdeath_host_parent = 0; g_pdeath_fired = 0;
+    return 0;
+  }
+  return virtual_signal_arm_parent(linux_signo, getppid());
 }
 int syscalls_signal_get_pdeathsig(void) { return g_pdeathsig; }
 void syscalls_signal_after_fork(void) {
@@ -2422,12 +2517,61 @@ void syscalls_signal_after_fork(void) {
   g_pdeathsig = 0;
   g_pdeath_host_parent = 0;
   g_pdeath_fired = 0;
+  g_pdeath_generation++;
+  // The worker thread did not survive fork. Remove its inherited kqueue from the
+  // child-only descriptor registry without touching a possibly locked host mutex.
+  int fd = g_pdeath_watch_fd;
+  if (fd >= 0) {
+    for (int i = 0; i < g_shim_nfd; i++) if (g_shim_fds[i] == fd) {
+      g_shim_fds[i] = g_shim_fds[--g_shim_nfd]; break;
+    }
+    close(fd);
+  }
+  g_pdeath_watch_fd = -1;
+}
+void syscalls_signal_exec_snapshot(char* out, size_t cap, int forked_child) {
+  snprintf(out, cap, "%016llx,%016llx,%d,%ld",
+           (unsigned long long)__atomic_load_n(&g_sigmask, __ATOMIC_ACQUIRE),
+           (unsigned long long)(forked_child ? 0 : __atomic_load_n(&g_sigpending, __ATOMIC_ACQUIRE)),
+           forked_child ? 0 : g_pdeathsig,
+           forked_child ? 0L : (long)g_pdeath_host_parent);
+}
+void syscalls_signal_exec_restore(const char* snapshot) {
+  if (!snapshot) return;
+  unsigned long long mask, pending;
+  int signo; long parent;
+  if (sscanf(snapshot, "%llx,%llx,%d,%ld", &mask, &pending, &signo, &parent) != 4) return;
+  mask &= ~((1ULL << (9 - 1)) | (1ULL << (19 - 1)));
+  __atomic_store_n(&g_sigmask, (uint64_t)mask, __ATOMIC_RELEASE);
+  __atomic_store_n(&g_sigpending, (uint64_t)pending, __ATOMIC_RELEASE);
+  if (signo > 0 && signo <= 31 && parent > 0 && g_sigacts[signo].handler <= 1) {
+    if (getppid() != (pid_t)parent) {
+      g_pdeathsig = signo; g_pdeath_host_parent = (pid_t)parent;
+      virtual_signal_emit_parent(signo, g_pdeath_generation);
+    } else if (virtual_signal_arm_parent(signo, (pid_t)parent) < 0) {
+      // exec has replaced the original image. Continuing without its promised
+      // parent-death notification would silently weaken process cleanup.
+      fprintf(stderr, "[shim] cannot restore parent-death signal after exec\n");
+      _exit(127);
+    }
+  }
 }
 static void virtual_signal_check_parent(void) {
   int signo = g_pdeathsig;
-  if (signo && !g_pdeath_fired && getppid() != g_pdeath_host_parent) {
-    g_pdeath_fired = 1;
-    __atomic_fetch_or(&g_sigpending, 1ULL << (signo - 1), __ATOMIC_ACQ_REL);
+  if (signo && getppid() != g_pdeath_host_parent)
+    virtual_signal_emit_parent(signo, g_pdeath_generation);
+}
+static void virtual_signal_deliver_unblocked(void) {
+  for (;;) {
+    uint64_t pending = __atomic_load_n(&g_sigpending, __ATOMIC_ACQUIRE);
+    uint64_t mask = __atomic_load_n(&g_sigmask, __ATOMIC_ACQUIRE);
+    uint64_t ready = pending & ~mask;
+    if (!ready) return;
+    uint64_t bit = ready & (~ready + 1);
+    uint64_t old = pending;
+    if (__atomic_compare_exchange_n(&g_sigpending, &old, pending & ~bit, 0,
+                                    __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+      virtual_signal_default(__builtin_ctzll(bit) + 1);
   }
 }
 unsigned long long syscalls_signal_pending(void) {
@@ -4684,8 +4828,14 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     int sig = (int)a0;
     if (sig < 1 || sig > 64) return -LX_EINVAL;
     if (a3 && a3 != 8) return -LX_EINVAL;       // sigsetsize must be 8 on aarch64
+    if (a1 && sig == g_pdeathsig &&
+        ((const struct linux_sigaction*)a1)->handler > 1) return -LX_ENOSYS;
     struct linux_sigaction prev = g_sigacts[sig];
-    if (a1) g_sigacts[sig] = *(const struct linux_sigaction*)a1;
+    if (a1) {
+      g_sigacts[sig] = *(const struct linux_sigaction*)a1;
+      if (g_sigacts[sig].handler == 1)
+        __atomic_fetch_and(&g_sigpending, ~(1ULL << (sig - 1)), __ATOMIC_ACQ_REL);
+    }
     if (a2) *(struct linux_sigaction*)a2 = prev;
     return 0;
   }
@@ -4697,17 +4847,20 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     uint64_t old = __atomic_load_n(&g_sigmask, __ATOMIC_ACQUIRE);
     if (a1) {
       uint64_t set = *(const uint64_t*)a1;
+      set &= ~((1ULL << (9 - 1)) | (1ULL << (19 - 1)));
       if      (howv == 0) __atomic_fetch_or(&g_sigmask, set, __ATOMIC_ACQ_REL);
       else if (howv == 1) __atomic_fetch_and(&g_sigmask, ~set, __ATOMIC_ACQ_REL);
       else if (howv == 2) __atomic_store_n(&g_sigmask, set, __ATOMIC_RELEASE);
       else return -LX_EINVAL;
+      virtual_signal_check_parent();
+      virtual_signal_deliver_unblocked();
     }
     if (a2) *(uint64_t*)a2 = old;
     return 0;
   }
 
   // ---------- 137 rt_sigtimedwait ----------
-  // Nothing ever queues a signal to the guest, so the honest answer is "timed out".
+  // Consume supported virtual pending standard signals, including parent death.
   case 137: {
     if (!a0) return -LX_EFAULT;
     if (a3 != 8) return -LX_EINVAL;

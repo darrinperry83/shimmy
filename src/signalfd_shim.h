@@ -5,4 +5,7 @@
 // Isolated Weston probe: supports the standard signals requested by its event loop.
 long signalfd4_shim(int fd, const uint64_t* mask, size_t size, int flags);
 void signalfd_shim_closed(int fd);
+// Queue one virtual standard signal to a matching signalfd, if any. Returns 1
+// when consumed; a full or absent signalfd leaves the caller's pending bit intact.
+int signalfd_shim_queue_linux(int signo);
 #endif

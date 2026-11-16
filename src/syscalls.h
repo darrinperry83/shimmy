@@ -59,6 +59,8 @@ long syscalls_signal_set_pdeathsig(int linux_signo);
 int  syscalls_signal_get_pdeathsig(void);
 void syscalls_signal_after_fork(void);
 unsigned long long syscalls_signal_pending(void);
+void syscalls_signal_exec_snapshot(char* out, size_t cap, int forked_child);
+void syscalls_signal_exec_restore(const char* snapshot);
 
 // ---------------------------------------------------------------------------------------------
 // SHIM-OWNED DESCRIPTORS
