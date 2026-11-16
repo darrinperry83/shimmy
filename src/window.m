@@ -64,6 +64,8 @@
 #include "evdev.h"
 #include "session_frame.h"
 #include "drmasahi.h"
+#include "rdgpu_native_output.h"
+#include "drm_output_route.h"
 #include <unistd.h>
 #include <strings.h>
 #include <ctype.h>
@@ -2461,7 +2463,9 @@ static long present_secondary_fb(const uint8_t* bgra, uint64_t w, uint64_t h) {
   return rc;
 }
 
-// Strong override of drmasahi.c's weak per-CRTC hook. CRTC 1 = primary, CRTC 2 = secondary.
+// Strong override of drmasahi.c's weak per-CRTC hook. With two displays, external CRTC 1
+// is primary and builtin CRTC 2 is secondary. With only the builtin display, CRTC 2 uses
+// the existing primary window rather than creating a second window over the same screen.
 long gpuwin_present_crtc(const uint8_t* px, uint64_t w, uint64_t h, int bgra, uint32_t crtc_id) {
   // A systemd-launched compositor is another host shim process. It must hand
   // its DRM framebuffer to PID 1's existing GUI, never create an AppKit window
@@ -2483,7 +2487,22 @@ long gpuwin_present_crtc(const uint8_t* px, uint64_t w, uint64_t h, int bgra, ui
                       "direct scanout)\n",
               crtc_id, drmFlipScanoutFrames, (unsigned)w, (unsigned)h, bgra);
   }
-  if (crtc_id == 2) return present_secondary_fb(px, w, h);   // BGRA (drm_present_fb passes bgra=1)
+  static _Atomic(uint64_t) routeGeneration = UINT64_MAX;
+  static _Atomic(int) externalConnected, builtinConnected;
+  uint64_t generation = atomic_load(&gHotplugGeneration);
+  if (atomic_load(&routeGeneration) != generation) {
+    int external = rdgpu_drm_connector_output(1, NULL, NULL) == 0;
+    int builtin = rdgpu_drm_connector_output(2, NULL, NULL) == 0;
+    atomic_store(&externalConnected, external);
+    atomic_store(&builtinConnected, builtin);
+    atomic_store(&routeGeneration, generation);
+    fprintf(stderr, "[drm-present] route generation=%llu external=%d builtin=%d\n",
+            (unsigned long long)generation, external, builtin);
+  }
+  enum drm_output_route route = drm_output_route(crtc_id,
+      atomic_load(&externalConnected), atomic_load(&builtinConnected));
+  if (route == DRM_ROUTE_SECONDARY) return present_secondary_fb(px, w, h);
+  if (route == DRM_ROUTE_NONE) return -19;
   vt_graphics_frame();
   return present_fb(px, w, h, bgra, CPU_PRESENT_DRM_PRIMARY);
 }
