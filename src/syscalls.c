@@ -432,8 +432,9 @@ void syscalls_set_cwd(const char* gcwd) {
 
 // Is `guest_path` the guest PID 1? systemd decides "system manager" by getpid()==1, so the shim
 // must report 1 for the process the kernel would have launched as init (argv[0] = /sbin/init, the
-// systemd-sysvcompat symlink). /usr/lib/systemd/systemd is the real target and is included so a
-// systemd daemon-reexec (which re-exec's the shim with the real binary as argv[0]) stays PID 1.
+// systemd-sysvcompat symlink). /usr/lib/systemd/systemd is also the user manager's binary, so
+// path alone is insufficient. The boot owner's host PID survives daemon-reexec and is carried
+// to children in RDVT_ROOT_PID; only that exact process may claim guest PID 1.
 static int guest_path_is_init(const char* p) {
   if (!p) return 0;
   static const char* const inits[] = {
@@ -447,10 +448,12 @@ static int guest_path_is_init(const char* p) {
 
 void syscalls_set_exe(const char* guest_path) {
   if (guest_path && *guest_path) snprintf(g_exe, sizeof g_exe, "%s", guest_path);
-  g_is_init = guest_path_is_init(guest_path);
-  const char* owner = getenv("RDVT_ROOT_PID");
-  if (g_is_init && g_rootlen && owner && strtol(owner, NULL, 10) == (long)getpid())
-    drm_materialize_udev();
+  const char *root = getenv("RDVT_ROOT_PID");
+  char *end = NULL;
+  long boot_pid = root ? strtol(root, &end, 10) : -1;
+  g_is_init = guest_path_is_init(guest_path) && root && end != root && !*end &&
+              boot_pid > 0 && boot_pid == (long)getpid();
+  if (g_is_init && g_rootlen) drm_materialize_udev();
 }
 
 // Scoped PID-1 identity. syscalls_set_exe() sets it for the init process; the fork() child clears

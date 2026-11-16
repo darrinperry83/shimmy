@@ -95,7 +95,8 @@ try:
             else:
                 print("PASSWORD_PROMPT", flush=True)
                 type_keys(password + "\n")
-                if wait_text("shimtest@", 25) or wait_text("[shimtest@", 1):
+                shell_wait = 60 if os.environ.get("RD_TEST_SESSION") == "1" else 25
+                if wait_text("shimtest@", shell_wait) or wait_text("[shimtest@", 1):
                     type_keys("id -un; id -u\n")
                     ok = wait_text("\nshimtest\n", 8) and wait_text("\n22001\n", 3)
                 print("LOGIN_SHELL_AND_ID" if ok else "LOGIN_SHELL_MISSING", flush=True)
@@ -114,6 +115,14 @@ try:
                     kwin_seen = any("kwin_wayland" in p for p in programs)
                     print("KWIN_PROCESS_SEEN" if kwin_seen else "KWIN_PROCESS_MISSING", flush=True)
                     ok = runtime_seen and kwin_seen
+                if ok and os.environ.get("RD_TEST_SESSION") == "1":
+                    type_keys("printf 'SHIMMY_RUNTIME=%s\\n' \"$XDG_RUNTIME_DIR\"; "
+                              "systemctl --user is-active basic.target && "
+                              "printf 'SHIMMY_USER_%s\\n' MANAGER_READY\n")
+                    runtime = wait_text("SHIMMY_RUNTIME=/run/user/22001", 12)
+                    manager = wait_text("SHIMMY_USER_MANAGER_READY", 12)
+                    ok = runtime and manager
+                    print("LOGIN_USER_SESSION_OK" if ok else "LOGIN_USER_SESSION_MISSING", flush=True)
                 if ok and os.environ.get("RD_TEST_JOB_CONTROL") == "1":
                     if console.exists() and "no job control in this shell" in console.read_text(errors="replace"):
                         ok = False
