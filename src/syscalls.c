@@ -2405,6 +2405,9 @@ static pid_t g_pdeath_host_parent;
 static int g_pdeath_fired;
 static uint64_t g_pdeath_generation;
 static int g_pdeath_watch_fd = -1;
+static pid_t g_sigchld_notified_pid;
+static void virtual_signal_check_parent(void);
+static void virtual_signal_deliver_unblocked(void);
 
 struct pdeath_watch {
   int fd, signo;
@@ -2528,6 +2531,38 @@ void syscalls_signal_after_fork(void) {
     close(fd);
   }
   g_pdeath_watch_fd = -1;
+  g_sigchld_notified_pid = 0;
+}
+void syscalls_signal_child_reaped(long pid) {
+  if (pid > 0 && g_sigchld_notified_pid == (pid_t)pid)
+    g_sigchld_notified_pid = 0;
+}
+long syscalls_signal_sigsuspend(const unsigned long long* mask, size_t size) {
+  if (!mask) return -LX_EFAULT;
+  if (size != 8) return -LX_EINVAL;
+  uint64_t temporary = (uint64_t)*mask &
+      ~((1ULL << (9 - 1)) | (1ULL << (19 - 1)));
+  uint64_t previous = __atomic_exchange_n(&g_sigmask, temporary, __ATOMIC_ACQ_REL);
+  for (;;) {
+    virtual_signal_check_parent();
+    virtual_signal_deliver_unblocked();
+    // A caught, newly exited guest child is a real SIGCHLD wake source. WNOWAIT
+    // leaves it for the caller's waitpid() loop to reap after EINTR. No handler
+    // is synthesized here; callers that need handler side effects remain outside
+    // the current signal compatibility contract.
+    if (!(temporary & (1ULL << (17 - 1))) && g_sigacts[17].handler > 1) {
+      siginfo_t si = {0};
+      if (waitid(P_ALL, 0, &si, WEXITED | WNOHANG | WNOWAIT) == 0 &&
+          si.si_pid > 0 && si.si_pid != g_sigchld_notified_pid &&
+          guest_child_known((int)si.si_pid)) {
+        g_sigchld_notified_pid = si.si_pid;
+        __atomic_store_n(&g_sigmask, previous, __ATOMIC_RELEASE);
+        return -LX_EINTR;
+      }
+    }
+    struct timespec pause = {0, 100000000};
+    nanosleep(&pause, NULL);
+  }
 }
 void syscalls_signal_exec_snapshot(char* out, size_t cap, int forked_child) {
   snprintf(out, cap, "%016llx,%016llx,%d,%ld",
@@ -5084,6 +5119,7 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     struct rusage ru;
     pid_t p = wait4((pid_t)(long)a0, &st, mopt, a3 ? &ru : 0);
     if (p < 0) return herrno();
+    if (p > 0) syscalls_signal_child_reaped(p);
     if (a1) *(int*)a1 = st;                     // wait status encoding is compatible
     if (a3 && p > 0) rusage_m2l(&ru, (struct linux_rusage*)a3);
     return (long)p;

@@ -1128,6 +1128,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if ((int)a0 == LX_P_PIDFD) {
       if (pidfd_shim_waitid((int)a1, (id_t)a1, &si, hopt) != 0) return eret();
     } else if (waitid((idtype_t)a0, (id_t)a1, &si, hopt) != 0) return eret();
+    if (si.si_pid > 0 && !(lopt & LX_WNOWAIT)) syscalls_signal_child_reaped(si.si_pid);
     if (a2) {                                                  // Linux siginfo layout, by hand
       unsigned char* u = (unsigned char*)a2;
       memset(u, 0, 128);
@@ -1226,13 +1227,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   }
   case 132: return do_sigaltstack((const struct lx_stack*)a0, (struct lx_stack*)a1);
   case 133: {                                                  // rt_sigsuspend
-    // The shim records but never DELIVERS signals to guest code, so a sigsuspend/pause() has no
-    // signal to wait for and can never return normally. Returning -EINTR here (the old behaviour)
-    // is a busy-spin for every caller: glibc's pause() retries the syscall in a tight loop, which
-    // is what burned a full core and stopped WirePlumber's main thread from ever settling. Block
-    // instead — the thread parks until the process exits.
-    struct timespec ts = { 3600, 0 };
-    for (;;) nanosleep(&ts, &ts);
+    return syscalls_signal_sigsuspend((const unsigned long long*)a0, (size_t)a1);
   }
   case 136:                                                    // rt_sigpending
     if (!a0) return -LX_EFAULT;
@@ -1582,6 +1577,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     int status = 0;
     pid_t r = wait4((pid_t)a0, a1 ? &status : 0, hopt, &ru);
     if (r < 0) return eret();
+    if (r > 0) syscalls_signal_child_reaped(r);
     if (a1) *(int*)a1 = status;                                 // wait status encoding matches
     if (a3) lx_rusage_put((struct lx_rusage*)a3, &ru);
     return r;
