@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Compile and run one GBM/EGL context in a disposable Arch root under build/.
+"""Compile and run one GBM/EGL/GLES clear in a disposable Arch root under build/.
 
-This checks device discovery and context creation, not direct Metal rendering.
+This checks device discovery, context creation and a clear call, not Metal GPU execution.
 The caller must supply an isolated copy of the root; never point at a live rootfs.
 """
 import argparse
@@ -40,7 +40,7 @@ def main():
         subprocess.run([
             'clang', '--target=aarch64-linux-gnu', '--sysroot=' + str(root),
             '-fuse-ld=lld', '-fPIE', '-pie', str(base / 'tests/egl_gbm_probe.c'),
-            '-o', str(target), '-lEGL', '-lgbm',
+            '-o', str(target), '-lEGL', '-lgbm', '-lGLESv2',
         ], check=True, timeout=30)
         proc = subprocess.Popen([str(shim), str(root), '/tmp/shim-egl-gbm-probe'],
                                 env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -53,10 +53,11 @@ def main():
             raise RuntimeError('EGL probe timed out: ' + output[-1000:])
         for line in output.splitlines():
             if ('pci id for fd' in line or 'MESA-LOADER: dlopen(' in line or
-                    line.startswith('EGL ') or line.startswith('GBM ')):
+                    line.startswith('EGL ') or line.startswith('GBM ') or
+                    line.startswith('GL_RENDERER=')):
                 print(line)
         if (proc.returncode or not re.search(r'EGL \d+\.\d+ initialized', output) or
-                'GBM GLES2 context created' not in output or
+                'GBM GLES2 window clear completed' not in output or
                 'MESA-LOADER: failed to retrieve device information' in output):
             raise RuntimeError(f'EGL probe exit {proc.returncode}')
     finally:
