@@ -16,7 +16,7 @@ from boot_process_scope import boot_processes
 
 base = Path.cwd()
 root = Path(os.environ["RD_LOGIN_ROOT"]).resolve()
-binary = (base / "shim_cli").resolve(strict=True)
+binary = Path(os.environ.get("RD_LOGIN_BINARY", str(base / "shim_cli"))).resolve(strict=True)
 if not root.is_relative_to((base / "build").resolve()) or not (root / "usr/bin/login").is_file():
     raise SystemExit("RD_LOGIN_ROOT must be a private clone under build/")
 user = "shimtest"
@@ -40,6 +40,22 @@ with (root / "etc/group").open("a") as f:
 with (root / "etc/shadow").open("a") as f:
     f.write(f"{user}:{hashed}:20670::::::\n")
 (root / "home" / user).mkdir(mode=0o700, exist_ok=True)
+if os.environ.get("RD_TEST_FOOT") == "1":
+    foot_seconds = 90 if os.environ.get("RD_TEST_STABILITY") == "1" else 20
+    (root / "tmp/shim-foot-probe.sh").write_text(
+        '#!/bin/sh\n'
+        'for i in $(seq 1 60); do\n'
+        '  for s in "$XDG_RUNTIME_DIR"/wayland-[0-9]*.lock; do\n'
+        '    if [ -f "$s" ]; then\n'
+        '      display="${s##*/}"\n'
+        '      export WAYLAND_DISPLAY="${display%.lock}"\n'
+        '      echo "FOOT_DISPLAY=$WAYLAND_DISPLAY"\n'
+        f'      exec env WAYLAND_DEBUG=client /usr/bin/foot -e /usr/bin/sleep {foot_seconds}\n'
+        '    fi\n'
+        '  done\n'
+        '  sleep 1\n'
+        'done\n'
+        'echo FOOT_NO_SOCKET\nexit 1\n')
 
 # AF_UNIX paths are short; the socket namespace must not inherit the long checkout path.
 tmp = Path(tempfile.mkdtemp(prefix="rdli-", dir="/tmp"))
@@ -109,18 +125,48 @@ try:
                                                 "open bus r=", "TakeControl r=", "TakeDevice ", "ReadReply ")):
                                 print(line, flush=True)
                 if ok and os.environ.get("RD_TEST_PLASMA") == "1":
+                    if os.environ.get("RD_TEST_DRM_TRACE") == "1":
+                        type_keys("systemctl --user set-environment RDDRM_TRACE=1; echo DRM_TRACE_SET\n")
+                        if not wait_text("DRM_TRACE_SET", 8):
+                            raise RuntimeError("could not set user-manager DRM trace")
                     type_keys("printf 'PLASMA_RUNTIME=%s\\n' \"$XDG_RUNTIME_DIR\"\n")
                     runtime_seen = wait_text("PLASMA_RUNTIME=/run/user/22001", 8)
+                    if os.environ.get("RD_TEST_FOOT") == "1":
+                        type_keys("sh /tmp/shim-foot-probe.sh >/tmp/shim-foot-probe.log 2>&1 &\n")
                     type_keys("/usr/lib/plasma-dbus-run-session-if-needed /usr/bin/startplasma-wayland\n")
                     hold = int(os.environ.get("RD_TEST_PLASMA_HOLD", "15"))
                     if not 1 <= hold <= 120:
                         raise ValueError("RD_TEST_PLASMA_HOLD must be 1..120 seconds")
-                    time.sleep(hold)
+                    def plasma_pids():
+                        rows = subprocess.check_output(["ps", "-axo", "pid=,command="], text=True)
+                        return {args.split(None, 1)[0]: int(pid)
+                                for pid, args in boot_processes(rows, binary, root)
+                                if args.split(None, 1)[0] in ("/usr/bin/kwin_wayland", "/usr/bin/plasmashell", "/usr/bin/foot")}
+                    first = None
+                    if hold > 5:
+                        first_delay = min(20, hold // 2) if os.environ.get("RD_TEST_STABILITY") == "1" else 5
+                        time.sleep(first_delay)
+                        first = plasma_pids()
+                        time.sleep(hold - first_delay)
+                    else:
+                        time.sleep(hold)
+                    last = plasma_pids()
+                    print("PLASMA_PIDS_FIRST", first, flush=True)
+                    print("PLASMA_PIDS_LAST", last, flush=True)
+                    print("KWIN_SAME_PID" if first and first.get("/usr/bin/kwin_wayland") ==
+                          last.get("/usr/bin/kwin_wayland") else "KWIN_PID_CHANGED", flush=True)
+                    if os.environ.get("RD_TEST_FOOT") == "1":
+                        print("FOOT_SAME_PID" if first and first.get("/usr/bin/foot") and
+                              first.get("/usr/bin/foot") == last.get("/usr/bin/foot") else
+                              "FOOT_PID_CHANGED", flush=True)
                     listing = subprocess.check_output(["ps", "-axo", "pid=,command="], text=True)
                     programs = [args.split(None, 1)[0]
                                 for _, args in boot_processes(listing, binary, root)]
                     print("PLASMA_RUNTIME_OK" if runtime_seen else "PLASMA_RUNTIME_MISSING", flush=True)
                     print("PLASMA_PROGRAMS", ",".join(sorted(set(programs))), flush=True)
+                    if os.environ.get("RD_TEST_FOOT") == "1":
+                        probe = root / "tmp/shim-foot-probe.log"
+                        print("FOOT_PROBE", probe.read_text(errors="replace")[-2000:] if probe.exists() else "missing", flush=True)
                     # This is only a process-start probe. A visible desktop and a working
                     # greeter/logout cycle require a separate GUI integration test.
                     kwin_seen = "/usr/bin/kwin_wayland" in programs
