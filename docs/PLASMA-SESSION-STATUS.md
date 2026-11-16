@@ -105,7 +105,10 @@ valid ARM64 words at `+0x10` (`a9b97bfd,a90653f3,a9055bf5,f90027f7`);
 before a later executable flip the same words were all zero, and skipping
 the rewrite left them zero. No overlapping guest `mmap(MAP_FIXED)`, `munmap`,
 or `mprotect`, nor a logged W^X write flip, appeared between those two
-samples. This rules out Shimmy's runtime instruction rewrite as the direct
-source of those zero words. It does **not** yet identify how the page was
-cleared or why PCRE2 called its stale entry. JIT byte and syscall tracing
-were temporary local instrumentation and were removed after this test.
+samples. The shared stderr trace did not label every JIT byte sample with its
+host PID and thread ID, so cross-process interleaving cannot be fully excluded.
+The result argues against the runtime instruction rewrite directly zeroing the
+page, but does **not** yet establish how it was cleared or why PCRE2 called its
+entry. A follow-up trace needs PID/thread and mapping-generation identifiers.
+JIT byte and syscall tracing were temporary local instrumentation and were
+removed after this test.
