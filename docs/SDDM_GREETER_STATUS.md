@@ -45,3 +45,51 @@ runtime directory, sustained KWin and SDDM greeter processes, and then visual
 frame and session-selection tests. Neither service startup nor transient KWin
 launch proves a usable greeter, Plasma or Hyprland login, or GPU presentation.
 No live root, Mac display, or existing session was changed.
+
+## Integrated-development retest
+
+A later isolated full boot used the then-current `development` CLI at
+`bf28e6f` with its opt-in `RDPIDFD_SOCKET=1` and
+`RDSOCKETOUTQ_COMPAT=1` features. The clone alone contained the SDDM Wayland
+configuration. `seat0` reported `CanGraphical=yes`; SDDM reached `Greeter
+starting`. In one aligned run, SDDM host PID 46339 and helper PID 46344 logged
+the helper's PAM authentication returning. During a 45-second observation,
+KWin never appeared, `loginctl` showed no SDDM session, and `/run/user/962`
+did not exist. This run stopped **before** PAM session opening and is distinct
+from the earlier transient-KWin run above.
+
+A separate opt-in byte-count trace showed the helper successfully wrote its
+HELLO (20 bytes) and AUTHENTICATED (24 bytes) to the SDDM auth Unix socket,
+then waited for a reply. The parent did not log an auth-socket accept or
+reply in that trace. SDDM v0.21.0's source confirms the helper waits for the
+parent's environment and cookie reply at this point. The parent main thread
+sample was parked in Shimmy's futex translation; a later aligned futex trace
+showed indefinite `FUTEX_WAIT_BITSET|PRIVATE|CLOCK_REALTIME` on
+`0x109551dc0`, with the word remaining zero and no wake during 25 seconds.
+That is a real wait but does not itself prove a lost wake or identify the Qt
+callsite. A standalone cross-process Unix listener/epoll check passed, so a
+generic listener wakeup failure is not established. The current blocker is
+the parent not progressing the SDDM helper authentication exchange; the
+precise reason remains under investigation.
+
+The later header-only D-Bus trace identified the direct wait as SDDM's
+`DisplayManagerSeat` constructor calling `QDBusConnection::registerService`
+again. The parent previously sent `RequestName` with serial 3. Its reply was
+**not missing**: the broker coalesced `NameAcquired` and the 84-byte method
+return (`reply_serial=3`) into one 279-byte recv; a first-frame-only diagnostic
+had incorrectly missed it. SDDM owned the name and later D-Bus calls received
+replies. At the final wait, its system-bus socket had no queued bytes. The
+repeat call did not send another `RequestName` before parking. This narrows
+the problem to Qt's repeated call path or ordering in this SDDM process; it
+does not prove a broker delivery failure.
+
+A tiny Qt6DBus AArch64 PIE executable in the disposable root registered
+`org.freedesktop.DisplayManager` twice on the same guest bus successfully.
+It also succeeded when the second registration ran from a pending-call
+callback. A test that scheduled a callback before the first registration
+returned still ran the callback *after* the first returned, so it did not
+reproduce nested registration. These tests exclude a general inability to
+register the same name twice but leave SDDM's particular ordering unresolved.
+The separate eventfd counter experiment corrected a real Linux semantic gap
+in a test branch; an isolated SDDM retest still showed no KWin process. It is
+not the proven cause of the greeter stall and is not merged here.
