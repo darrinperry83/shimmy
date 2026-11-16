@@ -491,9 +491,9 @@ static int evdev_minor_of_path(const char* path) {
 
 void evdev_fake_stat(unsigned int* mode, unsigned long* rdev, const char* path) {
   int k = evdev_sysfs_kind(path);
-  if (k == 1 || k == 2 || k == 4 || k == 5) { *mode = 0100000u; *rdev = 0; return; }  // S_IFREG
-  if (k == 3) { *mode = 0120000u; *rdev = 0; return; }                                // S_IFLNK
-  if (k == 6 || k == 7) { *mode = 0040000u; *rdev = 0; return; }                      // S_IFDIR
+  if (k == 1 || k == 2 || k == 4 || k == 5 || k == 9) { *mode = 0100000u; *rdev = 0; return; }
+  if (k == 3 || k == 10) { *mode = 0120000u; *rdev = 0; return; }
+  if (k == 6 || k == 7 || k == 8) { *mode = 0040000u; *rdev = 0; return; }
   // /dev/input/eventN char node: major 13, minor 64/65.
   int minor = evdev_minor_of_path(path);
   *mode = (*mode & 0777u) | 0020000u;                 // S_IFCHR
@@ -509,9 +509,33 @@ void evdev_fake_stat(unsigned int* mode, unsigned long* rdev, const char* path) 
 //   5 = /run/udev/data/+input:<name>            (S_IFREG) systemd>=255 udev-db key
 //   6 = <dev>                 (S_IFDIR)  either /sys/class/input/eventN or /sys/dev/char/13:6N
 //   7 = /sys/class/input      (S_IFDIR)
+//   8 = /sys/devices/virtual/input/inputN parent (S_IFDIR)
+//   9 = parent/uevent         (S_IFREG)
+//  10 = parent/subsystem      (S_IFLNK)
 int evdev_sysfs_kind(const char* path) {
   if (!path) return 0;
   if (strcmp(path, "/sys/class/input") == 0) return 7;
+
+  // logind takes evdev fds through the *input parent* of each event device.
+  // /sys/class/input/eventN alone cannot provide that ancestry.
+  for (int i = 0; i < 2; i++) {
+    char parent[64], event[80];
+    snprintf(parent, sizeof parent, "/sys/devices/virtual/input/input%d", i);
+    snprintf(event, sizeof event, "%s/event%d", parent, i);
+    if (strcmp(path, parent) == 0) return 8;
+    if (strncmp(path, parent, strlen(parent)) == 0) {
+      const char* leaf = path + strlen(parent);
+      if (strcmp(leaf, "/uevent") == 0) return 9;
+      if (strcmp(leaf, "/subsystem") == 0) return 10;
+    }
+    if (strcmp(path, event) == 0) return 6;
+    if (strncmp(path, event, strlen(event)) == 0) {
+      const char* leaf = path + strlen(event);
+      if (strcmp(leaf, "/uevent") == 0) return 1;
+      if (strcmp(leaf, "/dev") == 0) return 2;
+      if (strcmp(leaf, "/subsystem") == 0) return 3;
+    }
+  }
 
   // Normalize a device node path to "event0"/"event1" (class form) or "13:64"/"13:65" (devnum form).
   const char* leaf = NULL;   // device basename + any trailing "/<file>"
@@ -561,8 +585,10 @@ const char* evdev_sysfs_content(const char* path) {
                "S:class/input/event%d\nE:ID_INPUT=1\nE:ID_INPUT_%s=1\nE:ID_SEAT=seat0\n",
                minor - EVDEV_EVENT0_MINOR, is_kbd ? "KEYBOARD" : "MOUSE");
       return buf;
+    case 9:
+      return "SUBSYSTEM=input\nNAME=\"Shimmy virtual input\"\n";
     default: return 0;
   }
 }
 
-const char* evdev_sysfs_link(void) { return "/sys/class/input"; }
+const char* evdev_sysfs_link(void) { return "/sys/bus/input"; }

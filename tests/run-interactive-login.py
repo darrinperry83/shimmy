@@ -100,11 +100,22 @@ try:
                     type_keys("id -un; id -u\n")
                     ok = wait_text("\nshimtest\n", 8) and wait_text("\n22001\n", 3)
                 print("LOGIN_SHELL_AND_ID" if ok else "LOGIN_SHELL_MISSING", flush=True)
+                if ok and os.environ.get("RD_TEST_SEAT_DBUS") == "1":
+                    type_keys("/tmp/shim-seat-dbus\n")
+                    ok = wait_text("TakeDevice 226:0", 15)
+                    if console.exists():
+                        for line in console.read_text(errors="replace").splitlines():
+                            if line.startswith(("device r=", "devname r=", "direct logind-flags",
+                                                "open bus r=", "TakeControl r=", "TakeDevice ", "ReadReply ")):
+                                print(line, flush=True)
                 if ok and os.environ.get("RD_TEST_PLASMA") == "1":
                     type_keys("printf 'PLASMA_RUNTIME=%s\\n' \"$XDG_RUNTIME_DIR\"\n")
                     runtime_seen = wait_text("PLASMA_RUNTIME=/run/user/22001", 8)
                     type_keys("/usr/lib/plasma-dbus-run-session-if-needed /usr/bin/startplasma-wayland\n")
-                    time.sleep(15)
+                    hold = int(os.environ.get("RD_TEST_PLASMA_HOLD", "15"))
+                    if not 1 <= hold <= 120:
+                        raise ValueError("RD_TEST_PLASMA_HOLD must be 1..120 seconds")
+                    time.sleep(hold)
                     listing = subprocess.check_output(["ps", "-axo", "pid=,command="], text=True)
                     programs = [args.split(None, 1)[0]
                                 for _, args in boot_processes(listing, binary, root)]
@@ -112,9 +123,11 @@ try:
                     print("PLASMA_PROGRAMS", ",".join(sorted(set(programs))), flush=True)
                     # This is only a process-start probe. A visible desktop and a working
                     # greeter/logout cycle require a separate GUI integration test.
-                    kwin_seen = any("kwin_wayland" in p for p in programs)
+                    kwin_seen = "/usr/bin/kwin_wayland" in programs
+                    shell_seen = "/usr/bin/plasmashell" in programs
                     print("KWIN_PROCESS_SEEN" if kwin_seen else "KWIN_PROCESS_MISSING", flush=True)
-                    ok = runtime_seen and kwin_seen
+                    print("PLASMASHELL_PROCESS_SEEN" if shell_seen else "PLASMASHELL_PROCESS_MISSING", flush=True)
+                    ok = runtime_seen and kwin_seen and shell_seen
                 if ok and os.environ.get("RD_TEST_SESSION") == "1":
                     type_keys("printf 'SHIMMY_RUNTIME=%s\\n' \"$XDG_RUNTIME_DIR\"; "
                               "systemctl --user is-active basic.target && "

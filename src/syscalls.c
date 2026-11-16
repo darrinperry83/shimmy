@@ -87,6 +87,7 @@ extern void rd_rtnl_dup(int oldfd, int newfd);
 #define LX_EDEADLK 35
 #define LX_ENOMEM 12
 #define LX_EACCES 13
+#define LX_EROFS 30
 #define LX_EFAULT 14
 #define LX_EBUSY 16
 #define LX_EEXIST 17
@@ -379,6 +380,7 @@ long syscalls_get_guest_ppid(void) { return g_guest_ppid; }
 
 static void synth_materialize_all(void);   // defined with the /proc,/sys,/dev synthesis below
 static void drm_materialize_udev(void);     // only the actual guest PID1 boot owner updates seat state
+static void evdev_materialize_udev(void);
 static int  cgroup_dir_path(int fd, char* out, size_t cap);  // defined with the cgroup synthesis below
 
 void syscalls_set_root(const char* root) {
@@ -455,7 +457,7 @@ void syscalls_set_exe(const char* guest_path) {
   long boot_pid = root ? strtol(root, &end, 10) : -1;
   g_is_init = guest_path_is_init(guest_path) && root && end != root && !*end &&
               boot_pid > 0 && boot_pid == (long)getpid();
-  if (g_is_init && g_rootlen) drm_materialize_udev();
+  if (g_is_init && g_rootlen) { drm_materialize_udev(); evdev_materialize_udev(); }
 }
 
 // Scoped PID-1 identity. syscalls_set_exe() sets it for the init process; the fork() child clears
@@ -3666,6 +3668,76 @@ static int mkdir_p(const char* path) {
   return 0;
 }
 
+// logind resolves an evdev node through its input parent, then requires that parent to belong
+// to seat0. These are virtual devices, so no kernel uevent will populate that relationship.
+static void evdev_materialize_udev(void) {
+  char host[PATH_MAX], path[PATH_MAX];
+  static const char* const dirs[] = { "/sys/devices/virtual/input", "/sys/bus/input",
+                                      "/run/udev/data", "/run/udev/tags/seat" };
+  for (size_t j = 0; j < sizeof dirs / sizeof dirs[0]; j++)
+    if (guest_to_host(dirs[j], host, sizeof host) || mkdir_p(host)) return;
+  for (int i = 0; i < 2; i++) {
+    snprintf(path, sizeof path, "/sys/devices/virtual/input/input%d/event%d", i, i);
+    if (guest_to_host(path, host, sizeof host) || mkdir_p(host)) return;
+    const char* suffixes[] = { "/uevent", "/dev", "/subsystem" };
+    for (int level = 0; level < 2; level++) {
+      snprintf(path, sizeof path, level ? "/sys/devices/virtual/input/input%d/event%d" :
+               "/sys/devices/virtual/input/input%d", i, i);
+      for (int k = 0; k < 3; k++) {
+        if (!level && k == 1) continue;
+        char item[PATH_MAX];
+        if (snprintf(item, sizeof item, "%s%s", path, suffixes[k]) >= (int)sizeof item ||
+            guest_to_host(item, host, sizeof host)) return;
+        if (k == 2) {
+          if (symlink("/sys/bus/input", host) && errno != EEXIST) return;
+        } else {
+          int fd = open(host, O_WRONLY | O_CREAT, 0444);
+          if (fd < 0) return;
+          close(fd);
+        }
+      }
+    }
+    snprintf(path, sizeof path, "/sys/class/input/event%d", i);
+    if (guest_to_host(path, host, sizeof host)) return;
+    (void)rmdir(host); // only replace an empty legacy placeholder; preserve actual guest data
+    char target[96];
+    snprintf(target, sizeof target, "../../devices/virtual/input/input%d/event%d", i, i);
+    if (symlink(target, host) && errno != EEXIST) return;
+    char existing[96];
+    ssize_t n = readlink(host, existing, sizeof existing - 1);
+    if (n < 0) return;
+    existing[n] = 0;
+    if (strcmp(existing, target)) return;
+
+    snprintf(path, sizeof path, "/run/udev/data/+input:input%d", i);
+    if (guest_to_host(path, host, sizeof host)) return;
+    char prior[512] = {0};
+    int fd = open(host, O_RDONLY);
+    if (fd >= 0) { (void)read(fd, prior, sizeof prior - 1); close(fd); }
+    if (fd >= 0 && !strstr(prior, "E:SHIMMY_VIRTUAL_INPUT_PARENT=1\n")) return;
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts)) return;
+    unsigned long long usec = (unsigned long long)ts.tv_sec * 1000000ULL +
+                              (unsigned long long)ts.tv_nsec / 1000ULL;
+    char db[512];
+    int len = snprintf(db, sizeof db, "I:%llu\nE:DEVPATH=/devices/virtual/input/input%d\n"
+                       "E:SUBSYSTEM=input\nE:ID_SEAT=seat0\nE:SHIMMY_VIRTUAL_INPUT_PARENT=1\n"
+                       "G:seat\nQ:seat\n", usec, i);
+    if (len < 0 || len >= (int)sizeof db) return;
+    char tmp[PATH_MAX];
+    if (snprintf(tmp, sizeof tmp, "%s.shimmy-%d", host, (int)getpid()) >= (int)sizeof tmp) return;
+    fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL, 0644);
+    if (fd < 0) return;
+    ssize_t written = write(fd, db, (size_t)len);
+    close(fd);
+    if (written != len || rename(tmp, host)) { unlink(tmp); return; }
+    snprintf(path, sizeof path, "/run/udev/tags/seat/+input:input%d", i);
+    if (guest_to_host(path, host, sizeof host)) return;
+    fd = open(host, O_WRONLY | O_CREAT, 0644);
+    if (fd >= 0) close(fd);
+  }
+}
+
 // The DRM card is supplied by Shimmy, so udev has no kernel add event from which to build its
 // database. logind enumerates /run/udev/tags/master-of-seat and resolves c226:0 through sysfs;
 // a /dev/dri/card0 placeholder alone never makes seat0 graphical. Keep these records in the
@@ -4277,7 +4349,8 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     // input surface for libinput's udev backend (see evdev.c). Served in-process.
     {
       int ek = evdev_sysfs_kind(gabs);
-      if (ek == 1 || ek == 2 || ek == 4 || ek == 5) {
+      if (ek == 1 || ek == 2 || ek == 4 || ek == 5 || ek == 9) {
+        if ((ek == 1 || ek == 9) && (a2 & LO_ACCMODE) != 0) return -LX_EROFS;
         const char* c = evdev_sysfs_content(gabs);
         if (!c) return -LX_EIO;
         int ufd = mem_fd(c, strlen(c));
@@ -4618,7 +4691,7 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
       return (long)n;
     }
     // /sys/class/input/eventN/subsystem — libudev's subsystem probe for the synthetic input device.
-    if (evdev_sysfs_kind(gabs) == 3) {
+    if (evdev_sysfs_kind(gabs) == 3 || evdev_sysfs_kind(gabs) == 10) {
       const char* t = evdev_sysfs_link();
       size_t n = strlen(t);
       if (n > sz) n = sz;
