@@ -168,6 +168,13 @@ long session_frame_child_present(const uint8_t* bgra, uint32_t width,
   if (!rc) snprintf(server.sun_path, sizeof server.sun_path, "%s", path);
   ssize_t sent = rc ? -1 : sendto(g_send_socket, &msg, sizeof msg, 0,
                                  (struct sockaddr*)&server, sizeof server);
+  if (getenv("RDGPU_PRESENT_STATS")) {
+    static unsigned traced;
+    if (++traced <= 8 || sent != sizeof msg)
+      fprintf(stderr, "[frame-bridge] child pid=%d root=%d crtc=%u seq=%llu %ux%u send=%zd errno=%d\n",
+              (int)getpid(), root_pid(), crtc, (unsigned long long)seq,
+              width, height, sent, sent < 0 ? errno : 0);
+  }
   pthread_mutex_unlock(&g_sender_lock);
   return sent == sizeof msg ? 0 : -ENODEV;
 }
@@ -224,7 +231,20 @@ static void* receiver_loop(void* unused) {
           uint64_t after = atomic_load_explicit(&slot->map->seq, memory_order_acquire);
           if (before != after || after != msg.seq) continue; // producer raced this copy
           slot->last_seq = msg.seq;
-          if (g_present) g_present(snapshot, msg.width, msg.height, msg.crtc);
+          if (g_present) {
+            long rc = g_present(snapshot, msg.width, msg.height, msg.crtc);
+            if (getenv("RDGPU_PRESENT_STATS")) {
+              static unsigned traced;
+              if (++traced <= 8 || rc) {
+                int nonblack = 0;
+                for (size_t p = 0; p + 2 < bytes; p += 4096)
+                  if (snapshot[p] || snapshot[p+1] || snapshot[p+2]) { nonblack = 1; break; }
+                fprintf(stderr, "[frame-bridge] owner pid=%d child=%u crtc=%u seq=%llu %ux%u nonblack=%d present=%ld\n",
+                        (int)getpid(), msg.pid, msg.crtc,
+                        (unsigned long long)msg.seq, msg.width, msg.height, nonblack, rc);
+              }
+            }
+          }
         }
       }
     }

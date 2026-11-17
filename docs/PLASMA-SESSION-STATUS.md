@@ -146,3 +146,22 @@ outgoing-queue compatibility path. An isolated authenticated TTY login now
 creates a real logind session, runtime directory, user manager, and user bus
 with the `run.sh --init` flags. See `LOGIND-SESSION-PIDFD.md`. This does not yet
 establish a visible or persistent Plasma desktop.
+
+## On-screen frame bridge trace (2026-11-17)
+
+An isolated systemd GUI boot reached the throwaway user's authenticated Bash
+session with `XDG_RUNTIME_DIR=/run/user/22001`; `startplasma-wayland` started
+KWin and Plasmashell. The host window remained black. With
+`RDGPU_PRESENT_STATS=1`, the persistent GUI owner (PID 19614) accepted two
+3600x2338 CRTC 2 frames from the KWin host process (PID 20015). Both presenter
+callbacks returned 0. Direct inspection of the shared frame's 8,416,800 RGB
+pixels found all zero, so the bridge delivered black content rather than
+dropped those two frames. A temporary colored frame through the same receiver
+was logged as nonblack with present status 0, then restored. This does not
+establish a visible desktop or GPU rendering.
+
+The disposable root then exhausted host disk space. systemd reported `No space
+left on device` while restarting logind and udev, so later service behavior in
+that boot is not a valid Plasma stability result. The test boot and disposable
+root were stopped and removed. Further compositor work needs sufficient disk
+headroom and a bounded guest journal before another on-screen run.
