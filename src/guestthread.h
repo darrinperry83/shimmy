@@ -12,6 +12,7 @@ extern "C" {
 // Guest tid of the thread currently in a syscall (1 for the initial thread).
 int  guest_tid(void);
 int  guest_tid_known(int tid);
+int  guest_thread_count(void);  // live guest threads in this host process
 
 // HOST child processes the shim created on the guest's behalf (fork, and the posix_spawn behind
 // vfork/execve). These are the only pids outside this process that a guest may legitimately name:

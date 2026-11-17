@@ -75,6 +75,7 @@ extern void rd_rtnl_dup(int oldfd, int newfd);
 #define LX_ENOENT          2
 #define LX_ESRCH           3
 #define LX_EINTR           4
+#define LX_E2BIG           7
 #define LX_EBADF           9
 #define LX_ECHILD         10
 #define LX_EAGAIN         11
@@ -1696,7 +1697,44 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   }
   case 272: return -LX_ENOSYS;                                  // kcmp
   case 273: return -LX_EPERM;                                   // finit_module
-  case 274: return -LX_ENOSYS;                                  // sched_setattr
+  case 274: {                                                   // sched_setattr
+    /* Darwin priority is process-wide.  Only a lone guest thread may change
+     * nice; otherwise a successful call would silently change its siblings.
+     * RT/deadline/uclamp scheduling is not implemented. */
+    struct lx_sched_attr_v0 {
+      uint32_t size, policy;
+      uint64_t flags;
+      int32_t nice;
+      uint32_t priority;
+      uint64_t runtime, deadline, period;
+    } attr;
+    _Static_assert(sizeof(attr) == 48, "Linux sched_attr v0 ABI");
+    long target = (long)(int)a0;
+    if (!a1) return -LX_EFAULT;
+    if (a2) return -LX_EINVAL;
+    if (target < 0) return -LX_EINVAL;
+    if (target && target != guest_tid() &&
+        !(target == (long)getpid() && guest_tid() == 1))
+      return guest_tid_known((int)target) ? -LX_EOPNOTSUPP : -LX_ESRCH;
+    uint32_t size = *(const uint32_t *)a1;
+    if (size && size < sizeof(attr)) return -LX_EINVAL;
+    if (size > 4096) return -LX_E2BIG;
+    memcpy(&attr, (const void *)a1, sizeof(attr));
+    if (size > sizeof(attr)) {
+      const uint8_t *extra = (const uint8_t *)a1 + sizeof(attr);
+      for (uint32_t i = sizeof(attr); i < size; i++)
+        if (extra[i - sizeof(attr)]) return -LX_E2BIG;
+    }
+    if (attr.policy != 0 || attr.flags || attr.priority || attr.runtime ||
+        attr.deadline || attr.period) return -LX_EOPNOTSUPP;
+    if (attr.nice < -20 || attr.nice > 19) return -LX_EINVAL;
+    errno = 0;
+    int old_nice = getpriority(PRIO_PROCESS, 0);
+    if (old_nice == -1 && errno) return eret();
+    if (attr.nice == old_nice) return 0;
+    if (guest_thread_count() != 1) return -LX_EOPNOTSUPP;
+    return ok0(setpriority(PRIO_PROCESS, 0, attr.nice));
+  }
   case 275: {                                                   // sched_getattr
     /* Shimmy exposes SCHED_OTHER for guest threads.  Report only the v0
      * sched_attr fields, with the nice value backed by the host process's
