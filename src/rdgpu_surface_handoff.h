@@ -50,6 +50,7 @@ int rdgpu_handoff_is_pending_fd(int fd);
 /* Fail-closed classification only; this marker is not authorization. */
 int rdgpu_handoff_is_carrier_fd(int fd);
 int rdgpu_handoff_frame_ready_fd(int fd, uint64_t *generation);
+int rdgpu_handoff_consumer_acquire_fd(int fd, uint64_t generation);
 int rdgpu_handoff_consumer_release_fd(int fd, uint64_t generation);
 
 /* Export side: drop a published surface (carrier released/destroyed). */

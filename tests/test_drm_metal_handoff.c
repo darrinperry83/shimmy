@@ -7,10 +7,29 @@
 #include <sys/stat.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOSurface/IOSurface.h>
+#include "../src/session_gpu_frame.h"
+
+int session_gpu_epoch_parse(const char *text, session_gpu_epoch *out) {
+  (void)text; (void)out; return -EINVAL;
+}
+int session_gpu_child_register_master(pid_t pid, session_gpu_epoch epoch, int fd) {
+  (void)pid; (void)epoch; (void)fd; return -ENOSYS;
+}
+int session_gpu_child_unregister_master(pid_t pid, session_gpu_epoch epoch, int fd) {
+  (void)pid; (void)epoch; (void)fd; return -ENOSYS;
+}
+int session_gpu_child_present_master(pid_t pid, session_gpu_epoch epoch, int fd,
+                                     IOSurfaceRef surface, uint64_t generation,
+                                     uint32_t crtc, uint32_t width,
+                                     uint32_t height, uint32_t format) {
+  (void)pid; (void)epoch; (void)fd; (void)surface; (void)generation;
+  (void)crtc; (void)width; (void)height; (void)format; return -ENOSYS;
+}
 
 static dev_t carrier_dev[2];
 static ino_t carrier_ino[2];
-static int carrier_state[2]; // 0 pending, 1 completed, 2 released
+static int carrier_state[2]; // 0 pending, 1 completed, 2 revoked
+static unsigned carrier_refs[2];
 static struct { uint32_t width, height, surface_id; } fake_image = {64, 64, 7};
 static IOSurfaceRef image;
 static unsigned presents, releases, resolves;
@@ -33,10 +52,16 @@ int rdgpu_handoff_frame_ready_fd(int fd, uint64_t* generation) {
   if (generation) *generation = 1;
   return 1;
 }
+int rdgpu_handoff_consumer_acquire_fd(int fd, uint64_t generation) {
+  int i = carrier_index(fd);
+  if (i < 0 || carrier_state[i] != 1 || generation != 1) return -ESTALE;
+  carrier_refs[i]++;
+  return 0;
+}
 int rdgpu_handoff_consumer_release_fd(int fd, uint64_t generation) {
   int i = carrier_index(fd);
-  if (i < 0 || carrier_state[i] != 1 || generation != 1) return -1;
-  carrier_state[i] = 2;
+  if (i < 0 || carrier_state[i] != 1 || generation != 1 || !carrier_refs[i]) return -1;
+  carrier_refs[i]--;
   releases++;
   return 0;
 }
@@ -102,7 +127,7 @@ int main(void) {
   assert(presents == 0 && resolves == 0 && g_crtc.fb_id == 0);
   carrier_state[0] = 1;
   assert(drm_ioctl(-1, request(DRM_NR_MODE_PAGE_FLIP), (uintptr_t)&flip) == 0);
-  assert(presents == 1 && releases == 0 && g_crtc.fb_id == fb1);
+  assert(presents == 1 && releases == 0 && carrier_refs[0] == 1 && g_crtc.fb_id == fb1);
   uint32_t fb2 = imported_fb(second);
   flip.fb_id = fb2;
   assert(drm_ioctl(-1, request(DRM_NR_MODE_PAGE_FLIP), (uintptr_t)&flip) == -EAGAIN);
@@ -121,15 +146,18 @@ int main(void) {
   atomic.flags = 0;
   present_fail = 1;
   assert(drm_ioctl(-1, request(DRM_NR_MODE_ATOMIC), (uintptr_t)&atomic) == -EIO);
-  assert(presents == 1 && releases == 0 && g_crtc.fb_id == fb1);
+  assert(presents == 1 && releases == 1 && carrier_refs[1] == 0 && g_crtc.fb_id == fb1);
   present_fail = 0;
   assert(drm_ioctl(-1, request(DRM_NR_MODE_ATOMIC), (uintptr_t)&atomic) == 0);
-  assert(presents == 2 && releases == 1 && carrier_state[0] == 2);
+  assert(presents == 2 && releases == 2 && carrier_refs[0] == 0);
+  flip.fb_id = fb1;
   assert(drm_ioctl(-1, request(DRM_NR_MODE_PAGE_FLIP), (uintptr_t)&flip) == 0);
-  assert(presents == 3 && releases == 1); // same scanout generation stays held
-  carrier_state[1] = 2; // producer invalidated readiness: stale FB cannot flip
+  assert(presents == 3 && releases == 3 && carrier_refs[0] == 1);
+  assert(drm_ioctl(-1, request(DRM_NR_MODE_PAGE_FLIP), (uintptr_t)&flip) == 0);
+  assert(presents == 4 && releases == 3 && carrier_refs[0] == 1); // same scanout held
+  carrier_state[0] = 2; // revoked carrier cannot flip
   assert(drm_ioctl(-1, request(DRM_NR_MODE_PAGE_FLIP), (uintptr_t)&flip) == -EAGAIN);
-  assert(presents == 3 && releases == 1);
+  assert(presents == 4 && releases == 3);
   // A recognizable but unauthenticated sparse carrier must never become a CPU BO.
   carrier_state[0] = 2;
   struct drm_prime_handle denied = {.fd = first};

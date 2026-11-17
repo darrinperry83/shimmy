@@ -71,6 +71,9 @@ int main(int argc,char **argv) {
     assert(rdgpu_handoff_publish_completed_fd(fd,image,1)==0);
     assert(!rdgpu_handoff_is_pending_fd(fd));
     assert(rdgpu_handoff_frame_ready_fd(duplicate,&generation)==1 && generation==1);
+    assert(rdgpu_handoff_consumer_acquire_fd(duplicate,2)<0);
+    assert(rdgpu_handoff_consumer_acquire_fd(duplicate,1)==0);
+    assert(rdgpu_handoff_consumer_acquire_fd(fd,1)==0); /* second display */
     int flags=fcntl(fd,F_GETFD);assert(flags>=0);
     assert(fcntl(fd,F_SETFD,flags&~FD_CLOEXEC)==0);
     pid_t child=fork();assert(child>=0);
@@ -85,7 +88,12 @@ int main(int argc,char **argv) {
     assert(rdgpu_handoff_consumer_release_fd(other,1)<0);
     assert(rdgpu_handoff_consumer_release_fd(fd,2)<0); /* stale generation */
     assert(rdgpu_handoff_consumer_release_fd(fd,1)==0);
-    assert(rdgpu_handoff_resolve_fd(fd)==NULL);
+    assert(rdgpu_handoff_begin_write_fd(fd)<0); /* second display still holds */
+    assert(rdgpu_handoff_consumer_release_fd(duplicate,1)==0);
+    assert(rdgpu_handoff_frame_ready_fd(fd,&generation) && generation==1);
+    assert(rdgpu_handoff_consumer_acquire_fd(fd,1)==0); /* redisplay unchanged frame */
+    assert(rdgpu_handoff_begin_write_fd(fd)<0);
+    assert(rdgpu_handoff_consumer_release_fd(fd,1)==0);
     assert(rdgpu_handoff_begin_write_fd(fd)==0);
     assert(rdgpu_handoff_is_pending_fd(fd));
     assert(!rdgpu_handoff_frame_ready_fd(fd,&generation));

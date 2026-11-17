@@ -78,6 +78,9 @@ __attribute__((weak)) int rdgpu_handoff_is_pending_fd(int fd) { (void)fd; return
 __attribute__((weak)) int rdgpu_handoff_frame_ready_fd(int fd, uint64_t* generation) {
   (void)fd; if (generation) *generation = 0; return 0;
 }
+__attribute__((weak)) int rdgpu_handoff_consumer_acquire_fd(int fd, uint64_t generation) {
+  (void)fd; (void)generation; return -ENOSYS;
+}
 __attribute__((weak)) int rdgpu_handoff_consumer_release_fd(int fd, uint64_t generation) {
   (void)fd; (void)generation; return -ENOSYS;
 }
@@ -945,6 +948,13 @@ static int metal_frame_ready(struct gem_slot* g, uint64_t* generation) {
     struct timespec pause = {.tv_sec = 0, .tv_nsec = 1000000};
     nanosleep(&pause, NULL);
   }
+  if (tracing()) {
+    struct stat st = {0};
+    (void)fstat(g->fd, &st);
+    fprintf(stderr, "DRM_METAL_WAIT_TIMEOUT handle=0x%x fd=%d dev=%d ino=%llu pending=%d carrier=%d\n",
+            g->handle, g->fd, (int)st.st_dev, (unsigned long long)st.st_ino,
+            rdgpu_handoff_is_pending_fd(g->fd), rdgpu_handoff_is_carrier_fd(g->fd));
+  }
   return -EAGAIN;
 }
 
@@ -958,15 +968,20 @@ static int drm_check_fb_ready(uint32_t fb_id) {
   return metal_frame_ready(g, &generation);
 }
 
+static int scanout_matches(uint32_t crtc_id, int fd, uint64_t generation) {
+  if (crtc_id < 1 || crtc_id > 2 || fd < 0) return 0;
+  const struct scanout_frame* current = &g_scanout[crtc_id - 1];
+  if (current->fd < 0 || current->generation != generation) return 0;
+  struct stat a, b;
+  return !fstat(current->fd, &a) && !fstat(fd, &b) &&
+         a.st_dev == b.st_dev && a.st_ino == b.st_ino;
+}
+
 static void scanout_retire(uint32_t crtc_id, int replacement_fd, uint64_t replacement_generation) {
   if (crtc_id < 1 || crtc_id > 2) return;
   struct scanout_frame* old = &g_scanout[crtc_id - 1];
   if (old->fd < 0) return;
-  struct stat a, b;
-  int same = replacement_fd >= 0 && !fstat(old->fd, &a) && !fstat(replacement_fd, &b) &&
-             a.st_dev == b.st_dev && a.st_ino == b.st_ino &&
-             old->generation == replacement_generation;
-  if (same) return;
+  if (scanout_matches(crtc_id, replacement_fd, replacement_generation)) return;
   // The window presenter confirms completion before this point. Never release
   // a producer frame while a Metal command buffer may still sample it.
   int released = rdgpu_handoff_consumer_release_fd(old->fd, old->generation);
@@ -994,18 +1009,35 @@ static int drm_present_fb(uint32_t fb_id, uint32_t crtc_id) {
     uint64_t generation = 0;
     int r = metal_frame_ready(g, &generation);
     if (r) return r;
+    /* A completed buffer can be presented again after leaving the display.
+     * Hold a consumer reference before resolving it so the producer cannot
+     * begin its next write while Metal is sampling the old generation. */
+    int already_scanning = scanout_matches(crtc_id, g->fd, generation);
+    if (!already_scanning) {
+      r = rdgpu_handoff_consumer_acquire_fd(g->fd, generation);
+      if (r) return r;
+    }
     IOSurfaceRef surface = rdgpu_handoff_resolve_fd(g->fd);
-    if (!surface) return -EAGAIN;
+    if (!surface) {
+      if (!already_scanning) rdgpu_handoff_consumer_release_fd(g->fd, generation);
+      return -EAGAIN;
+    }
     if (IOSurfaceGetWidth(surface) != f->width || IOSurfaceGetHeight(surface) != f->height ||
         IOSurfaceGetBytesPerRow(surface) != f->pitch ||
         f->format != DRM_FORMAT_XRGB8888) {
       CFRelease(surface);
+      if (!already_scanning) rdgpu_handoff_consumer_release_fd(g->fd, generation);
       return -EINVAL;
     }
     int next_fd = -1;
     if (crtc_id >= 1 && crtc_id <= 2) {
       next_fd = fcntl(g->fd, F_DUPFD_CLOEXEC, 0);
-      if (next_fd < 0) { CFRelease(surface); return -errno; }
+      if (next_fd < 0) {
+        r = -errno;
+        CFRelease(surface);
+        if (!already_scanning) rdgpu_handoff_consumer_release_fd(g->fd, generation);
+        return r;
+      }
     }
     uint32_t surface_id = IOSurfaceGetID(surface);
     pid_t owner = 0;
@@ -1018,7 +1050,11 @@ static int drm_present_fb(uint32_t fb_id, uint32_t crtc_id) {
                  surface, generation, crtc_id, f->width, f->height, 'BGRA');
     } else r = (int)gpuwin_present_iosurface_crtc(surface, crtc_id, generation);
     CFRelease(surface);
-    if (r) { if (next_fd >= 0) close(next_fd); return r; }
+    if (r) {
+      if (next_fd >= 0) close(next_fd);
+      if (!already_scanning) rdgpu_handoff_consumer_release_fd(g->fd, generation);
+      return r;
+    }
     if (crtc_id >= 1 && crtc_id <= 2) {
       struct scanout_frame* current = &g_scanout[crtc_id - 1];
       scanout_retire(crtc_id, g->fd, generation);

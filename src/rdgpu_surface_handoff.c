@@ -25,6 +25,7 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <mach/mach.h>
 #include <pthread.h>
 #include <servers/bootstrap.h>
@@ -59,7 +60,8 @@ typedef struct {
     dev_t device;
     ino_t inode;
     uint64_t generation;
-    int live, ready, released;
+    int live, ready;
+    unsigned consumer_refs;
 } RDGPUStagedEntry;
 static RDGPUStagedEntry g_staged[RDGPU_HANDOFF_MAX_SURFACES];
 
@@ -119,7 +121,7 @@ int rdgpu_handoff_frame_ready_fd(int fd, uint64_t *generation) {
     if (!generation || !fd_identity(fd, &st)) return 0;
     pthread_mutex_lock(&g_lock);
     int i = staged_index(st.st_dev, st.st_ino);
-    int ready = i >= 0 && g_staged[i].ready && !g_staged[i].released;
+    int ready = i >= 0 && g_staged[i].ready;
     if (ready) *generation = g_staged[i].generation;
     pthread_mutex_unlock(&g_lock);
     return ready;
@@ -130,11 +132,25 @@ int rdgpu_handoff_begin_write_fd(int fd) {
     if (!fd_identity(fd, &st)) return -EINVAL;
     pthread_mutex_lock(&g_lock);
     int i = staged_index(st.st_dev, st.st_ino);
-    if (i < 0 || (g_staged[i].ready && !g_staged[i].released)) {
+    if (i < 0 || g_staged[i].consumer_refs) {
         pthread_mutex_unlock(&g_lock); return -EBUSY;
     }
     g_staged[i].ready = 0;
-    g_staged[i].released = 0;
+    pthread_mutex_unlock(&g_lock);
+    return 0;
+}
+
+int rdgpu_handoff_consumer_acquire_fd(int fd, uint64_t generation) {
+    struct stat st;
+    if (!generation || !fd_identity(fd, &st)) return -EINVAL;
+    pthread_mutex_lock(&g_lock);
+    int i = staged_index(st.st_dev, st.st_ino);
+    if (i < 0 || !g_staged[i].ready ||
+        g_staged[i].generation != generation ||
+        g_staged[i].consumer_refs == UINT_MAX) {
+        pthread_mutex_unlock(&g_lock); return -ESTALE;
+    }
+    g_staged[i].consumer_refs++;
     pthread_mutex_unlock(&g_lock);
     return 0;
 }
@@ -144,11 +160,11 @@ int rdgpu_handoff_consumer_release_fd(int fd, uint64_t generation) {
     if (!generation || !fd_identity(fd, &st)) return -EINVAL;
     pthread_mutex_lock(&g_lock);
     int i = staged_index(st.st_dev, st.st_ino);
-    if (i < 0 || !g_staged[i].ready || g_staged[i].released ||
+    if (i < 0 || !g_staged[i].ready || !g_staged[i].consumer_refs ||
         g_staged[i].generation != generation) {
         pthread_mutex_unlock(&g_lock); return -ESTALE;
     }
-    g_staged[i].released = 1;
+    g_staged[i].consumer_refs--;
     pthread_mutex_unlock(&g_lock);
     return 0;
 }
@@ -497,7 +513,6 @@ int rdgpu_handoff_publish_completed_fd(int fd, IOSurfaceRef surface,
         .inode = st.st_ino, .surface = surface, .port = MACH_PORT_NULL,
         .live = 1 };
     g_staged[i].generation = generation;
-    g_staged[i].released = 0;
     g_staged[i].ready = 1;
     pthread_mutex_unlock(&g_lock);
     return 0;
@@ -514,7 +529,7 @@ IOSurfaceRef rdgpu_handoff_resolve_fd(int fd) {
     int staged = staged_index(st.st_dev, st.st_ino);
     if (staged >= 0) {
         IOSurfaceRef local = NULL;
-        if (g_staged[staged].ready && !g_staged[staged].released)
+        if (g_staged[staged].ready)
             for (int i = 0; i < RDGPU_HANDOFF_MAX_SURFACES; i++)
                 if (g_entries[i].live && g_entries[i].device == st.st_dev &&
                     g_entries[i].inode == st.st_ino) {
