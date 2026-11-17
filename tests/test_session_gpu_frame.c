@@ -100,10 +100,10 @@ static void child(int command_fd, int result_fd, pid_t owner,
   _exit(0);
 }
 
-static void command(int to, int from, char c) {
+static void command(int to, int from, char c, char expected) {
   assert(write(to, &c, 1) == 1);
   char result = 0;
-  assert(read(from, &result, 1) == 1 && result == 'y');
+  assert(read(from, &result, 1) == 1 && result == expected);
 }
 
 int main(void) {
@@ -134,34 +134,34 @@ int main(void) {
   close(stranger_commands[0]); close(stranger_results[1]);
   assert(session_gpu_host_start(producer, geteuid(), epoch,
                                 present, lost, NULL) == 0);
-  command(commands[1], results[0], 'a');
+  command(commands[1], results[0], 'a', 'y');
   wait_at_least(&g_frames, 1);
-  command(commands[1], results[0], 'a'); /* stale generation */
+  command(commands[1], results[0], 'a', 'n'); /* stale generation */
   usleep(250000);
   assert(frames() == 1);
-  command(commands[1], results[0], 'e'); /* wrong IOSurface dimensions */
+  command(commands[1], results[0], 'e', 'n'); /* wrong IOSurface dimensions */
   usleep(250000);
   assert(frames() == 1);
-  command(commands[1], results[0], 'd'); /* unsupported format */
-  command(commands[1], results[0], 'f'); /* surface format mismatches metadata */
+  command(commands[1], results[0], 'd', 'y'); /* unsupported format rejected at sender */
+  command(commands[1], results[0], 'f', 'n'); /* surface format mismatches metadata */
   usleep(250000);
   assert(frames() == 1);
-  command(commands[1], results[0], 'b');
+  command(commands[1], results[0], 'b', 'y');
   wait_at_least(&g_frames, 2);
-  command(commands[1], results[0], 'c');
+  command(commands[1], results[0], 'c', 'y');
   wait_at_least(&g_frames, 3);
   assert(g_crtc[0] == 1 && g_generation[0] == 1);
   assert(g_crtc[1] == 1 && g_generation[1] == 2);
   assert(g_crtc[2] == 2 && g_generation[2] == 1);
 
-  command(stranger_commands[1], stranger_results[0], 'a');
+  command(stranger_commands[1], stranger_results[0], 'a', 'n');
   int status;
   usleep(250000);
   assert(frames() == 3);
 
   assert(session_gpu_host_set_producer(stranger, geteuid()) == 0);
   wait_at_least(&g_losses, 1); /* old graphics session cleared */
-  command(stranger_commands[1], stranger_results[0], 'a');
+  command(stranger_commands[1], stranger_results[0], 'a', 'y');
   wait_at_least(&g_frames, 4); /* generation 1 valid in new producer epoch */
 
   assert(write(stranger_commands[1], "q", 1) == 1);

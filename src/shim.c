@@ -56,6 +56,7 @@
 #include "execve.h"
 #include "vt.h"
 #include "evdev.h"
+#include "session_gpu_frame.h"
 // PID-1 identity lives in syscalls.c (set from syscalls_set_exe); the fork child clears it because
 // it is a new guest process, not PID 1. Declared here because syscalls.h is a symlink into the
 // shared linux-shim tree that this task must not modify.
@@ -822,7 +823,7 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
     // eight times over, while the top-level process reports the flag set. Same silent-revert-in-
     // the-child shape as every RDX18_* knob above; glmark2 never caught it because glmark2 does
     // not exec and WebKit always does.
-    "RDHOSTCALL", "RDVT_ROOT_PID", "RDVT_STATE", "RDSHIM_BOOT", "RDBOOT_LOCK_FD", "RDNOTIFYDBG", "RDERRDBG", "RDNETSOCK",
+    "RDHOSTCALL", "RDVT_ROOT_PID", "RDVT_STATE", "RDGPU_SESSION_EPOCH", "RDSHIM_BOOT", "RDBOOT_LOCK_FD", "RDNOTIFYDBG", "RDERRDBG", "RDNETSOCK",
     // The VT/console knobs ride across exec too, so a forked+exec'd getty (or a re-exec'd main
     // process after `exec` in a boot script) keeps the same console geometry, trace and dump.
     "RDVT", "RDVT_TRACE", "RDVT_AUTOSWITCH", "RDCONS_DUMP", "RDCONS_DUMPFILE", "RDCONS_COLS", "RDCONS_ROWS", 0
@@ -2301,6 +2302,17 @@ int main(int argc, char** argv) {
     char rpid[32];
     snprintf(rpid, sizeof rpid, "%d", (int)getpid());
     setenv("RDVT_ROOT_PID", rpid, 1);
+  }
+  if (getenv("RDNATIVE_SESSION") && !getenv("RDGPU_SESSION_EPOCH")) {
+    const char* root_pid = getenv("RDVT_ROOT_PID");
+    if (root_pid && atol(root_pid) == (long)getpid()) {
+      session_gpu_epoch epoch = {0};
+      do { arc4random_buf(&epoch, sizeof epoch); }
+      while (!epoch.high || !epoch.low);
+      char token[33];
+      if (session_gpu_epoch_format(epoch, token) == 0)
+        setenv("RDGPU_SESSION_EPOCH", token, 1);
+    }
   }
   // A per-boot token shared by every shim process of this guest (carried across exec in kCarry).
   // It keys the shared guest-child registry (guest_child_register/known) so PID 1 recognises

@@ -63,6 +63,7 @@
 #include "vt.h"
 #include "evdev.h"
 #include "session_frame.h"
+#include "session_gpu_frame.h"
 #include "drmasahi.h"
 #include "rdgpu_native_output.h"
 #include "drm_output_route.h"
@@ -2615,9 +2616,34 @@ static void session_frame_producer_lost(void) {
   vt_graphics_session_lost(); // clear old unlocked pixels and allow a new greeter to select VT7
 }
 
+static long session_gpu_present_owned(IOSurfaceRef surface, uint32_t crtc,
+                                      uint64_t generation, void* ctx) {
+  (void)ctx;
+  vt_graphics_frame();
+  if (vt_enabled() && vt_active() != 7) return 0;
+  return gpuwin_present_iosurface_crtc(surface, crtc, generation);
+}
+
+static void session_gpu_producer_lost(void* ctx) {
+  (void)ctx;
+  vt_graphics_session_lost();
+}
+
 int gpuwin_start_session_frame_bridge(void) {
-  return session_frame_host_start_with_lost(session_frame_present_owned,
-                                             session_frame_producer_lost);
+  int cpu = session_frame_host_start_with_lost(session_frame_present_owned,
+                                                session_frame_producer_lost);
+  const char* group = getenv("RDSOCKETGROUP");
+  const char* token = getenv("RDGPU_SESSION_EPOCH");
+  session_gpu_epoch epoch;
+  if (!group || !*group || session_gpu_epoch_parse(token, &epoch)) return cpu ? cpu : -EINVAL;
+  char lock_path[PATH_MAX];
+  if (snprintf(lock_path, sizeof lock_path, "%s/drm-master.lock", group) >=
+      (int)sizeof lock_path) return cpu ? cpu : -ENAMETOOLONG;
+  int gpu = session_gpu_host_start_from_master(geteuid(), epoch, lock_path,
+                                                session_gpu_present_owned,
+                                                session_gpu_producer_lost, NULL);
+  if (gpu) fprintf(stderr, "[session-gpu] owner receiver failed rc=%d\n", gpu);
+  return cpu ? cpu : gpu;
 }
 
 // ---------------------------------------------------------------- evdev input pump

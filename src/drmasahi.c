@@ -22,6 +22,7 @@
 // RDDRM_TRACE=1  log every ioctl
 #include "drmasahi.h"
 #include "rdgpu_surface_handoff.h"
+#include "session_gpu_frame.h"
 
 #include "rdgpu_native_output.h"
 
@@ -504,6 +505,18 @@ static int tracing(void);
 static struct { int fd, minor; } g_fds[MAXFD];
 static int g_nfd;
 static int g_master_owner_fd = -1, g_master_lock_fd = -1;
+static int g_gpu_master_registered;
+static int gpu_session_child(pid_t* owner, session_gpu_epoch* epoch) {
+  if (!getenv("RDNATIVE_SESSION")) return 0;
+  const char* root = getenv("RDVT_ROOT_PID");
+  if (!root || !*root) return 0;
+  char* end = NULL;
+  long pid = strtol(root, &end, 10);
+  if (!end || *end || pid <= 1 || pid > INT32_MAX || pid == (long)getpid()) return 0;
+  if (owner) *owner = (pid_t)pid;
+  if (epoch && session_gpu_epoch_parse(getenv("RDGPU_SESSION_EPOCH"), epoch)) return -EINVAL;
+  return 1;
+}
 // Legacy primary-node authentication used when a compositor reopens card0.
 // A magic identifies one live open file description, never a pathname or fd
 // number (both can be reused). Render nodes do not participate in this API.
@@ -527,6 +540,13 @@ static int drm_fd_identity(int fd, unsigned long long* dev, unsigned long long* 
 
 static void drm_master_release(void) {
   if (g_master_lock_fd >= 0) {
+    pid_t owner = 0;
+    session_gpu_epoch epoch;
+    if (g_gpu_master_registered && gpu_session_child(&owner, &epoch) > 0) {
+      int rc = session_gpu_child_unregister_master(owner, epoch, g_master_lock_fd);
+      if (rc) fprintf(stderr, "DRM_MASTER_GPU_REVOKE pid=%d rc=%d\n", getpid(), rc);
+    }
+    g_gpu_master_registered = 0;
     (void)flock(g_master_lock_fd, LOCK_UN);
     if (shim_fd_unreserve) shim_fd_unreserve(g_master_lock_fd);
     close(g_master_lock_fd);
@@ -625,6 +645,19 @@ static long drm_master_ioctl(int fd, unsigned nr) {
     g_master_lock_fd = shim_fd_reserve ? shim_fd_reserve(lockfd) : lockfd;
   }
   g_master_owner_fd = fd;
+  pid_t owner = 0;
+  session_gpu_epoch epoch;
+  int native_child = gpu_session_child(&owner, &epoch);
+  if (native_child < 0) { drm_master_release(); return native_child; }
+  if (native_child > 0) {
+    int rc = session_gpu_child_register_master(owner, epoch, g_master_lock_fd);
+    if (rc) {
+      fprintf(stderr, "DRM_MASTER_GPU_REGISTER pid=%d rc=%d\n", getpid(), rc);
+      drm_master_release();
+      return rc;
+    }
+    g_gpu_master_registered = 1;
+  }
   return 0;
 }
 
@@ -975,7 +1008,15 @@ static int drm_present_fb(uint32_t fb_id, uint32_t crtc_id) {
       if (next_fd < 0) { CFRelease(surface); return -errno; }
     }
     uint32_t surface_id = IOSurfaceGetID(surface);
-    r = (int)gpuwin_present_iosurface_crtc(surface, crtc_id, generation);
+    pid_t owner = 0;
+    session_gpu_epoch epoch;
+    int native_child = gpu_session_child(&owner, &epoch);
+    if (native_child < 0) r = native_child;
+    else if (native_child > 0) {
+      if (g_master_lock_fd < 0) r = -EACCES;
+      else r = session_gpu_child_present_master(owner, epoch, g_master_lock_fd,
+                 surface, generation, crtc_id, f->width, f->height, 'BGRA');
+    } else r = (int)gpuwin_present_iosurface_crtc(surface, crtc_id, generation);
     CFRelease(surface);
     if (r) { if (next_fd >= 0) close(next_fd); return r; }
     if (crtc_id >= 1 && crtc_id <= 2) {
