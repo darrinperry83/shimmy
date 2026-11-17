@@ -237,6 +237,42 @@ the child. The Shimmy syscall trace recorded the preceding guest open of
 (`Operation not supported on socket`) from the namespaced host socket path;
 the resulting descriptor is `-1`. Shimmy currently translates `O_PATH` to a
 normal Darwin `O_RDONLY` open, which does not provide Linux `O_PATH` semantics
-for this listening socket. The next fix must preserve the socket reference and
-its `/proc/self/fd/N` handoff across fork/exec, including the post-open guest
-unlink, rather than making `fcntl(-1)` falsely succeed. No such fix is landed.
+for this listening socket. This identified the startup failure, not a proven
+pipe/fork fd-inheritance bug.
+
+## Xwayland handoff after the O_PATH bridge (2026-11-18)
+
+Commit `f3424fd` added a socket-inode `O_PATH` reference and its
+`/proc/self/fd/N` handoff. A fresh disposable Arch boot after the additional
+runtime-directory ownership fix `b79a07d` authenticated a throwaway user and
+started KWin, Plasmashell, Xwayland and a foot Wayland client. In a bounded
+45-second GUI observation KWin and foot kept the same PIDs. The cross-process
+frame carrier reached sequence 34 (17 frames) and contained nonblack RGB
+pixels, versus the old sequence 4 (two all-black frames). A second fresh-run
+regression check reached sequence 26 with nonblack RGB and Xwayland running.
+`tests/run-interactive-login.py` has an opt-in `RD_TEST_FRAME_PROGRESS=1`
+assertion for more than two frames, nonblack RGB and a running Xwayland process.
+
+A repeat that reused the prior boot's `/run` produced only two black frames:
+foot chose a stale `wayland-1.lock`, then failed to connect to the old socket.
+Resetting `/run` in the disposable clone restored the working result. This
+failure was a test-fixture lifecycle error, not proof that fd inheritance
+regressed. The installed root and live session were not changed.
+
+The desktop is still slow. The frame carrier moves 3600x2338 BGRA images
+(33,667,200 bytes each) through CPU memory, and the installed rdmetal Mesa
+screen still falls back to softpipe. In one bounded run foot waited roughly
+6.7 seconds between Wayland frame callbacks; Xwayland and Plasmashell each
+used substantial CPU while KWin stayed alive. This clears the pipe-stall
+gate, not the full-GPU or usable-performance gates.
+
+The supplied isolated RD Metal driver (`8e5e02ccecb425a2c41740e0a86cec2920d3fcac62677ab40d017d97a3b8380c`)
+was installed only in another disposable Arch clone. After resetting that
+clone's `/run`, the same 45-second GUI probe authenticated, kept KWin,
+Plasmashell and foot alive, and reached frame sequence 34 with nonblack RGB.
+The first attempt with a reused `/run` stalled at the password prompt, so it
+was not a graphics result. This validates the fixed driver against this
+session's startup and frame path. It does not establish a frame-rate gain:
+the probe observed only 17 frames and did not disable the hybrid softpipe
+fallback or prove Metal execution for those frames. The live installed driver
+was not replaced.

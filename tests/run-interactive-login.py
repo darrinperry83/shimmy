@@ -4,6 +4,7 @@ Set RD_LOGIN_ROOT to a private clone under this checkout's build directory.
 The live rootfs, account database, and personal credentials are never touched.
 """
 import os
+import struct
 import resource
 import secrets
 import shutil
@@ -19,6 +20,9 @@ root = Path(os.environ["RD_LOGIN_ROOT"]).resolve()
 binary = Path(os.environ.get("RD_LOGIN_BINARY", str(base / "shim_cli"))).resolve(strict=True)
 if not root.is_relative_to((base / "build").resolve()) or not (root / "usr/bin/login").is_file():
     raise SystemExit("RD_LOGIN_ROOT must be a private clone under build/")
+if os.environ.get("RD_TEST_FRAME_PROGRESS") == "1" and \
+        list((root / "run/user/22001").glob("wayland-*.lock")):
+    raise SystemExit("stale Wayland lock in disposable root; start this probe with a fresh /run")
 user = "shimtest"
 existing = [line for line in (root / "etc/passwd").read_text().splitlines()
             if line.startswith(user + ":")]
@@ -174,6 +178,38 @@ try:
                     print("KWIN_PROCESS_SEEN" if kwin_seen else "KWIN_PROCESS_MISSING", flush=True)
                     print("PLASMASHELL_PROCESS_SEEN" if shell_seen else "PLASMASHELL_PROCESS_MISSING", flush=True)
                     ok = runtime_seen and kwin_seen and shell_seen
+                    if os.environ.get("RD_TEST_FRAME_PROGRESS") == "1":
+                        # The CPU frame carrier is a testable output of KWin's DRM flips.
+                        # More than two frames with real pixels rules out the previous
+                        # permanent Xwayland-read wait and frozen black framebuffer.
+                        frame_ok = False
+                        frame_dir = Path(f"/tmp/rdx-{proc.pid}")
+                        for frame in frame_dir.glob("frame.*.*.*"):
+                            try:
+                                with frame.open("rb") as source:
+                                    seq, magic, width, height, crtc = struct.unpack("<QIIII", source.read(24))
+                                    if magic != 0x52444652 or seq < 6 or seq & 1 or not 0 < width <= 8192 or not 0 < height <= 8192:
+                                        continue
+                                    remaining = width * height * 4
+                                    nonblack = False
+                                    while remaining:
+                                        chunk = source.read(min(65536, remaining))
+                                        if not chunk:
+                                            break
+                                        if any(chunk[0::4]) or any(chunk[1::4]) or any(chunk[2::4]):
+                                            nonblack = True
+                                            break
+                                        remaining -= len(chunk)
+                                    if nonblack:
+                                        print(f"DRM_FRAME_PROGRESS seq={seq} size={width}x{height} crtc={crtc}", flush=True)
+                                        frame_ok = True
+                                        break
+                            except (OSError, struct.error):
+                                continue
+                        print("DRM_FRAME_PROGRESS_OK" if frame_ok else "DRM_FRAME_PROGRESS_MISSING", flush=True)
+                        xwayland_seen = "/usr/bin/Xwayland" in programs
+                        print("XWAYLAND_PROCESS_SEEN" if xwayland_seen else "XWAYLAND_PROCESS_MISSING", flush=True)
+                        ok = ok and frame_ok and xwayland_seen
                 if ok and os.environ.get("RD_TEST_SESSION") == "1":
                     type_keys("printf 'SHIMMY_RUNTIME=%s\\n' \"$XDG_RUNTIME_DIR\"; "
                               "systemctl --user is-active basic.target && "
