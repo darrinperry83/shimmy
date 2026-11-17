@@ -40,6 +40,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
+#include <pthread.h>
 
 // Present bridge to the Metal window. Declared + defined WEAK here so the headless builds
 // (shim_cli, shim_wlh) link without window.m; the GUI build's strong definition in window.m
@@ -72,6 +73,8 @@ __attribute__((weak)) long gpuwin_present_crtc(const uint8_t* px, uint64_t w, ui
 #define DRM_TYPE          'd'
 #define DRM_COMMAND_BASE  0x40
 #define DRM_NR_VERSION    0x00
+#define DRM_NR_GET_MAGIC  0x02
+#define DRM_NR_AUTH_MAGIC 0x11
 #define DRM_NR_GEM_CLOSE  0x09
 #define DRM_NR_SET_MASTER 0x1e
 #define DRM_NR_DROP_MASTER 0x1f
@@ -479,6 +482,16 @@ static int tracing(void);
 static struct { int fd, minor; } g_fds[MAXFD];
 static int g_nfd;
 static int g_master_owner_fd = -1, g_master_lock_fd = -1;
+// Legacy primary-node authentication used when a compositor reopens card0.
+// A magic identifies one live open file description, never a pathname or fd
+// number (both can be reused). Render nodes do not participate in this API.
+struct drm_magic_slot {
+  unsigned long long dev, ino;
+  uint32_t magic;
+};
+#define MAX_DRM_MAGIC 64
+static struct drm_magic_slot g_magic[MAX_DRM_MAGIC];
+static pthread_mutex_t g_magic_lock = PTHREAD_MUTEX_INITIALIZER;
 __attribute__((weak_import)) extern int shim_fd_reserve(int fd);
 __attribute__((weak_import)) extern void shim_fd_unreserve(int fd);
 
@@ -498,6 +511,63 @@ static void drm_master_release(void) {
     g_master_lock_fd = -1;
   }
   g_master_owner_fd = -1;
+}
+
+static long drm_master_ioctl(int fd, unsigned nr);
+
+static long drm_magic_ioctl(int fd, unsigned nr, uint32_t *magic) {
+  if (!magic || drm_minor_of_fd(fd) != 0) return -EINVAL;
+  unsigned long long dev, ino;
+  if (drm_fd_identity(fd, &dev, &ino)) return -EBADF;
+  if (nr == DRM_NR_AUTH_MAGIC) {
+    // libdrm's drmIsMaster(fd) probes AUTH_MAGIC with magic=0. Linux returns
+    // EINVAL to its master and EACCES to another open. The first card open in
+    // the active native session owns master once it acquires our exclusive
+    // per-session lock; this is also when SET_MASTER would claim it.
+    if (*magic == 0 && g_master_owner_fd < 0) {
+      long claim = drm_master_ioctl(fd, DRM_NR_SET_MASTER);
+      return claim == 0 ? -EINVAL : -EACCES;
+    }
+    unsigned long long master_dev, master_ino;
+    if (g_master_owner_fd < 0 ||
+        drm_fd_identity(g_master_owner_fd, &master_dev, &master_ino) ||
+        master_dev != dev || master_ino != ino) return -EACCES;
+    if (*magic == 0) return -EINVAL;
+  }
+  pthread_mutex_lock(&g_magic_lock);
+  if (nr == DRM_NR_GET_MAGIC) {
+    int free_slot = -1;
+    for (int i = 0; i < MAX_DRM_MAGIC; i++) {
+      if (g_magic[i].magic && g_magic[i].dev == dev && g_magic[i].ino == ino) {
+        *magic = g_magic[i].magic;
+        pthread_mutex_unlock(&g_magic_lock);
+        return 0;
+      }
+      if (!g_magic[i].magic && free_slot < 0) free_slot = i;
+    }
+    if (free_slot < 0) { pthread_mutex_unlock(&g_magic_lock); return -ENOSPC; }
+    uint32_t candidate;
+    do {
+      candidate = arc4random();
+      if (!candidate) continue;
+      int used = 0;
+      for (int i = 0; i < MAX_DRM_MAGIC; i++)
+        if (g_magic[i].magic == candidate) used = 1;
+      if (!used) break;
+    } while (1);
+    g_magic[free_slot] = (struct drm_magic_slot){dev, ino, candidate};
+    *magic = candidate;
+    pthread_mutex_unlock(&g_magic_lock);
+    return 0;
+  }
+  for (int i = 0; i < MAX_DRM_MAGIC; i++)
+    if (g_magic[i].magic == *magic) {
+      g_magic[i] = (struct drm_magic_slot){0};
+      pthread_mutex_unlock(&g_magic_lock);
+      return 0;
+    }
+  pthread_mutex_unlock(&g_magic_lock);
+  return -EINVAL;
 }
 
 static long drm_master_ioctl(int fd, unsigned nr) {
@@ -934,6 +1004,8 @@ int drm_minor_of_fd(int fd) {
 }
 
 void drm_forget_fd(int fd) {
+  unsigned long long closing_dev = 0, closing_ino = 0;
+  int closing_known = !drm_fd_identity(fd, &closing_dev, &closing_ino);
   if (g_master_owner_fd == fd) {
     unsigned long long dev, ino;
     int replacement = -1;
@@ -949,7 +1021,21 @@ void drm_forget_fd(int fd) {
     else drm_master_release();
   }
   for (int i = 0; i < g_nfd; i++)
-    if (g_fds[i].fd == fd) { g_fds[i] = g_fds[--g_nfd]; return; }
+    if (g_fds[i].fd == fd) { g_fds[i] = g_fds[--g_nfd]; break; }
+  if (closing_known) {
+    // A dup keeps the same open file description. Drop outstanding magic only
+    // when its final tracked descriptor closes, before the host can reuse it.
+    for (int i = 0; i < g_nfd; i++) {
+      unsigned long long d, in;
+      if (!drm_fd_identity(g_fds[i].fd, &d, &in) &&
+          d == closing_dev && in == closing_ino) return;
+    }
+    pthread_mutex_lock(&g_magic_lock);
+    for (int i = 0; i < MAX_DRM_MAGIC; i++)
+      if (g_magic[i].magic && g_magic[i].dev == closing_dev &&
+          g_magic[i].ino == closing_ino) g_magic[i] = (struct drm_magic_slot){0};
+    pthread_mutex_unlock(&g_magic_lock);
+  }
 }
 
 int drm_owns_fd(int fd) {
@@ -1383,6 +1469,16 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
     long result = drm_master_ioctl(fd, nr);
     if (tracing()) fprintf(stderr, "[drm] %s_MASTER fd=%d -> %ld\n",
                            nr == DRM_NR_SET_MASTER ? "SET" : "DROP", fd, result);
+    return result;
+  }
+
+  if (type == DRM_TYPE && (nr == DRM_NR_GET_MAGIC || nr == DRM_NR_AUTH_MAGIC)) {
+    long result = (sz == sizeof(uint32_t) &&
+                   dir == (nr == DRM_NR_GET_MAGIC ? 2u : 1u))
+                      ? drm_magic_ioctl(fd, nr, (uint32_t *)(uintptr_t)arg)
+                      : -EINVAL;
+    if (tracing()) fprintf(stderr, "[drm] %s_MAGIC fd=%d -> %ld\n",
+                           nr == DRM_NR_GET_MAGIC ? "GET" : "AUTH", fd, result);
     return result;
   }
 

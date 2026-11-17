@@ -393,7 +393,13 @@ static long mock_stride(void *ctx,pid_t actual,const uint8_t lease[16],
         if(actual!=getpid()||!m||generation!=1||m->width!=width||
            m->height!=height){fprintf(stderr,"RDMETAL_FIXTURE_STRIDE_DENY identity\n");return -EPERM;}
         IOSurfaceRef image=rdgpu_test_export_surface(metal_fixture,lease,generation);
-        if(!image){fprintf(stderr,"RDMETAL_FIXTURE_STRIDE_FALLBACK width=%u\n",width);return width<=4096?(long)width*4:-EPERM;}
+        if(!image){
+            /* A production Metal session may only export an actual IOSurface.
+             * The mock fixture retains its bounded synthetic-stride test. */
+            if(atomic_load(&gate_mode)==1)return -EPERM;
+            fprintf(stderr,"RDMETAL_FIXTURE_STRIDE_FALLBACK width=%u\n",width);
+            return width<=4096?(long)width*4:-EPERM;
+        }
         long stride=(long)IOSurfaceGetBytesPerRow(image);
         rdgpu_test_return_surface(metal_fixture,lease,generation,image);
         fprintf(stderr,"RDMETAL_FIXTURE_STRIDE_OK stride=%ld\n",stride);
@@ -492,6 +498,7 @@ static long mock_fd_export(void *ctx,pid_t actual,const uint8_t lease[16],
     IOSurfaceRef image=NULL;
     if(metal_fixture){
         image=rdgpu_test_export_surface(metal_fixture,lease,generation);
+        if(!image&&atomic_load(&gate_mode)==1)return -EPERM;
         if(image&&(IOSurfaceGetWidth(image)!=width||IOSurfaceGetHeight(image)!=height||
            IOSurfaceGetBytesPerRow(image)!=stride||
            IOSurfaceGetPixelFormat(image)!=0x42475241u)){
@@ -602,9 +609,25 @@ long rdgpu_mock_gate(uint64_t op,uint64_t a1,uint64_t a2,uint64_t a3,
 long rdgpu_metal_gate(uint64_t op,uint64_t a1,uint64_t a2,uint64_t a3,
                       uint64_t a4,uint64_t a5){
     int expected=0;
-    if(!atomic_compare_exchange_strong(&gate_mode,&expected,1)&&expected!=1)
+    if(!atomic_compare_exchange_strong(&gate_mode,&expected,1)&&expected!=1){
+        if(op==0&&getenv("RDMETAL_GATE_DEBUG"))
+            fprintf(stderr,"RDMETAL_CAPABILITY mode_conflict=%d pid=%d\n",expected,getpid());
         return -EPERM;
+    }
     pthread_once(&once,init);
-    if(init_failed||!metal_fixture||!texture_bridge)return -ENODEV;
+    if(init_failed||!metal_fixture||!texture_bridge){
+        if(op==0&&getenv("RDMETAL_GATE_DEBUG"))
+            fprintf(stderr,"RDMETAL_CAPABILITY unavailable init=%d metal=%d texture=%d pid=%d\n",
+                    init_failed,metal_fixture!=NULL,texture_bridge!=NULL,getpid());
+        return -ENODEV;
+    }
+    /* A read-only capability probe lets Mesa fail closed before advertising
+     * a Metal renderer. It cannot consume a broker image lease. */
+    if(op==0){
+        long result=(a1||a2||a3||a4||a5)?-EINVAL:0x52444d01L;
+        if(getenv("RDMETAL_GATE_DEBUG"))
+            fprintf(stderr,"RDMETAL_CAPABILITY result=%ld pid=%d\n",result,getpid());
+        return result;
+    }
     return rdgpu_guest_syscall(&state,op,a1,a2,a3,a4,a5);
 }

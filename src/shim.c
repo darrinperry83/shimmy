@@ -1989,17 +1989,15 @@ static void* guest_thread(void* arg) {
 }
 
 // --- guest environment -----------------------------------------------------------------------
-// The guest gets a fixed base environment, but every experiment we run (indirect GLX vs Mesa's
-// own software rasterizer, which driver, how much logging) is selected by an env var, so the
-// host must be able to override it. Two mechanisms, both host-side:
+// The guest gets a fixed base environment. Optional host-side diagnostic
+// variables can override it through two mechanisms:
 //
 //   LIBGL_*/MESA_*/GALLIUM_*/EGL_*   forwarded verbatim if set on the host
 //   RDENV_FOO=bar                    passes FOO=bar (escape hatch for anything else)
 //
 // A forwarded name REPLACES the base entry of the same name, and an EMPTY value REMOVES it
-// entirely rather than passing an empty string. That distinction is not pedantry: Mesa tests
-// `getenv("LIBGL_ALWAYS_INDIRECT") != NULL`, so setting it to "0" still selects indirect GLX.
-// `LIBGL_ALWAYS_INDIRECT= ./shim_gui ...` is what actually turns the default off.
+// entirely rather than passing an empty string. Mesa tests
+// `getenv("LIBGL_ALWAYS_INDIRECT") != NULL`, so "0" still selects indirect GLX.
 extern char** environ;
 
 static const char* kEnvPrefixes[] = { "LIBGL_", "MESA_", "GALLIUM_", "EGL_", "GBM_", "LIBVA_", "VDPAU_", 0 };
@@ -2031,7 +2029,6 @@ static char** build_guest_env(void) {
     // which names the X11 display and so reads as an X11 problem, while gtk3-demo in
     // the SAME rootfs presents 1490 frames over Wayland. Two runs lost to it.
     "WAYLAND_DISPLAY=wayland-0",
-    "LIBGL_ALWAYS_INDIRECT=1",   // default: GL over the wire -> our GLX decoder -> Metal
     "LIBVA_DRIVER_NAME=rdva",    // default: VAAPI decode -> our rdva driver -> VideoToolbox
   };
   const int nbase = (int)(sizeof base / sizeof base[0]);
