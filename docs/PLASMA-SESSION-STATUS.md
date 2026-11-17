@@ -165,3 +165,30 @@ left on device` while restarting logind and udev, so later service behavior in
 that boot is not a valid Plasma stability result. The test boot and disposable
 root were stopped and removed. Further compositor work needs sufficient disk
 headroom and a bounded guest journal before another on-screen run.
+
+## Authenticated login to Plasma handoff (2026-11-17)
+
+The GUI boot showed `localhost login:` on tty1. The shim had been losing the
+guest's `argv[0]` across exec, so `/bin/login`'s `-bash` became `/bin/bash` and
+the user's login profile was skipped. Commit `c9e4d92` preserves guest argv0;
+the focused regression now reports `login_shell on` and `ARGV0=-bash`. Both
+CLI and GUI builds passed.
+
+With a throwaway account and a profile in a disposable root, an on-screen
+password login ran that profile, created a logind user session and
+`XDG_RUNTIME_DIR`, and launched `startplasma-wayland`. The guest journal logged
+`Started KDE Plasma Workspace`; KWin and Plasmashell remained running during
+the observation. The host window was still black. The cross-process frame file
+advanced to sequence 4, but its sampled pixels were all zero and no later
+frame appeared. This is **not** a visible desktop or a validated logout cycle.
+Terminating the test's `startplasma-wayland` process logged `Session c1 logged
+out. Waiting for processes to exit`, while KWin remained running. The entire
+disposable boot was then stopped.
+
+This run generated large host core dumps and filled the disk; only dumps
+created during the test were removed and free space recovered. The throwaway
+password/profile, test unit masks and input FIFO were restored or removed.
+Future GUI boot probes must disable core dumps in the parent process before
+launch. The next presentation investigation is why KWin emits only an initial
+black frame after authenticated Plasma starts; a live process alone does not
+prove continued rendering.
