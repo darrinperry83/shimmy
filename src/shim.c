@@ -300,8 +300,12 @@ static long route_syscall(unsigned long nr, unsigned long a0, unsigned long a1, 
   if (nr == GPU_SYSCALL)          return gpu_hypercall((struct gpu_req*)a0);
   if (nr == HOSTCALL_SYSCALL)     return hostcall((struct hostcall_req*)a0);
   long r;
+  if (nr == 0x2002 && getenv("RDMETAL_GATE_DEBUG"))
+    fprintf(stderr, "RDMETAL_SYSCALL enter pid=%d op=%lu\n", (int)getpid(), a0);
   if (net_owns_syscall(nr))       r = net_syscall(nr, a0, a1, a2, a3, a4, a5);
   else                            r = linux_syscall(nr, a0, a1, a2, a3, a4, a5);
+  if (nr == 0x2002 && getenv("RDMETAL_GATE_DEBUG"))
+    fprintf(stderr, "RDMETAL_SYSCALL result=%ld pid=%d\n", r, (int)getpid());
   if (getenv("RDEXECDBG") && r == -9)
     fprintf(stderr, "[ebadf] nr=%lu(%#lx,%#lx,%#lx,%#lx,%#lx,%#lx) -> -9\n",
             nr, a0, a1, a2, a3, a4, a5);

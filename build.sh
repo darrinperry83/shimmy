@@ -73,7 +73,7 @@ build_gui() {
   rm -rf build/gui && mkdir -p build/gui
   ( cd build/gui && clang $CFLAGS -c ../../$SRC/shim.c -o shim.o )
   for f in $CORE x11srv.c glxdecode.c wlsrv.c; do
-    ( cd build/gui && clang $CFLAGS -c ../../$SRC/$f -o "${f%.c}.o" )
+    ( cd build/gui && clang $CFLAGS -DRDGPU_CLIENT -c ../../$SRC/$f -o "${f%.c}.o" )
   done
   # The rdmetal GPU broker (syscall 0x2002) — same guest-side syscall the CLI ships, so the
   # GUI desktop can create Metal-backed (broker) resources instead of falling back to softpipe.

@@ -19,6 +19,11 @@ typedef void (*RDGPURevokeTestExport)(void *context,uint64_t receipt);
 /* Same-process broker entry. The host shim obtains its peer identity from
  * getpid(); no guest-provided PID or unauthenticated socket is accepted. */
 RDGPUSession *rdgpu_local_session_create(void);
+/* Read geometry of an allocated image before its first render. This returns
+ * metadata only; it does not export the IOSurface or mark content complete. */
+bool rdgpu_local_image_geometry(RDGPUSession *session,
+                                const uint8_t lease[16],uint64_t generation,
+                                uint32_t *width,uint32_t *height,uint32_t *stride);
 /* Synchronous local draw only; draw_execute releases the retained surface. */
 IOSurfaceRef rdgpu_local_draw_surface(RDGPUSession *session,
                                       const uint8_t lease[16],uint64_t generation);

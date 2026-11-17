@@ -392,11 +392,15 @@ static long mock_stride(void *ctx,pid_t actual,const uint8_t lease[16],
     if(metal_fixture){
         if(actual!=getpid()||!m||generation!=1||m->width!=width||
            m->height!=height){fprintf(stderr,"RDMETAL_FIXTURE_STRIDE_DENY identity\n");return -EPERM;}
+        if(atomic_load(&gate_mode)==1){
+            uint32_t image_width=0,image_height=0,stride=0;
+            if(!rdgpu_local_image_geometry(metal_fixture,lease,generation,
+                                           &image_width,&image_height,&stride)||
+               image_width!=width||image_height!=height)return -EPERM;
+            return stride;
+        }
         IOSurfaceRef image=rdgpu_test_export_surface(metal_fixture,lease,generation);
         if(!image){
-            /* A production Metal session may only export an actual IOSurface.
-             * The mock fixture retains its bounded synthetic-stride test. */
-            if(atomic_load(&gate_mode)==1)return -EPERM;
             fprintf(stderr,"RDMETAL_FIXTURE_STRIDE_FALLBACK width=%u\n",width);
             return width<=4096?(long)width*4:-EPERM;
         }

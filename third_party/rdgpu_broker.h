@@ -19,6 +19,10 @@ typedef void (*RDGPURevokeTestExport)(void *context,uint64_t receipt);
 /* Same-process broker entry. The host shim obtains its peer identity from
  * getpid(); no guest-provided PID or unauthenticated socket is accepted. */
 RDGPUSession *rdgpu_local_session_create(void);
+/* Metadata query is available before first render; it grants no image access. */
+bool rdgpu_local_image_geometry(RDGPUSession *session,
+                                const uint8_t lease[16],uint64_t generation,
+                                uint32_t *width,uint32_t *height,uint32_t *stride);
 /* Synchronous local draw only: the caller holds its guest slot lock until
  * draw_execute returns and calls draw_complete. The returned surface is
  * retained for draw_execute, which releases it. It is not an export grant. */

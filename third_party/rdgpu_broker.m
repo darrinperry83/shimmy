@@ -54,6 +54,22 @@ static RDGPUSession *create_session(pid_t actualPeer){
 RDGPUSession *rdgpu_local_session_create(void){
     return create_session(getpid());
 }
+bool rdgpu_local_image_geometry(RDGPUSession *s,
+                                const uint8_t lease[16],uint64_t generation,
+                                uint32_t *width,uint32_t *height,uint32_t *stride){
+    if(!s||getpid()!=s->actualPeer||!width||!height||!stride)return false;
+    pthread_mutex_lock(&s->lock);
+    ImageSlot *slot=find(s,lease,generation);
+    IOSurfaceRef surface=slot?rd_metal_image_surface(slot->image):NULL;
+    bool valid=surface!=NULL;
+    if(valid){
+        *width=(uint32_t)IOSurfaceGetWidth(surface);
+        *height=(uint32_t)IOSurfaceGetHeight(surface);
+        *stride=(uint32_t)IOSurfaceGetBytesPerRow(surface);
+    }
+    pthread_mutex_unlock(&s->lock);
+    return valid;
+}
 IOSurfaceRef rdgpu_local_draw_surface(RDGPUSession *s,
                                       const uint8_t lease[16],uint64_t generation){
     if(!s||getpid()!=s->actualPeer)return NULL;
