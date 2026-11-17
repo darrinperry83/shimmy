@@ -1818,7 +1818,6 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     }
     return 0;
   }
-  case 437: return -LX_ENOSYS;                                  // openat2 (glibc falls back)
   case 438: return -LX_ENOSYS;                                  // pidfd_getfd
   case 439: {                                                   // faccessat2(dfd, path, mode, flags)
     // AT_EMPTY_PATH + "" means "check the file the fd refers to". macOS faccessat() has no

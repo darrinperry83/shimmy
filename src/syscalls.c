@@ -126,6 +126,7 @@ extern void rd_rtnl_dup(int oldfd, int newfd);
 #define LO_CLOEXEC   0x80000
 #define LO_SYNC      0x101000
 #define LO_PATH      0x200000
+#include "openat2_compat.h"
 
 // *at()
 #define LX_AT_FDCWD            (-100)
@@ -4265,6 +4266,13 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   }
 
   // ---------- 56 openat ----------
+  case 437: { // openat2: validated no-RESOLVE subset uses the existing guest openat path
+    struct rd_open_how how;
+    long status = rd_openat2_decode((const void *)a2, (size_t)a3, &how);
+    if (status < 0) return status;
+    return linux_syscall(56, a0, a1, (unsigned long)how.flags,
+                         (unsigned long)how.mode, 0, 0);
+  }
   case 56: {
     // O_NOFOLLOW must stop the GUEST-side resolver too, not only the host open(): if we resolved
     // the final component here, the host would be handed a non-link and O_NOFOLLOW would silently
