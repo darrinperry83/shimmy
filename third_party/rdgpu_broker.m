@@ -211,11 +211,17 @@ RDGPUReply rdgpu_dispatch(RDGPUSession *s,const RDGPURequest *q){
         uint64_t bytes=(uint64_t)w*h*4;
         if(!w||!h||w>RDGPU_MAX_IMAGE_EDGE||h>RDGPU_MAX_IMAGE_EDGE||
            bytes>RDGPU_MAX_IMAGE_BYTES){r.status=RDGPU_LIMIT;goto done;}
-        if(bytes>RDGPU_MAX_BYTES_PER_PEER-s->bytes){r.status=RDGPU_LIMIT;goto done;}
+        if(bytes>RDGPU_MAX_BYTES_PER_PEER-s->bytes){
+            if(getenv("RDMETAL_TRACE_DRAW"))fprintf(stderr,"RDMETAL_BROKER_QUOTA_BYTES used=%llu request=%llu limit=%llu\n",(unsigned long long)s->bytes,(unsigned long long)bytes,(unsigned long long)RDGPU_MAX_BYTES_PER_PEER);
+            r.status=RDGPU_LIMIT;goto done;
+        }
         ImageSlot *slot=NULL;
         for(unsigned i=0;i<RDGPU_MAX_IMAGES_PER_PEER;i++)if(!s->images[i].image){
             slot=&s->images[i];break;}
-        if(!slot){r.status=RDGPU_LIMIT;goto done;}
+        if(!slot){
+            if(getenv("RDMETAL_TRACE_DRAW"))fprintf(stderr,"RDMETAL_BROKER_QUOTA_SLOTS count=%u\n",RDGPU_MAX_IMAGES_PER_PEER);
+            r.status=RDGPU_LIMIT;goto done;
+        }
         RDMetalImage *image=rd_metal_image_create(s->core,w,h);
         if(!image){r.status=RDGPU_GPU_FAILED;goto done;}
         uint8_t token[16];
