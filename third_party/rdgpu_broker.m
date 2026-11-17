@@ -82,6 +82,25 @@ IOSurfaceRef rdgpu_local_draw_surface(RDGPUSession *s,
     pthread_mutex_unlock(&s->lock);
     return surface;
 }
+IOSurfaceRef rdgpu_local_sample_surface(RDGPUSession *s,
+                                        const uint8_t lease[16],uint64_t generation){
+    if(!s||getpid()!=s->actualPeer)return NULL;
+    pthread_mutex_lock(&s->lock);
+    ImageSlot *slot=find(s,lease,generation);
+    /* GL permits sampling a newly allocated texture whose contents are
+     * undefined. Give that image defined transparent pixels with an actual
+     * GPU clear before it is exposed as a source, avoiding stale IOSurface
+     * bytes or a denied first draw. This does not mark it guest-exportable. */
+    if(slot&&!slot->completed&&!slot->fence&&!slot->exportRefs){
+        uint64_t fence=rd_metal_image_clear(slot->image,0,0,0,0);
+        if(fence&&rd_metal_image_wait(slot->image,fence))slot->completed=true;
+    }
+    IOSurfaceRef surface=slot&&slot->completed&&!slot->fence?
+        rd_metal_image_surface(slot->image):NULL;
+    if(surface)CFRetain(surface);
+    pthread_mutex_unlock(&s->lock);
+    return surface;
+}
 bool rdgpu_local_draw_complete(RDGPUSession *s,
                                const uint8_t lease[16],uint64_t generation){
     if(!s||getpid()!=s->actualPeer)return false;

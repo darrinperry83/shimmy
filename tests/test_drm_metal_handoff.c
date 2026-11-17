@@ -119,6 +119,7 @@ static uint32_t imported_fb(int fd) {
 }
 
 int main(void) {
+  setenv("RDGPU_SCANOUT_DIRECT_SOURCE", "1", 1); // exercise retained direct scanout
   image = (IOSurfaceRef)&fake_image;
   int first = carrier(0), second = carrier(1);
   uint32_t fb1 = imported_fb(first);
@@ -155,9 +156,14 @@ int main(void) {
   assert(presents == 3 && releases == 3 && carrier_refs[0] == 1);
   assert(drm_ioctl(-1, request(DRM_NR_MODE_PAGE_FLIP), (uintptr_t)&flip) == 0);
   assert(presents == 4 && releases == 3 && carrier_refs[0] == 1); // same scanout held
+  unsetenv("RDGPU_SCANOUT_DIRECT_SOURCE"); // windowed ACK ends Metal sampling
+  flip.fb_id = fb2;
+  assert(drm_ioctl(-1, request(DRM_NR_MODE_PAGE_FLIP), (uintptr_t)&flip) == 0);
+  assert(presents == 5 && releases == 5 && !carrier_refs[0] && !carrier_refs[1]);
+  flip.fb_id = fb1;
   carrier_state[0] = 2; // revoked carrier cannot flip
   assert(drm_ioctl(-1, request(DRM_NR_MODE_PAGE_FLIP), (uintptr_t)&flip) == -EAGAIN);
-  assert(presents == 4 && releases == 3);
+  assert(presents == 5 && releases == 5);
   // A recognizable but unauthenticated sparse carrier must never become a CPU BO.
   carrier_state[0] = 2;
   struct drm_prime_handle denied = {.fd = first};

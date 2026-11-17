@@ -977,6 +977,15 @@ static int scanout_matches(uint32_t crtc_id, int fd, uint64_t generation) {
          a.st_dev == b.st_dev && a.st_ino == b.st_ino;
 }
 
+/* The ordinary CAMetalLayer path waits for its sample command buffer before
+ * returning. It no longer reads the producer IOSurface after that ACK, so a
+ * compositor may draw into the buffer again. Direct IOSurface scanout retains
+ * the image until a replacement frame is accepted. */
+static int scanout_retains_surface(void) {
+  const char* direct = getenv("RDGPU_SCANOUT_DIRECT_SOURCE");
+  return direct && *direct && *direct != '0';
+}
+
 static void scanout_retire(uint32_t crtc_id, int replacement_fd, uint64_t replacement_generation) {
   if (crtc_id < 1 || crtc_id > 2) return;
   struct scanout_frame* old = &g_scanout[crtc_id - 1];
@@ -1030,7 +1039,8 @@ static int drm_present_fb(uint32_t fb_id, uint32_t crtc_id) {
       return -EINVAL;
     }
     int next_fd = -1;
-    if (crtc_id >= 1 && crtc_id <= 2) {
+    int retain = scanout_retains_surface();
+    if (retain && crtc_id >= 1 && crtc_id <= 2) {
       next_fd = fcntl(g->fd, F_DUPFD_CLOEXEC, 0);
       if (next_fd < 0) {
         r = -errno;
@@ -1055,13 +1065,16 @@ static int drm_present_fb(uint32_t fb_id, uint32_t crtc_id) {
       if (!already_scanning) rdgpu_handoff_consumer_release_fd(g->fd, generation);
       return r;
     }
-    if (crtc_id >= 1 && crtc_id <= 2) {
+    if (retain && crtc_id >= 1 && crtc_id <= 2) {
       struct scanout_frame* current = &g_scanout[crtc_id - 1];
       scanout_retire(crtc_id, g->fd, generation);
       if (current->fd < 0) {
         current->fd = next_fd;
         current->generation = generation;
       } else close(next_fd);
+    } else {
+      scanout_retire(crtc_id, -1, 0);
+      if (!already_scanning) rdgpu_handoff_consumer_release_fd(g->fd, generation);
     }
     fprintf(stderr, "DRM_PRESENT_METAL crtc=%u fb_id=0x%x generation=%llu surface=%u\n",
             crtc_id, fb_id, (unsigned long long)generation, surface_id);

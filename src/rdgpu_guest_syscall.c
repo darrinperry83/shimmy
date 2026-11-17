@@ -260,7 +260,13 @@ long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
         pthread_mutex_lock(&s->lock);
         RDGPUGuestSlot *entry=slot(s,a1);
         if(!entry){pthread_mutex_unlock(&s->lock);return -ESTALE;}
-        if(entry->exported||entry->drawFence){pthread_mutex_unlock(&s->lock);return -EBUSY;}
+        if(entry->exported||entry->drawFence){
+            if (getenv("RDMETAL_TRACE_DRAW"))
+                fprintf(stderr,"RDMETAL_DRAW_PREFLIGHT handle=%llu exported=%d carrier=%d drawFence=%llu\n",
+                        (unsigned long long)a1,entry->exported,
+                        entry->carrierIssued,(unsigned long long)entry->drawFence);
+            pthread_mutex_unlock(&s->lock);return -EBUSY;
+        }
         if(!s->drawTransport||!s->drawPollTransport){pthread_mutex_unlock(&s->lock);return -EPERM;}
         void *snapshot=malloc((size_t)a3);
         if(!snapshot){pthread_mutex_unlock(&s->lock);return -ENOMEM;}
@@ -285,9 +291,14 @@ long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
             .generation=entry->generation,.target_handle=a1,
             .packet_bytes=(uint32_t)a3};
         memcpy(batch.lease,entry->lease,16);
-        if(entry->carrierIssued &&
-           (!s->fdFrameBegin || s->fdFrameBegin(s->fdFrameContext,
-               s->ownerPid,entry->lease,entry->generation))){
+        int frame_begin = entry->carrierIssued ?
+           (s->fdFrameBegin ? s->fdFrameBegin(s->fdFrameContext,
+               s->ownerPid,entry->lease,entry->generation) : -ENOSYS) : 0;
+        if (getenv("RDMETAL_TRACE_DRAW"))
+            fprintf(stderr,"RDMETAL_DRAW_BEGIN handle=%llu carrier=%d complete=%d drawFence=%llu begin=%d\n",
+                    (unsigned long long)a1,entry->carrierIssued,
+                    entry->producerComplete,(unsigned long long)entry->drawFence,frame_begin);
+        if(frame_begin){
             free(snapshot);pthread_mutex_unlock(&s->lock);return -EBUSY;
         }
         long result=s->drawTransport(s->drawContext,&batch,snapshot,(size_t)a3);

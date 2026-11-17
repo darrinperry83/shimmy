@@ -28,6 +28,10 @@ bool rdgpu_local_image_geometry(RDGPUSession *session,
  * retained for draw_execute, which releases it. It is not an export grant. */
 IOSurfaceRef rdgpu_local_draw_surface(RDGPUSession *session,
                                       const uint8_t lease[16],uint64_t generation);
+/* A completed image may be sampled as an input by a synchronous draw in the
+ * same attested guest session. The caller releases the returned CF reference. */
+IOSurfaceRef rdgpu_local_sample_surface(RDGPUSession *session,
+                                        const uint8_t lease[16],uint64_t generation);
 bool rdgpu_local_draw_complete(RDGPUSession *session,
                                const uint8_t lease[16],uint64_t generation);
 /* Synchronous upload into an EXISTING broker-owned BGRA8 IOSurface. The source

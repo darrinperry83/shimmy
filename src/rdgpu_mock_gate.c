@@ -154,10 +154,34 @@ static void fixture_cleanup(void){
     if(metal_fixture){rdgpu_session_disconnect(metal_fixture);metal_fixture=NULL;}
     if(texture_bridge){rdgpu_texture_bridge_destroy(texture_bridge);texture_bridge=NULL;}
 }
+struct fixture_draw_resolve_context { uint64_t target_handle; };
 static IOSurfaceRef fixture_resolve(uint64_t handle,void *context){
-    (void)context;
     fprintf(stderr,"RDMETAL_FIXTURE_RESOLVE_ENTER handle=%llu image_count=%u\n",
             (unsigned long long)handle,image_count);
+    if(atomic_load(&gate_mode)==1&&context&&metal_fixture){
+        const struct fixture_draw_resolve_context *draw=context;
+        /* Guest handles are chosen by RDGPUGuestState after CREATE returns.
+         * The older sequence cache only learned a handle after that image
+         * was itself a draw target, so a cleared image could not be sampled.
+         * The guest slot lock is held throughout this synchronous draw. */
+        for(unsigned i=0;i<RDGPU_MAX_IMAGES_PER_PEER;i++){
+            RDGPUGuestSlot *slot=&state.slots[i];
+            if(slot->handle!=handle||slot->generation!=1||
+               !find_image(slot->lease))continue;
+            IOSurfaceRef found=handle==draw->target_handle?
+                rdgpu_local_draw_surface(metal_fixture,slot->lease,1):
+                rdgpu_local_sample_surface(metal_fixture,slot->lease,1);
+            if(getenv("RDMETAL_TRACE_DRAW"))
+                fprintf(stderr,"RDMETAL_FIXTURE_SLOT_RESOLVE handle=%llu target=%d complete=%d fence=%llu surface=%d\n",
+                        (unsigned long long)handle,handle==draw->target_handle,
+                        slot->producerComplete,(unsigned long long)slot->drawFence,found!=NULL);
+            return found;
+        }
+        if(getenv("RDMETAL_TRACE_DRAW"))
+            fprintf(stderr,"RDMETAL_FIXTURE_SLOT_MISS handle=%llu\n",
+                    (unsigned long long)handle);
+        return NULL;
+    }
     for(unsigned i=0;i<image_count;i++)
         if(images[i].sequence==handle&&metal_fixture)
             return atomic_load(&gate_mode)==1?
@@ -214,7 +238,8 @@ static long fixture_draw_submit(void *context,const RDGPUDrawBatchRequest *heade
     /* The resolver's handle is scoped to this exact lease. This synchronous
      * Metal execution is fixture-only; the real broker needs async fences. */
     m->sequence=header->target_handle;
-    int result=rdgpu_draw_execute(packet,bytes,fixture_resolve,NULL,
+    struct fixture_draw_resolve_context resolve={.target_handle=header->target_handle};
+    int result=rdgpu_draw_execute(packet,bytes,fixture_resolve,&resolve,
                                   texture_bridge?fixture_texture_resolve:NULL,
                                   texture_bridge?fixture_texture_complete:NULL,
                                   NULL);
