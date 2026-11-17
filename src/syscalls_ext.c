@@ -84,6 +84,7 @@ extern void rd_rtnl_dup(int oldfd, int newfd);
 #define LX_EINVAL         22
 #define LX_ENAMETOOLONG   36
 #define LX_ENOSYS         38
+#define LX_ELOOP          40
 #define LX_EOPNOTSUPP     95
 
 #define LX_AT_FDCWD              (-100)
@@ -1709,7 +1710,44 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   case 277: return -LX_ENOSYS;                                  // seccomp
   case 279: return do_memfd_create((const char*)a0, (unsigned)a1);
   case 280: return -LX_EPERM;                                   // bpf
-  case 281: return -LX_ENOSYS;                                  // execveat
+  case 281: {                                                   // execveat(dirfd, path, argv, envp, flags)
+    const char *path = (const char *)a1;
+    unsigned flags = (unsigned)a4;
+    if (!path) return -LX_EFAULT;
+    if (flags & ~(LX_AT_EMPTY_PATH | LX_AT_SYMLINK_NOFOLLOW)) return -LX_EINVAL;
+    if (!path[0]) {
+      if (!(flags & LX_AT_EMPTY_PATH)) return -LX_ENOENT;
+      // The existing exec bridge resolves /proc/self/fd/N through F_GETPATH.
+      // Reject descriptors with no recoverable backing path rather than
+      // claiming to support anonymous/deleted executables and failing after
+      // the shim replaces its process image.
+      int fd = (int)a0;
+      struct stat st;
+      if (fstat(fd, &st) < 0) return eret();
+      if ((flags & LX_AT_SYMLINK_NOFOLLOW) && S_ISLNK(st.st_mode))
+        return -LX_ELOOP;
+      if (!S_ISREG(st.st_mode)) return -LX_EACCES;
+      char host[PATH_MAX];
+      if (fcntl(fd, F_GETPATH, host) < 0) return -LX_ENOSYS;
+      struct stat named;
+      if (stat(host, &named) < 0 || named.st_dev != st.st_dev ||
+          named.st_ino != st.st_ino) return -LX_ENOSYS;
+      char fdpath[64];
+      snprintf(fdpath, sizeof fdpath, "/proc/self/fd/%d", fd);
+      return guest_execve(fdpath, (char *const *)a2, (char *const *)a3);
+    }
+    char host[PATH_MAX], guest[PATH_MAX];
+    long r = syscalls_resolve((int)a0, path,
+                              (flags & LX_AT_SYMLINK_NOFOLLOW) != 0,
+                              host, sizeof host, guest, sizeof guest);
+    if (r < 0) return r;
+    if (flags & LX_AT_SYMLINK_NOFOLLOW) {
+      struct stat st;
+      if (lstat(host, &st) < 0) return eret();
+      if (S_ISLNK(st.st_mode)) return -LX_ELOOP;
+    }
+    return guest_execve(guest, (char *const *)a2, (char *const *)a3);
+  }
   case 282: return -LX_ENOSYS;                                  // userfaultfd
   case 283: {                                                   // membarrier
     __sync_synchronize();
