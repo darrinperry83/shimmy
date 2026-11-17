@@ -115,3 +115,20 @@ bool rdguest_range_copyout(RDGuestRangeLedger *ledger,uintptr_t guestAddress,
     }
     pthread_mutex_unlock(&ledger->lock);return ok;
 }
+bool rdguest_range_copyin(RDGuestRangeLedger *ledger,uintptr_t guestAddress,
+                          void *snapshot,size_t length){
+    uintptr_t hi;
+    if(!ledger||!snapshot||!bounds(guestAddress,length,&hi))return false;
+    pthread_mutex_lock(&ledger->lock);
+    bool ok=covered(ledger,guestAddress,hi,false);
+    if(ok){
+        /* Hold the ledger lock across the copy so mmap/munmap/protect cannot
+         * revoke or replace the admitted guest range mid-snapshot. */
+        mach_vm_size_t copied=0;
+        ok=mach_vm_read_overwrite(mach_task_self(),
+            (mach_vm_address_t)guestAddress,(mach_vm_size_t)length,
+            (mach_vm_address_t)snapshot,&copied)==KERN_SUCCESS&&copied==length;
+    }
+    pthread_mutex_unlock(&ledger->lock);
+    return ok;
+}

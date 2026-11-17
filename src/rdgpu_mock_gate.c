@@ -480,7 +480,8 @@ static void init(void){
     rdgpu_guest_set_fd_import_transport(&state,mock_fd_import,NULL);
     rdgpu_guest_set_image_stride_transport(&state,mock_stride,NULL);
     if(local_metal)
-        rdgpu_guest_set_image_upload_transport(&state,fixture_image_upload,NULL);
+        rdgpu_guest_set_image_upload_transport(&state,fixture_image_upload,
+                                               gmem_guest_export_copyin,NULL);
 }
 static void mock_return(void *context,const uint8_t lease[16],uint64_t generation){
     (void)context;(void)generation;

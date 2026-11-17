@@ -25,6 +25,8 @@ typedef int (*RDGPUImageUpload)(void *context,pid_t attestedGuestPid,
                                 const uint8_t lease[16],uint64_t generation,
                                 uint32_t sourceFormat,const void *snapshot,
                                 size_t bytes);
+typedef int (*RDGPUUploadCopyin)(void *context,uint64_t guestAddress,
+                                 void *snapshot,size_t bytes);
 /* The issuer runs in the trusted host shim after exact slot lookup. It must
  * return a CLOEXEC FD for this lease or a negative errno; the guest cannot
  * supply or mint the FD. */
@@ -108,6 +110,7 @@ typedef struct {
     RDGPUImageStrideQuery imageStrideQuery;
     void *imageStrideContext;
     RDGPUImageUpload imageUpload;
+    RDGPUUploadCopyin uploadCopyin;
     void *imageUploadContext;
     void *exportTransportContext;
     int ready,disabled;
@@ -142,7 +145,9 @@ void rdgpu_guest_set_fd_frame_transport(RDGPUGuestState *state,
 void rdgpu_guest_set_image_stride_transport(RDGPUGuestState *state,
                                             RDGPUImageStrideQuery query,void *context);
 void rdgpu_guest_set_image_upload_transport(RDGPUGuestState *state,
-                                             RDGPUImageUpload upload,void *context);
+                                             RDGPUImageUpload upload,
+                                             RDGPUUploadCopyin copyin,
+                                             void *context);
 long rdgpu_guest_syscall(RDGPUGuestState *state,uint64_t op,uint64_t a1,
                           uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5);
 #endif

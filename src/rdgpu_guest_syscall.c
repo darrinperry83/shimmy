@@ -87,10 +87,13 @@ void rdgpu_guest_set_image_stride_transport(RDGPUGuestState *s,
     pthread_mutex_unlock(&s->lock);
 }
 void rdgpu_guest_set_image_upload_transport(RDGPUGuestState *s,
-                                             RDGPUImageUpload upload,void *context){
+                                             RDGPUImageUpload upload,
+                                             RDGPUUploadCopyin copyin,
+                                             void *context){
     if(!s||!s->ready)return;
     pthread_mutex_lock(&s->lock);
-    s->imageUpload=upload;s->imageUploadContext=context;
+    s->imageUpload=upload;s->uploadCopyin=copyin;
+    s->imageUploadContext=context;
     pthread_mutex_unlock(&s->lock);
 }
 static RDGPUGuestSlot *slot(RDGPUGuestState *s,uint64_t handle){
@@ -135,16 +138,14 @@ long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
         if(a3!=expected||expected>RDGPU_MAX_IMAGE_BYTES){
             pthread_mutex_unlock(&s->lock);return -EINVAL;
         }
-        if(entry->drawFence||entry->exported||!s->imageUpload){
+        if(entry->drawFence||entry->exported||!s->imageUpload||
+           !s->uploadCopyin){
             pthread_mutex_unlock(&s->lock);return -EBUSY;
         }
         void *snapshot=malloc((size_t)expected);
         if(!snapshot){pthread_mutex_unlock(&s->lock);return -ENOMEM;}
-        mach_vm_size_t copied=0;
-        kern_return_t status=mach_vm_read_overwrite(mach_task_self(),
-            (mach_vm_address_t)a2,(mach_vm_size_t)expected,
-            (mach_vm_address_t)snapshot,&copied);
-        if(status!=KERN_SUCCESS||copied!=expected){
+        if(s->uploadCopyin(s->imageUploadContext,a2,snapshot,
+                           (size_t)expected)){
             free(snapshot);pthread_mutex_unlock(&s->lock);return -EFAULT;
         }
         if(entry->carrierIssued&&
