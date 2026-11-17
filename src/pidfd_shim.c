@@ -39,6 +39,14 @@ static int socket_mode_enabled(void) {
   const char* s = getenv("RDPIDFD_SOCKET");
   return s && *s == '1';
 }
+static int transfer_mode_enabled(void) {
+  const char* s = getenv("RDPIDFD_TRANSFER");
+  return s && *s == '1';
+}
+static int transferable_socket_fd(int fd) {
+  struct stat st;
+  return transfer_mode_enabled() && fstat(fd, &st) == 0 && S_ISSOCK(st.st_mode);
+}
 
 static int birth_of(pid_t pid, uint64_t* sec, uint64_t* usec) {
   struct proc_bsdinfo info = {0};
@@ -155,7 +163,7 @@ static pid_t socket_pid(int fd) {
 }
 
 int pidfd_shim_target_init(void) {
-  if (!socket_mode_enabled()) return 0;
+  if (!socket_mode_enabled() && !transfer_mode_enabled()) return 0;
   char group[sizeof(((struct sockaddr_un*)0)->sun_path)];
   if (socket_group(group, sizeof group) < 0) return -1;
   pthread_mutex_lock(&target_init_lock);
@@ -239,6 +247,22 @@ static long pidfd_open_socket(pid_t pid) {
   return reader;
 }
 
+int pidfd_shim_transferable(int fd) {
+  /* A socket pidfd can already be sent. A kqueue cannot: Darwin sendmsg()
+   * rejects SCM_RIGHTS for kqueue descriptors with EINVAL. Check the host fd
+   * type before consulting the numeric registry, which deliberately retains
+   * closed pidfds and may contain a reused ordinary fd number. */
+  pid_t pid = socket_pid(fd);
+  if (pid > 0) {
+    int copy = fcntl(fd, F_DUPFD_CLOEXEC, 256);
+    return copy < 0 ? -errno : copy;
+  }
+  if (kevent(fd, NULL, 0, NULL, 0, NULL) < 0) return 0;
+  pid = pidfd_shim_pid(fd);
+  if (pid <= 0) return 0;
+  return (int)pidfd_open_socket(pid);
+}
+
 long pidfd_open_shim(pid_t pid, unsigned int flags) {
   if (flags != 0) return -22;               // Linux pidfd_open takes no flags
   if (pid <= 0) return -3;                  // -ESRCH
@@ -300,7 +324,8 @@ void pidfd_shim_register(int fd, pid_t pid) {
   struct stat st = {0};
   struct sockaddr_un addr = {0}; socklen_t addrlen = sizeof addr;
   uint64_t sec = 0, usec = 0;
-  int socket_auth = socket_mode_enabled();
+  int socket_auth = socket_mode_enabled() ||
+                    (transferable_socket_fd(fd) && socket_pid(fd) == pid);
   if (socket_auth && (socket_pid(fd) != pid || fstat(fd, &st) < 0 ||
                       getsockname(fd, (struct sockaddr*)&addr, &addrlen) < 0 ||
                       addr.sun_family != AF_UNIX ||
@@ -331,7 +356,7 @@ pid_t pidfd_shim_pid(int fd) {
   // A socket may be received through SCM_RIGHTS, closed, or have its fd number
   // reused. Never trust the numeric registry for this representation: inspect
   // its kernel peer and target birth identity on every lookup.
-  if (socket_mode_enabled()) {
+  if (socket_mode_enabled() || transferable_socket_fd(fd)) {
     pid_t live = socket_pid(fd);
     if (live > 0) { pidfd_shim_register(fd, live); return live; }
     // LOCAL_PEERPID stops working when the target closes its socket on exit.
@@ -370,7 +395,7 @@ pid_t pidfd_shim_pid(int fd) {
 int pidfd_shim_waitid(int fd, id_t id, siginfo_t* si, int hopt) {
   pid_t pid = pidfd_shim_pid(fd);
   if (pid <= 0) {
-    if (socket_mode_enabled()) { errno = EBADF; return -1; }
+    if (socket_mode_enabled() || transferable_socket_fd(fd)) { errno = EBADF; return -1; }
     // Not a pidfd we issued. The guest may hold a stale/unset pidfd (systemd uses fd=INT_MAX as a
     // "no pidfd" sentinel in some paths). On Linux this is EBADF; emulate "wait for any child"
     // instead so pidfd verification doesn't wedge every executor spawn with EBADF.
@@ -387,7 +412,7 @@ int pidfd_shim_waitid(int fd, id_t id, siginfo_t* si, int hopt) {
 
 int pidfd_shim_send_signal(int fd, int sig) {
   pid_t pid = pidfd_shim_pid(fd);
-  if (socket_mode_enabled()) {
+  if (socket_mode_enabled() || transferable_socket_fd(fd)) {
     if (pid <= 0) { errno = EBADF; return -1; }
     // A host kill(pid) can address a reused PID between lookup and delivery.
     // This representation needs a target-owned signaling protocol before it

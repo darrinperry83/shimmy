@@ -12,6 +12,10 @@ int pidfd_shim_target_init(void);
 void pidfd_shim_closed(int fd);
 // Look up the pid behind a pidfd, or 0 if unknown.
 pid_t pidfd_shim_pid(int fd);
+/* For an outgoing SCM_RIGHTS fd, return a target-owned, transferable pidfd;
+ * return 0 for an ordinary fd, or a negative errno on conversion failure.
+ * The caller owns a positive returned fd. */
+int pidfd_shim_transferable(int fd);
 // Register an externally-received pidfd (SCM_RIGHTS across exec'd shim processes) so fd -> pid
 // lookups keep working on the receiving side. systemd's executor sends the service pidfd to PID 1
 // over a socketpair; without this the manager cannot resolve the transferred fd to a pid.

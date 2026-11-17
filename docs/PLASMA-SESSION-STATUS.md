@@ -136,3 +136,13 @@ the disposable clone reached getty and authenticated the throwaway user, but
 the session lacked `XDG_RUNTIME_DIR`; KWin and Plasmashell did not persist.
 The Plasmashell JIT-on acceptance criterion remains to be rerun once that
 separate session setup issue is resolved.
+
+# 17 November 2026 logind update
+
+The earlier empty `XDG_RUNTIME_DIR` finding above was reproduced and traced.
+The `CreateSession` request and peer credentials were valid; kqueue pidfds could
+not cross Darwin `SCM_RIGHTS`, and dbus-broker also required the existing
+outgoing-queue compatibility path. An isolated authenticated TTY login now
+creates a real logind session, runtime directory, user manager, and user bus
+with the `run.sh --init` flags. See `LOGIND-SESSION-PIDFD.md`. This does not yet
+establish a visible or persistent Plasma desktop.

@@ -2397,8 +2397,39 @@ static long sys_sendmsg(int fd, const struct lin_msghdr* lm, int lflags) {
     if (r < 0) return r;
     hm.msg_control = hctl; hm.msg_controllen = (socklen_t)hctllen;
   }
+  int* transfer_fds = NULL;
+  size_t transfer_count = 0;
+  const char* transfer_mode = getenv("RDPIDFD_TRANSFER");
+  if (transfer_mode && *transfer_mode == '1' && hctllen) {
+    // Darwin cannot pass kqueue-backed pidfds with SCM_RIGHTS (sendmsg returns
+    // EINVAL). Keep kqueues for local child monitoring, but substitute a
+    // target-owned socket only for this outbound transfer. Close our temporary
+    // duplicate after sendmsg; the receiver owns the descriptor it receives.
+    size_t capacity = hctllen / sizeof(int);
+    transfer_fds = calloc(capacity, sizeof(int));
+    if (!transfer_fds) { free(hctl); return -L_ENOMEM; }
+    for (struct cmsghdr* c = CMSG_FIRSTHDR(&hm); c; c = CMSG_NXTHDR(&hm, c)) {
+      if (c->cmsg_level != SOL_SOCKET || c->cmsg_type != SCM_RIGHTS ||
+          c->cmsg_len < CMSG_LEN(0)) continue;
+      size_t count = (c->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+      for (size_t i = 0; i < count; i++) {
+        int original; memcpy(&original, CMSG_DATA(c) + i * sizeof(int), sizeof original);
+        int replacement = pidfd_shim_transferable(original);
+        if (replacement == 0) continue;
+        if (replacement < 0) {
+          for (size_t j = 0; j < transfer_count; j++) close(transfer_fds[j]);
+          free(transfer_fds); free(hctl);
+          return -linux_errno_from_host(-replacement);
+        }
+        transfer_fds[transfer_count++] = replacement;
+        memcpy(CMSG_DATA(c) + i * sizeof(int), &replacement, sizeof replacement);
+      }
+    }
+  }
   ssize_t n = sendmsg(fd, &hm, msgflags_l2h(lflags));
   long out = (n < 0) ? lerr() : (long)n;
+  for (size_t i = 0; i < transfer_count; i++) close(transfer_fds[i]);
+  free(transfer_fds);
   free(hctl);
   if (getenv("RDEXECDBG")) {
     // Peek the payload to see if a service is sending sd_notify (READY=1/STATUS=...).

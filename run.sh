@@ -97,6 +97,13 @@ if [ "$BOOT_INIT" = 1 ]; then
   fi
   echo "[run] boot-to-init: $INIT -> ${INIT_RESOLVED:-$INIT} (shim=$(basename "$SHIM"))" >&2
 
+  # systemd passes pidfds between logind, the broker and PID 1. Darwin cannot
+  # pass our local kqueue pidfds through SCM_RIGHTS, so use a private namespace
+  # for target-owned socket pidfds at transfer time. The broker also queries
+  # the Unix socket's pending output after forwarding an fd.
+  GRP="$(mktemp -d /tmp/rdmeta-init-XXXXXX)" || exit 1
+  chmod 700 "$GRP"
+
   # systemd must believe it is uid 0. (A full systemd-as-PID-1 boot additionally needs the
   # shim to report getpid()==1 to the init process — see the live-boot notes. That mapping
   # lives in the shim's syscall layer, not here; this script only wires the exec path.)
@@ -107,6 +114,7 @@ if [ "$BOOT_INIT" = 1 ]; then
   # guest environment; the display manager can set the real values for its user session.
   RDENV_WAYLAND_DISPLAY= RDENV_DISPLAY= RDENV_XDG_RUNTIME_DIR= \
   LIBGL_ALWAYS_INDIRECT= RDENV_LIBGL_ALWAYS_INDIRECT= RDNATIVE_SESSION=1 RDUID0=1 \
+  RDSOCKETGROUP="$GRP" RDPIDFD_TRANSFER=1 RDSOCKETOUTQ_COMPAT=1 \
     exec "$SHIM" "$ROOT" /sbin/init "$@"
 fi
 
