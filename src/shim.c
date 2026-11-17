@@ -521,6 +521,15 @@ int guest_tid_known(int tid) {
   pthread_mutex_unlock(&g_gt_mu);
   return found || tid == (int)syscalls_guest_pid(); // main thread before registration
 }
+
+int guest_thread_count(void) {
+  pthread_mutex_lock(&g_gt_mu);
+  int count = 0;
+  for (int i = 0; i < MAX_GTHREAD; i++)
+    if (g_gt[i].used) count++;
+  pthread_mutex_unlock(&g_gt_mu);
+  return count ? count : 1; // main thread before registration
+}
 // Host children we spawned for the guest (see guestthread.h). A small ring is enough: it only has
 // to answer "did we make this pid", and a guest that outlives 256 children has long since lost
 // interest in the first of them. Reaped pids are deliberately NOT removed — a guest may signal a
