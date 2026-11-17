@@ -586,7 +586,7 @@ int main(void) {
     CHECK(SC5(217, 0, 0, 0, 0, 0) == -LX_ENOSYS, "add_key must be -ENOSYS");
     CHECK(SC3(194, 0, 0, 0) == -LX_ENOSYS, "shmget must be -ENOSYS");
     CHECK(SC3(196, 0, 0, 0) == -LX_ENOSYS, "shmat must be -ENOSYS");
-    CHECK(SC5(281, 0, 0, 0, 0, 0) == -LX_ENOSYS, "execveat must be -ENOSYS");
+    CHECK(SC5(281, 0, 0, 0, 0, 0) == -14, "execveat null path must be -EFAULT");
     CHECK(SC5(292, 0, 0, 0, 0, 0) == -LX_ENOSYS, "io_pgetevents must be -ENOSYS");
     CHECK(SC5(234, 0, 0, 0, 0, 0) == -LX_ENOSYS, "remap_file_pages must be -ENOSYS");
     CHECK(SC5(435, 0, 0, 0, 0, 0) == -LX_ENOSYS, "clone3 must be -ENOSYS");
