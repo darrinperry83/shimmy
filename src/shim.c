@@ -842,13 +842,23 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
   char signalcarry[144];
   snprintf(signalcarry, sizeof signalcarry, "RDGUESTSIGNAL=%s", signalenv);
 
-  char** henv = (char**)calloc((size_t)genvc + ncarry + 5, sizeof *henv);
-  if (!henv) { free(hargv); return -12; }
+  // The shim's argv[2] is the executable path, but Linux execve keeps the
+  // caller-supplied argv[0]. login(1) uses "-bash" to request a login shell;
+  // replacing it with /bin/bash skips .bash_profile and breaks TTY sessions.
+  const char* guest_arg0 = argv && argv[0] ? argv[0] : "";
+  size_t arg0env_size = sizeof("RDGUESTARGV0=") + strlen(guest_arg0);
+  char* arg0env = malloc(arg0env_size);
+  if (!arg0env) { free(hargv); return -12; }
+  snprintf(arg0env, arg0env_size, "RDGUESTARGV0=%s", guest_arg0);
+
+  char** henv = (char**)calloc((size_t)genvc + ncarry + 6, sizeof *henv);
+  if (!henv) { free(arg0env); free(hargv); return -12; }
   int m = 0;
   henv[m++] = (char*)"RDGUESTENV=1";
   henv[m++] = cwdenv;
   henv[m++] = ppidenv;
   henv[m++] = signalcarry;
+  henv[m++] = arg0env;
   for (int i = 0; i < genvc; i++) henv[m++] = envp[i];
   for (int i = 0; kCarry[i]; i++) {
     const char* v = getenv(kCarry[i]);
@@ -875,14 +885,14 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
       guest_child_register((int)np);              // the guest may legitimately kill() this pid
       net_note_spawned_child((int)np);            // ...and it is now the peer of our socketpairs
     }
-    free(hargv); free(henv);
+    free(arg0env); free(hargv); free(henv);
     guest_vfork_finish(rc == 0 ? (long)np : -1, rc == 0 ? 0 : 127);   // never returns
     return -8;
   }
   execve(g_self_path, hargv, henv);
   int exec_error = errno;
   fprintf(stderr, "[shim] host re-exec failed for %s: %s\n", exec_guest_path, strerror(exec_error));
-  free(hargv); free(henv);
+  free(arg0env); free(hargv); free(henv);
   return -(long)linux_errno_from_host(exec_error);
 }
 
@@ -2356,6 +2366,9 @@ int main(int argc, char** argv) {
       if (arg) na[k++] = strdup(arg);                  // its single optional argument
       for (int i = 2; i < argc; i++) na[k++] = argv[i];  // script path, then the script's own args
       na[k] = 0;
+      // A shebang replaces the script with an interpreter. Its argv[0] is the
+      // interpreter, not the script's caller-supplied argv[0].
+      if (getenv("RDGUESTARGV0")) setenv("RDGUESTARGV0", p, 1);
       argv = na; argc = k;
       if (g_verbose) fprintf(stderr, "[shim] #! %s%s%s -> %s\n", p, arg ? " " : "",
                              arg ? arg : "", argv[2 + (arg ? 1 : 0)]);
@@ -2505,6 +2518,8 @@ int main(int argc, char** argv) {
   size_t stksz = 8 * 1024 * 1024;
   void* stack = malloc(stksz);              // plain RW is fine for the guest stack
   int gargc = argc - 2; char** gargv = &argv[2];
+  const char* guest_arg0 = getenv("RDGUESTARGV0");
+  if (guest_arg0 && gargc > 0) gargv[0] = (char*)guest_arg0;
   char** envp = build_guest_env();
   void* sp = build_stack(stack, stksz, gargc, gargv, envp, &pi);
   // Tell /proc/self/maps where the main guest stack REALLY is. glibc's pthread_getattr_np()
