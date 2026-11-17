@@ -40,6 +40,15 @@ context retains a hybrid softpipe fallback. The GUI desktop, cross-process
 frame handoff, and zero-fallback acceptance run remain unverified. The
 same-process route does not authenticate an independent broker process.
 
+A follow-up direct GLES triangle initially failed despite `glGetError()==0`:
+the broker required a prior clear before allowing a draw target. A local,
+synchronous draw target accessor now permits the first draw, and a disposable
+Arch run reached the Metal draw host with `result=0`; an opt-in diagnostic
+readback showed a nonblack center pixel. `tests/run-rdgpu-metal-triangle.py`
+reproduces that check. The production route does not perform that diagnostic
+IOSurface CPU readback unless `RDMETAL_VERIFY_DRAW_PIXEL=1` is set. This is
+one GLES draw, not a zero-softpipe desktop proof.
+
 | Area | Verified or present | Missing for this contract |
 | --- | --- | --- |
 | Boot and TTY | systemd reaches getty; isolated tests logged into Bash; tty1–tty6 gettys and TTY2 prompt verified | login → DE → logout cycle in the GUI |

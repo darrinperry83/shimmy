@@ -157,7 +157,9 @@ static IOSurfaceRef fixture_resolve(uint64_t handle,void *context){
             (unsigned long long)handle,image_count);
     for(unsigned i=0;i<image_count;i++)
         if(images[i].sequence==handle&&metal_fixture)
-            return rdgpu_test_export_surface(metal_fixture,images[i].lease,1);
+            return atomic_load(&gate_mode)==1?
+                rdgpu_local_draw_surface(metal_fixture,images[i].lease,1):
+                rdgpu_test_export_surface(metal_fixture,images[i].lease,1);
     fprintf(stderr,"RDMETAL_FIXTURE_RESOLVE_DENY handle=%llu image_count=%u seq0=%llu seq1=%llu\n",
             (unsigned long long)handle,image_count,
             (unsigned long long)(image_count>0?images[0].sequence:0),
@@ -204,8 +206,12 @@ static long fixture_draw_submit(void *context,const RDGPUDrawBatchRequest *heade
                                   texture_bridge?fixture_texture_resolve:NULL,
                                   texture_bridge?fixture_texture_complete:NULL,
                                   NULL);
+    if(result==RDGPU_DRAW_OK&&atomic_load(&gate_mode)==1&&
+       !rdgpu_local_draw_complete(metal_fixture,m->lease,1))
+        result=RDGPU_DRAW_DENIED;
     fprintf(stderr,"RDMETAL_FIXTURE_DRAW result=%d bytes=%zu\n",result,bytes);
-    if(result==RDGPU_DRAW_OK){
+    if(result==RDGPU_DRAW_OK&&
+       (atomic_load(&gate_mode)!=1||getenv("RDMETAL_VERIFY_DRAW_PIXEL"))){
         /* Read the center pixel back from the broker target to prove the
          * sampled texture produced a non-black draw (fixture-only proof). */
         IOSurfaceRef image=rdgpu_test_export_surface(metal_fixture,m->lease,1);
@@ -492,7 +498,7 @@ static long mock_fd_export(void *ctx,pid_t actual,const uint8_t lease[16],
             rdgpu_test_return_surface(metal_fixture,lease,generation,image);
             image=NULL;return -EINVAL;
         }
-        if(image&&m->hasExpectedClear){
+        if(image&&m->hasExpectedClear&&atomic_load(&gate_mode)!=1){
             if(IOSurfaceLock(image,kIOSurfaceLockReadOnly,NULL)!=kIOReturnSuccess){
                 rdgpu_test_return_surface(metal_fixture,lease,generation,image);
                 return -EIO;

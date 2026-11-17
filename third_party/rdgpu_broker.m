@@ -54,6 +54,27 @@ static RDGPUSession *create_session(pid_t actualPeer){
 RDGPUSession *rdgpu_local_session_create(void){
     return create_session(getpid());
 }
+IOSurfaceRef rdgpu_local_draw_surface(RDGPUSession *s,
+                                      const uint8_t lease[16],uint64_t generation){
+    if(!s||getpid()!=s->actualPeer)return NULL;
+    pthread_mutex_lock(&s->lock);
+    ImageSlot *slot=find(s,lease,generation);
+    IOSurfaceRef surface=slot&&!slot->fence&&!slot->exportRefs?
+        rd_metal_image_surface(slot->image):NULL;
+    if(surface)CFRetain(surface);
+    pthread_mutex_unlock(&s->lock);
+    return surface;
+}
+bool rdgpu_local_draw_complete(RDGPUSession *s,
+                               const uint8_t lease[16],uint64_t generation){
+    if(!s||getpid()!=s->actualPeer)return false;
+    pthread_mutex_lock(&s->lock);
+    ImageSlot *slot=find(s,lease,generation);
+    bool valid=slot&&!slot->fence&&!slot->exportRefs;
+    if(valid)slot->completed=true;
+    pthread_mutex_unlock(&s->lock);
+    return valid;
+}
 RDGPUSession *rdgpu_test_session_create(pid_t actualPeer,
                                         RDGPUVerifyTestPeer verify,void *context){
     // A null verifier fails closed. The caller obtains actualPeer from the OS,

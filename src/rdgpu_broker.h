@@ -19,6 +19,11 @@ typedef void (*RDGPURevokeTestExport)(void *context,uint64_t receipt);
 /* Same-process broker entry. The host shim obtains its peer identity from
  * getpid(); no guest-provided PID or unauthenticated socket is accepted. */
 RDGPUSession *rdgpu_local_session_create(void);
+/* Synchronous local draw only; draw_execute releases the retained surface. */
+IOSurfaceRef rdgpu_local_draw_surface(RDGPUSession *session,
+                                      const uint8_t lease[16],uint64_t generation);
+bool rdgpu_local_draw_complete(RDGPUSession *session,
+                               const uint8_t lease[16],uint64_t generation);
 
 /* Host-only fixture entry. A broker in a different process still requires
  * signed-shim attestation and a kernel-authenticated connection. Never
