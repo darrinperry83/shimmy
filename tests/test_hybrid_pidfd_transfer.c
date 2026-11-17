@@ -48,7 +48,8 @@ static int recv_fd(int socket_fd) {
 int main(void) {
   char dir[] = "/tmp/rdhybrid-pfd-XXXXXX";
   if (!mkdtemp(dir) || setenv("RDSOCKETGROUP", dir, 1) ||
-      setenv("RDPIDFD_TRANSFER", "1", 1)) return 1;
+      setenv("RDNATIVE_SESSION", "1", 1) ||
+      unsetenv("RDPIDFD_TRANSFER")) return 1;
   int ready[2], stop[2], channel[2];
   if (pipe(ready) || pipe(stop) || socketpair(AF_UNIX, SOCK_STREAM, 0, channel)) return 2;
   pid_t target = fork(); if (target < 0) return 3;

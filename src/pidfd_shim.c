@@ -41,7 +41,11 @@ static int socket_mode_enabled(void) {
 }
 static int transfer_mode_enabled(void) {
   const char* s = getenv("RDPIDFD_TRANSFER");
-  return s && *s == '1';
+  /* A real systemd boot must be able to pass pidfds to logind. Darwin cannot
+   * send a kqueue over SCM_RIGHTS, so select the authenticated socket-backed
+   * transfer automatically for native sessions. Preserve an explicit opt-out
+   * for diagnostics and the old opt-in for standalone compatibility tests. */
+  return s ? *s == '1' : getenv("RDNATIVE_SESSION") != NULL;
 }
 static int transferable_socket_fd(int fd) {
   struct stat st;

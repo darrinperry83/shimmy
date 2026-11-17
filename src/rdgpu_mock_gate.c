@@ -43,6 +43,8 @@ struct mock_image {
     uint64_t sequence;
     int exported;
     RDCarrier *carrier;
+    int carrierFd;
+    uint64_t frameGeneration;
     IOSurfaceRef retainedSurface;
     dev_t device;         /* carrier identity for the cross-process handoff */
     ino_t inode;
@@ -143,6 +145,7 @@ static void fixture_cleanup(void){
         struct mock_image *m=&images[i];
         if(m->device&&m->inode){rdgpu_handoff_revoke(m->device,m->inode);m->device=0;m->inode=0;}
         if(m->carrier){rd_carrier_destroy(m->carrier);m->carrier=NULL;}
+        if(m->carrierFd>0){close(m->carrierFd);m->carrierFd=0;}
         if(m->retainedSurface&&metal_fixture){
             rdgpu_test_return_surface(metal_fixture,m->lease,1,m->retainedSurface);
             m->retainedSurface=NULL;
@@ -151,10 +154,34 @@ static void fixture_cleanup(void){
     if(metal_fixture){rdgpu_session_disconnect(metal_fixture);metal_fixture=NULL;}
     if(texture_bridge){rdgpu_texture_bridge_destroy(texture_bridge);texture_bridge=NULL;}
 }
+struct fixture_draw_resolve_context { uint64_t target_handle; };
 static IOSurfaceRef fixture_resolve(uint64_t handle,void *context){
-    (void)context;
     fprintf(stderr,"RDMETAL_FIXTURE_RESOLVE_ENTER handle=%llu image_count=%u\n",
             (unsigned long long)handle,image_count);
+    if(atomic_load(&gate_mode)==1&&context&&metal_fixture){
+        const struct fixture_draw_resolve_context *draw=context;
+        /* Guest handles are chosen by RDGPUGuestState after CREATE returns.
+         * The older sequence cache only learned a handle after that image
+         * was itself a draw target, so a cleared image could not be sampled.
+         * The guest slot lock is held throughout this synchronous draw. */
+        for(unsigned i=0;i<RDGPU_MAX_IMAGES_PER_PEER;i++){
+            RDGPUGuestSlot *slot=&state.slots[i];
+            if(slot->handle!=handle||slot->generation!=1||
+               !find_image(slot->lease))continue;
+            IOSurfaceRef found=handle==draw->target_handle?
+                rdgpu_local_draw_surface(metal_fixture,slot->lease,1):
+                rdgpu_local_sample_surface(metal_fixture,slot->lease,1);
+            if(getenv("RDMETAL_TRACE_DRAW"))
+                fprintf(stderr,"RDMETAL_FIXTURE_SLOT_RESOLVE handle=%llu target=%d complete=%d fence=%llu surface=%d\n",
+                        (unsigned long long)handle,handle==draw->target_handle,
+                        slot->producerComplete,(unsigned long long)slot->drawFence,found!=NULL);
+            return found;
+        }
+        if(getenv("RDMETAL_TRACE_DRAW"))
+            fprintf(stderr,"RDMETAL_FIXTURE_SLOT_MISS handle=%llu\n",
+                    (unsigned long long)handle);
+        return NULL;
+    }
     for(unsigned i=0;i<image_count;i++)
         if(images[i].sequence==handle&&metal_fixture)
             return atomic_load(&gate_mode)==1?
@@ -184,6 +211,15 @@ static int fixture_texture_release(void *context,uint64_t handle,uint64_t genera
             (unsigned long long)handle,(unsigned long long)generation,rc);
     return rc;
 }
+static int fixture_image_upload(void *context,pid_t actual,
+                                const uint8_t lease[16],uint64_t generation,
+                                uint32_t source_format,const void *snapshot,
+                                size_t bytes){
+    (void)context;
+    if(actual!=getpid()||!metal_fixture)return -EPERM;
+    return rdgpu_local_upload_image(metal_fixture,lease,generation,
+                                    source_format,snapshot,bytes);
+}
 static void *fixture_texture_resolve(uint64_t handle,uint64_t generation,void *context){
     (void)context;
     return rdgpu_texture_bridge_acquire(texture_bridge,handle,generation);
@@ -202,7 +238,8 @@ static long fixture_draw_submit(void *context,const RDGPUDrawBatchRequest *heade
     /* The resolver's handle is scoped to this exact lease. This synchronous
      * Metal execution is fixture-only; the real broker needs async fences. */
     m->sequence=header->target_handle;
-    int result=rdgpu_draw_execute(packet,bytes,fixture_resolve,NULL,
+    struct fixture_draw_resolve_context resolve={.target_handle=header->target_handle};
+    int result=rdgpu_draw_execute(packet,bytes,fixture_resolve,&resolve,
                                   texture_bridge?fixture_texture_resolve:NULL,
                                   texture_bridge?fixture_texture_complete:NULL,
                                   NULL);
@@ -301,6 +338,7 @@ static RDGPUReply mock_transport(void *opaque,const RDGPURequest *q){
                     m->device=0;m->inode=0;
                 }
                 if(m->carrier){rd_carrier_destroy(m->carrier);m->carrier=NULL;}
+                if(m->carrierFd>0){close(m->carrierFd);m->carrierFd=0;}
                 m->exported=0;
                 m->hasExpectedClear=0;
                 memset(m->lease,0,16);
@@ -365,6 +403,8 @@ static void abort_export(void *opaque,pid_t pid,const uint8_t token[16],uint64_t
 }
 static long mock_fd_export(void *,pid_t,const uint8_t [16],uint64_t,
                            uint64_t,uint64_t,uint32_t,uint32_t,uint32_t);
+static int mock_frame_begin(void *,pid_t,const uint8_t [16],uint64_t);
+static int mock_frame_complete(void *,pid_t,const uint8_t [16],uint64_t,uint64_t);
 static int mock_fd_import(void *ctx,pid_t actual,int fd,uint8_t lease_out[16]);
 static long mock_stride(void *ctx,pid_t actual,const uint8_t lease[16],
                          uint64_t generation,uint32_t width,uint32_t height){
@@ -392,8 +432,18 @@ static long mock_stride(void *ctx,pid_t actual,const uint8_t lease[16],
     if(metal_fixture){
         if(actual!=getpid()||!m||generation!=1||m->width!=width||
            m->height!=height){fprintf(stderr,"RDMETAL_FIXTURE_STRIDE_DENY identity\n");return -EPERM;}
+        if(atomic_load(&gate_mode)==1){
+            uint32_t image_width=0,image_height=0,stride=0;
+            if(!rdgpu_local_image_geometry(metal_fixture,lease,generation,
+                                           &image_width,&image_height,&stride)||
+               image_width!=width||image_height!=height)return -EPERM;
+            return stride;
+        }
         IOSurfaceRef image=rdgpu_test_export_surface(metal_fixture,lease,generation);
-        if(!image){fprintf(stderr,"RDMETAL_FIXTURE_STRIDE_FALLBACK width=%u\n",width);return width<=4096?(long)width*4:-EPERM;}
+        if(!image){
+            fprintf(stderr,"RDMETAL_FIXTURE_STRIDE_FALLBACK width=%u\n",width);
+            return width<=4096?(long)width*4:-EPERM;
+        }
         long stride=(long)IOSurfaceGetBytesPerRow(image);
         rdgpu_test_return_surface(metal_fixture,lease,generation,image);
         fprintf(stderr,"RDMETAL_FIXTURE_STRIDE_OK stride=%ld\n",stride);
@@ -449,8 +499,14 @@ static void init(void){
         rdgpu_guest_set_texture_transport(&state,fixture_texture_upload,
                                           fixture_texture_release,NULL);
     rdgpu_guest_set_fd_export_transport(&state,mock_fd_export,NULL);
+    if(local_metal)
+        rdgpu_guest_set_fd_frame_transport(&state,mock_frame_begin,
+                                           mock_frame_complete,NULL);
     rdgpu_guest_set_fd_import_transport(&state,mock_fd_import,NULL);
     rdgpu_guest_set_image_stride_transport(&state,mock_stride,NULL);
+    if(local_metal)
+        rdgpu_guest_set_image_upload_transport(&state,fixture_image_upload,
+                                               gmem_guest_export_copyin,NULL);
 }
 static void mock_return(void *context,const uint8_t lease[16],uint64_t generation){
     (void)context;(void)generation;
@@ -489,9 +545,41 @@ static long mock_fd_export(void *ctx,pid_t actual,const uint8_t lease[16],
         fprintf(stderr,"RDMESA_SOCKET_CARRIER_ISSUED exact_lease=1 fd=%d\n",received);
         return received;
     }
+    if(atomic_load(&gate_mode)==1){
+        RDCarrier *table=rd_carrier_create(getpid(),1,mock_return,NULL);
+        RDCarrierFormat format={width,height,stride,RDCARRIER_ARGB8888,0};
+        RDCarrierCapability capability={handle,generation};
+        int fd=-1;
+        if(!table||!rd_carrier_issue_pending(table,lease,generation,format,
+                                              capability,&fd)){
+            rd_carrier_destroy(table);return -EIO;
+        }
+        int keeper=fcntl(fd,F_DUPFD_CLOEXEC,0);
+        struct stat st={0};
+        int pending=keeper<0||fstat(fd,&st)?-EIO:
+                    rdgpu_handoff_register_pending_fd(fd);
+        if(pending){
+            if(keeper>=0)close(keeper);
+            close(fd);rd_carrier_destroy(table);return pending;
+        }
+        m->carrier=table;m->carrierFd=keeper;
+        m->device=st.st_dev;m->inode=st.st_ino;
+        /* Export may also follow an already-completed clear. Publish exactly
+         * that completed fence; a pre-draw export (fence=0) stays pending. */
+        if(fence&&mock_frame_complete(NULL,actual,lease,generation,fence)){
+            rdgpu_handoff_revoke(m->device,m->inode);
+            close(m->carrierFd);m->carrierFd=0;
+            rd_carrier_destroy(m->carrier);m->carrier=NULL;
+            m->device=0;m->inode=0;close(fd);return -EIO;
+        }
+        fprintf(stderr,"RDMESA_CARRIER_PENDING fd=%d dev=%d ino=%llu\n",
+                fd,(int)st.st_dev,(unsigned long long)st.st_ino);
+        return fd;
+    }
     IOSurfaceRef image=NULL;
     if(metal_fixture){
         image=rdgpu_test_export_surface(metal_fixture,lease,generation);
+        if(!image&&atomic_load(&gate_mode)==1)return -EPERM;
         if(image&&(IOSurfaceGetWidth(image)!=width||IOSurfaceGetHeight(image)!=height||
            IOSurfaceGetBytesPerRow(image)!=stride||
            IOSurfaceGetPixelFormat(image)!=0x42475241u)){
@@ -566,6 +654,30 @@ static long mock_fd_export(void *ctx,pid_t actual,const uint8_t lease[16],
             image!=NULL);
     return fd;
 }
+static int mock_frame_begin(void *ctx,pid_t actual,const uint8_t lease[16],
+                            uint64_t generation){
+    (void)ctx;
+    struct mock_image *m=find_image(lease);
+    if(actual!=getpid()||generation!=1||!m||!m->carrier||m->carrierFd<0)
+        return -EPERM;
+    return rdgpu_handoff_begin_write_fd(m->carrierFd);
+}
+static int mock_frame_complete(void *ctx,pid_t actual,const uint8_t lease[16],
+                               uint64_t generation,uint64_t fence){
+    (void)ctx;
+    struct mock_image *m=find_image(lease);
+    if(actual!=getpid()||generation!=1||!fence||!m||!m->carrier||
+       m->carrierFd<0||!metal_fixture)return -EPERM;
+    if(!rd_carrier_arm_fence(m->carrier,lease,generation,fence)||
+       !rd_carrier_complete(m->carrier,lease,generation,fence))return -EIO;
+    IOSurfaceRef image=rdgpu_test_export_surface(metal_fixture,lease,generation);
+    if(!image)return -EIO;
+    uint64_t next=m->frameGeneration+1;
+    int result=rdgpu_handoff_publish_completed_fd(m->carrierFd,image,next);
+    rdgpu_test_return_surface(metal_fixture,lease,generation,image);
+    if(!result)m->frameGeneration=next;
+    return result;
+}
 /* op 12 IMPORT_FD: resolve a re-imported dma-buf carrier fd back to the broker
  * lease of the exact image the guest just exported. The fd's fstat(st_dev,
  * st_ino) is matched against each issued carrier (rd_carrier_matches_fd, the
@@ -602,9 +714,25 @@ long rdgpu_mock_gate(uint64_t op,uint64_t a1,uint64_t a2,uint64_t a3,
 long rdgpu_metal_gate(uint64_t op,uint64_t a1,uint64_t a2,uint64_t a3,
                       uint64_t a4,uint64_t a5){
     int expected=0;
-    if(!atomic_compare_exchange_strong(&gate_mode,&expected,1)&&expected!=1)
+    if(!atomic_compare_exchange_strong(&gate_mode,&expected,1)&&expected!=1){
+        if(op==0&&getenv("RDMETAL_GATE_DEBUG"))
+            fprintf(stderr,"RDMETAL_CAPABILITY mode_conflict=%d pid=%d\n",expected,getpid());
         return -EPERM;
+    }
     pthread_once(&once,init);
-    if(init_failed||!metal_fixture||!texture_bridge)return -ENODEV;
+    if(init_failed||!metal_fixture||!texture_bridge){
+        if(op==0&&getenv("RDMETAL_GATE_DEBUG"))
+            fprintf(stderr,"RDMETAL_CAPABILITY unavailable init=%d metal=%d texture=%d pid=%d\n",
+                    init_failed,metal_fixture!=NULL,texture_bridge!=NULL,getpid());
+        return -ENODEV;
+    }
+    /* A read-only capability probe lets Mesa fail closed before advertising
+     * a Metal renderer. It cannot consume a broker image lease. */
+    if(op==0){
+        long result=(a1||a2||a3||a4||a5)?-EINVAL:0x52444d01L;
+        if(getenv("RDMETAL_GATE_DEBUG"))
+            fprintf(stderr,"RDMETAL_CAPABILITY result=%ld pid=%d\n",result,getpid());
+        return result;
+    }
     return rdgpu_guest_syscall(&state,op,a1,a2,a3,a4,a5);
 }

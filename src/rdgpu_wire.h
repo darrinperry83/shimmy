@@ -11,7 +11,12 @@
 #define RDGPU_MAX_IMAGE_EDGE 4096u
 #define RDGPU_MAX_IMAGE_BYTES (64u*1024u*1024u)
 #define RDGPU_MAX_IMAGES_PER_PEER 16u
-#define RDGPU_MAX_BYTES_PER_PEER (256u*1024u*1024u)
+/* Two high-DPI outputs plus compositor snapshot/blur surfaces exceed 256 MiB.
+ * This is a ceiling, not a preallocation; image count stays bounded too. */
+#define RDGPU_MAX_BYTES_PER_PEER (512ull*1024u*1024u)
+#define RDGPU_UPLOAD_BGRA8 1u
+#define RDGPU_UPLOAD_RGBA8 2u
+#define RDGPU_UPLOAD_BGRX8 3u
 
 enum RDGPUOp { RDGPU_CREATE_BGRA8=1, RDGPU_CLEAR=2, RDGPU_WAIT=3,
                RDGPU_RELEASE=4, RDGPU_PREPARE_EXPORT=5 };

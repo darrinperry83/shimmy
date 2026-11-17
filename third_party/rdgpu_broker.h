@@ -19,13 +19,27 @@ typedef void (*RDGPURevokeTestExport)(void *context,uint64_t receipt);
 /* Same-process broker entry. The host shim obtains its peer identity from
  * getpid(); no guest-provided PID or unauthenticated socket is accepted. */
 RDGPUSession *rdgpu_local_session_create(void);
+/* Metadata query is available before first render; it grants no image access. */
+bool rdgpu_local_image_geometry(RDGPUSession *session,
+                                const uint8_t lease[16],uint64_t generation,
+                                uint32_t *width,uint32_t *height,uint32_t *stride);
 /* Synchronous local draw only: the caller holds its guest slot lock until
  * draw_execute returns and calls draw_complete. The returned surface is
  * retained for draw_execute, which releases it. It is not an export grant. */
 IOSurfaceRef rdgpu_local_draw_surface(RDGPUSession *session,
                                       const uint8_t lease[16],uint64_t generation);
+/* A completed image may be sampled as an input by a synchronous draw in the
+ * same attested guest session. The caller releases the returned CF reference. */
+IOSurfaceRef rdgpu_local_sample_surface(RDGPUSession *session,
+                                        const uint8_t lease[16],uint64_t generation);
 bool rdgpu_local_draw_complete(RDGPUSession *session,
                                const uint8_t lease[16],uint64_t generation);
+/* Synchronous upload into an EXISTING broker-owned BGRA8 IOSurface. The source
+ * is a checked guest snapshot; no new image or export right is minted. */
+int rdgpu_local_upload_image(RDGPUSession *session,
+                             const uint8_t lease[16],uint64_t generation,
+                             uint32_t source_format,const void *pixels,
+                             size_t bytes);
 
 /* Host-only fixture entry. A broker in a different process still requires
  * signed-shim attestation and a kernel-authenticated connection. Never

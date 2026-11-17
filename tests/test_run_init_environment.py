@@ -1,7 +1,7 @@
 """Check the host-to-guest environment contract for a normal init launch.
 
-The fake shim keeps this test off the user's running root and GUI. build_guest_env()
-consumes the empty RDENV entries when the real shim starts.
+The fake shim keeps this test off the user's running root and GUI. Native
+build_guest_env() omits the nested display and runtime defaults.
 """
 
 import json
@@ -43,10 +43,10 @@ with tempfile.TemporaryDirectory(prefix="shimmy-init-env-") as tmp:
     assert result["env"] == {
         "RDUID0": "1",
         "RDNATIVE_SESSION": "1",
-        "LIBGL_ALWAYS_INDIRECT": "",
-        "RDENV_WAYLAND_DISPLAY": "",
-        "RDENV_DISPLAY": "",
-        "RDENV_XDG_RUNTIME_DIR": "",
+        "LIBGL_ALWAYS_INDIRECT": "1",  # host value; real shim drops guest copy
+        "RDENV_WAYLAND_DISPLAY": None,
+        "RDENV_DISPLAY": None,
+        "RDENV_XDG_RUNTIME_DIR": None,
         "RDENV_LIBGL_ALWAYS_INDIRECT": "",
     }, result
     for tty in range(2, 7):

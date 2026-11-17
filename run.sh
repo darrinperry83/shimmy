@@ -107,14 +107,12 @@ if [ "$BOOT_INIT" = 1 ]; then
   # systemd must believe it is uid 0. (A full systemd-as-PID-1 boot additionally needs the
   # shim to report getpid()==1 to the init process — see the live-boot notes. That mapping
   # lives in the shim's syscall layer, not here; this script only wires the exec path.)
-  # A booted display manager must establish its own seat, runtime directory and display
-  # socket. build_guest_env() otherwise injects the nested shim defaults (wayland-0,
-  # DISPLAY=:0, XDG_RUNTIME_DIR=/tmp and indirect GL) into PID 1 and every service it
-  # starts. Empty RDENV_* entries shadow those defaults and are then removed from the
-  # guest environment; the display manager can set the real values for its user session.
-  RDENV_WAYLAND_DISPLAY= RDENV_DISPLAY= RDENV_XDG_RUNTIME_DIR= \
-  LIBGL_ALWAYS_INDIRECT= RDENV_LIBGL_ALWAYS_INDIRECT= RDNATIVE_SESSION=1 RDUID0=1 \
-  RDSOCKETGROUP="$GRP" RDPIDFD_TRANSFER=1 RDSOCKETOUTQ_COMPAT=1 \
+  # Native session mode omits the nested display/runtime defaults. PAM/logind
+  # creates XDG_RUNTIME_DIR after login, and the chosen compositor sets its
+  # own Wayland display. Only remove an explicitly inherited indirect-GL hint.
+  RDNATIVE_SESSION=1 RDUID0=1 \
+  RDENV_LIBGL_ALWAYS_INDIRECT= \
+  RDSOCKETGROUP="$GRP" \
     exec "$SHIM" "$ROOT" /sbin/init "$@"
 fi
 
@@ -138,16 +136,12 @@ if [ "$ROOTFS_TYPE" = omarchy ]; then
   # flip is what drm_present_fb stages and window.m hands to the Dock's direct-scanout
   # service — no nested wayland-0 involved. Its inner wayland-1 socket (where
   # quickshell/foot connect) is shared via RDSOCKETGROUP/RDUNIXPREFIX.
-  # The shim's default syscall-0x2002 route is the local Metal broker. The
-  # older Mesa binary still calls its direct-mode selector SHIM_OP5_MOCK;
-  # that guest setting does not enable the host mock gate. RDENV_* is passed
-  # to the guest driver. The Mesa softpipe fallback remains a separate gap.
-  RDMETAL_VIRTUAL_DMABUF_TEST=1 \
+  # The shim's default syscall-0x2002 route is the local Metal broker.
+  # The installed Mesa driver must select its authenticated Metal path
+  # without guest-set RDMETAL flags.
   RDSOCKETGROUP="$GRP" RDUNIXPREFIX="$GRP" \
   RDENV_XDG_RUNTIME_DIR=/tmp \
   RDENV_LIBSEAT_BACKEND=noop \
-  RDENV_RDMETAL_DIRECT_RESOURCE=1 RDENV_RDMETAL_SHIM_OP5_MOCK=1 \
-  RDENV_RDMETAL_USE_DMABUF=1 RDENV_RDMETAL_VIRTUAL_DMABUF_TEST=1 \
   WLSRV_DEBUG=1 RDDRM_TRACE=1 \
   exec "$SHIM" "$ROOT" /usr/bin/Hyprland --config /usr/share/omarchy/omarchy.lua --i-am-really-stupid
 fi

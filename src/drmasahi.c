@@ -22,6 +22,7 @@
 // RDDRM_TRACE=1  log every ioctl
 #include "drmasahi.h"
 #include "rdgpu_surface_handoff.h"
+#include "session_gpu_frame.h"
 
 #include "rdgpu_native_output.h"
 
@@ -40,6 +41,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
+#include <pthread.h>
+#include <time.h>
 
 // Present bridge to the Metal window. Declared + defined WEAK here so the headless builds
 // (shim_cli, shim_wlh) link without window.m; the GUI build's strong definition in window.m
@@ -60,6 +63,30 @@ __attribute__((weak)) long gpuwin_present_crtc(const uint8_t* px, uint64_t w, ui
   return gpuwin_present_fmt(px, w, h, bgra);   // headless fallback: primary only
 }
 
+// The GUI override wraps a completed IOSurface in a Metal texture. A headless
+// process cannot claim to have scanned out the image.
+#ifndef RDGPU_KMS_TEST
+__attribute__((weak)) long gpuwin_present_iosurface_crtc(IOSurfaceRef surface, uint32_t crtc_id,
+                                                         uint64_t generation) {
+  (void)surface; (void)crtc_id; (void)generation;
+  return -ENODEV;
+}
+
+// The completed-frame handoff supplies strong definitions in the integrated
+// build. A build without that broker cannot classify an fd as a Metal carrier.
+__attribute__((weak)) int rdgpu_handoff_is_pending_fd(int fd) { (void)fd; return 0; }
+__attribute__((weak)) int rdgpu_handoff_frame_ready_fd(int fd, uint64_t* generation) {
+  (void)fd; if (generation) *generation = 0; return 0;
+}
+__attribute__((weak)) int rdgpu_handoff_consumer_acquire_fd(int fd, uint64_t generation) {
+  (void)fd; (void)generation; return -ENOSYS;
+}
+__attribute__((weak)) int rdgpu_handoff_consumer_release_fd(int fd, uint64_t generation) {
+  (void)fd; (void)generation; return -ENOSYS;
+}
+__attribute__((weak)) int rdgpu_handoff_is_carrier_fd(int fd) { (void)fd; return 0; }
+#endif
+
 #define IOC_NRSHIFT    0
 #define IOC_TYPESHIFT  8
 #define IOC_SIZESHIFT  16
@@ -72,6 +99,8 @@ __attribute__((weak)) long gpuwin_present_crtc(const uint8_t* px, uint64_t w, ui
 #define DRM_TYPE          'd'
 #define DRM_COMMAND_BASE  0x40
 #define DRM_NR_VERSION    0x00
+#define DRM_NR_GET_MAGIC  0x02
+#define DRM_NR_AUTH_MAGIC 0x11
 #define DRM_NR_GEM_CLOSE  0x09
 #define DRM_NR_SET_MASTER 0x1e
 #define DRM_NR_DROP_MASTER 0x1f
@@ -479,6 +508,28 @@ static int tracing(void);
 static struct { int fd, minor; } g_fds[MAXFD];
 static int g_nfd;
 static int g_master_owner_fd = -1, g_master_lock_fd = -1;
+static int g_gpu_master_registered;
+static int gpu_session_child(pid_t* owner, session_gpu_epoch* epoch) {
+  if (!getenv("RDNATIVE_SESSION")) return 0;
+  const char* root = getenv("RDVT_ROOT_PID");
+  if (!root || !*root) return 0;
+  char* end = NULL;
+  long pid = strtol(root, &end, 10);
+  if (!end || *end || pid <= 1 || pid > INT32_MAX || pid == (long)getpid()) return 0;
+  if (owner) *owner = (pid_t)pid;
+  if (epoch && session_gpu_epoch_parse(getenv("RDGPU_SESSION_EPOCH"), epoch)) return -EINVAL;
+  return 1;
+}
+// Legacy primary-node authentication used when a compositor reopens card0.
+// A magic identifies one live open file description, never a pathname or fd
+// number (both can be reused). Render nodes do not participate in this API.
+struct drm_magic_slot {
+  unsigned long long dev, ino;
+  uint32_t magic;
+};
+#define MAX_DRM_MAGIC 64
+static struct drm_magic_slot g_magic[MAX_DRM_MAGIC];
+static pthread_mutex_t g_magic_lock = PTHREAD_MUTEX_INITIALIZER;
 __attribute__((weak_import)) extern int shim_fd_reserve(int fd);
 __attribute__((weak_import)) extern void shim_fd_unreserve(int fd);
 
@@ -492,12 +543,76 @@ static int drm_fd_identity(int fd, unsigned long long* dev, unsigned long long* 
 
 static void drm_master_release(void) {
   if (g_master_lock_fd >= 0) {
+    pid_t owner = 0;
+    session_gpu_epoch epoch;
+    if (g_gpu_master_registered && gpu_session_child(&owner, &epoch) > 0) {
+      int rc = session_gpu_child_unregister_master(owner, epoch, g_master_lock_fd);
+      if (rc) fprintf(stderr, "DRM_MASTER_GPU_REVOKE pid=%d rc=%d\n", getpid(), rc);
+    }
+    g_gpu_master_registered = 0;
     (void)flock(g_master_lock_fd, LOCK_UN);
     if (shim_fd_unreserve) shim_fd_unreserve(g_master_lock_fd);
     close(g_master_lock_fd);
     g_master_lock_fd = -1;
   }
   g_master_owner_fd = -1;
+}
+
+static long drm_master_ioctl(int fd, unsigned nr);
+
+static long drm_magic_ioctl(int fd, unsigned nr, uint32_t *magic) {
+  if (!magic || drm_minor_of_fd(fd) != 0) return -EINVAL;
+  unsigned long long dev, ino;
+  if (drm_fd_identity(fd, &dev, &ino)) return -EBADF;
+  if (nr == DRM_NR_AUTH_MAGIC) {
+    // libdrm's drmIsMaster(fd) probes AUTH_MAGIC with magic=0. Linux returns
+    // EINVAL to its master and EACCES to another open. The first card open in
+    // the active native session owns master once it acquires our exclusive
+    // per-session lock; this is also when SET_MASTER would claim it.
+    if (*magic == 0 && g_master_owner_fd < 0) {
+      long claim = drm_master_ioctl(fd, DRM_NR_SET_MASTER);
+      return claim == 0 ? -EINVAL : -EACCES;
+    }
+    unsigned long long master_dev, master_ino;
+    if (g_master_owner_fd < 0 ||
+        drm_fd_identity(g_master_owner_fd, &master_dev, &master_ino) ||
+        master_dev != dev || master_ino != ino) return -EACCES;
+    if (*magic == 0) return -EINVAL;
+  }
+  pthread_mutex_lock(&g_magic_lock);
+  if (nr == DRM_NR_GET_MAGIC) {
+    int free_slot = -1;
+    for (int i = 0; i < MAX_DRM_MAGIC; i++) {
+      if (g_magic[i].magic && g_magic[i].dev == dev && g_magic[i].ino == ino) {
+        *magic = g_magic[i].magic;
+        pthread_mutex_unlock(&g_magic_lock);
+        return 0;
+      }
+      if (!g_magic[i].magic && free_slot < 0) free_slot = i;
+    }
+    if (free_slot < 0) { pthread_mutex_unlock(&g_magic_lock); return -ENOSPC; }
+    uint32_t candidate;
+    do {
+      candidate = arc4random();
+      if (!candidate) continue;
+      int used = 0;
+      for (int i = 0; i < MAX_DRM_MAGIC; i++)
+        if (g_magic[i].magic == candidate) used = 1;
+      if (!used) break;
+    } while (1);
+    g_magic[free_slot] = (struct drm_magic_slot){dev, ino, candidate};
+    *magic = candidate;
+    pthread_mutex_unlock(&g_magic_lock);
+    return 0;
+  }
+  for (int i = 0; i < MAX_DRM_MAGIC; i++)
+    if (g_magic[i].magic == *magic) {
+      g_magic[i] = (struct drm_magic_slot){0};
+      pthread_mutex_unlock(&g_magic_lock);
+      return 0;
+    }
+  pthread_mutex_unlock(&g_magic_lock);
+  return -EINVAL;
 }
 
 static long drm_master_ioctl(int fd, unsigned nr) {
@@ -533,6 +648,19 @@ static long drm_master_ioctl(int fd, unsigned nr) {
     g_master_lock_fd = shim_fd_reserve ? shim_fd_reserve(lockfd) : lockfd;
   }
   g_master_owner_fd = fd;
+  pid_t owner = 0;
+  session_gpu_epoch epoch;
+  int native_child = gpu_session_child(&owner, &epoch);
+  if (native_child < 0) { drm_master_release(); return native_child; }
+  if (native_child > 0) {
+    int rc = session_gpu_child_register_master(owner, epoch, g_master_lock_fd);
+    if (rc) {
+      fprintf(stderr, "DRM_MASTER_GPU_REGISTER pid=%d rc=%d\n", getpid(), rc);
+      drm_master_release();
+      return rc;
+    }
+    g_gpu_master_registered = 1;
+  }
   return 0;
 }
 
@@ -544,27 +672,36 @@ static long drm_master_ioctl(int fd, unsigned nr) {
 #define MAX_GEM 64
 struct gem_slot {
   uint32_t handle;
-  int fd;                 // carrier fd at import time (identity only; not owned)
+  int fd;                 // owned duplicate: identity survives caller close/SCM_RIGHTS
   dev_t device;
   ino_t inode;
-  IOSurfaceRef surface;   // CFRetained, NULL until resolved
-  int resolved;
+  unsigned handle_refs;
+  unsigned fb_refs;
+  int used;
 };
 static struct gem_slot g_gem[MAX_GEM];
+static uint32_t g_next_gem_handle = 1;
 static uint32_t g_next_fb = 1;   // framebuffer ids minted by MODE_ADDFB2
 
 static struct gem_slot* gem_find_by_handle(uint32_t handle) {
   for (int i = 0; i < MAX_GEM; i++)
-    if (g_gem[i].resolved && g_gem[i].handle == handle) return &g_gem[i];
+    if (g_gem[i].used && g_gem[i].handle == handle) return &g_gem[i];
+  return NULL;
+}
+static struct gem_slot* gem_find_by_identity(dev_t device, ino_t inode) {
+  for (int i = 0; i < MAX_GEM; i++)
+    if (g_gem[i].used && g_gem[i].device == device && g_gem[i].inode == inode) return &g_gem[i];
   return NULL;
 }
 static void gem_release_slot(struct gem_slot* g) {
   if (!g) return;
-  if (g->surface) { CFRelease(g->surface); g->surface = NULL; }
-  /* Retire the import-side handoff entry too, so a bounded frame pool can
-   * run more than RDGPU_HANDOFF_MAX_SURFACES frames. */
-  if (g->device && g->inode) rdgpu_handoff_revoke(g->device, g->inode);
+  if (g->fd >= 0) close(g->fd);
+  // The producer owns publication and revocation. Closing an imported GEM
+  // must never revoke the producer's still-live IOSurface identity.
   memset(g, 0, sizeof *g);
+}
+static void gem_maybe_release(struct gem_slot* g) {
+  if (g && g->used && !g->handle_refs && !g->fb_refs) gem_release_slot(g);
 }
 
 // ---- GEM objects CREATED by the guest (Asahi GEM_CREATE), with CPU backing ----
@@ -784,7 +921,84 @@ static struct fb_slot* fb_find(uint32_t fb_id) {
 }
 static void fb_forget(uint32_t fb_id) {
   struct fb_slot* f = fb_find(fb_id);
-  if (f) memset(f, 0, sizeof *f);
+  if (f) {
+    struct gem_slot* g = gem_find_by_handle(f->handle);
+    if (g && g->fb_refs) { g->fb_refs--; gem_maybe_release(g); }
+    memset(f, 0, sizeof *f);
+  }
+}
+
+struct scanout_frame {
+  int fd;                   // independent of the GEM/FB lifetime
+  uint64_t generation;
+};
+static struct scanout_frame g_scanout[2] = {{.fd = -1}, {.fd = -1}};
+
+// A Metal carrier is an identity token, not a pixel file. Wait a bounded time
+// for the broker's completed draw and never read the sparse carrier mapping.
+static int metal_frame_ready(struct gem_slot* g, uint64_t* generation) {
+  if (!g) return -ENODEV;
+  for (unsigned attempt = 0; attempt < 250; attempt++) {
+    uint64_t n = 0;
+    if (rdgpu_handoff_frame_ready_fd(g->fd, &n) && n) {
+      *generation = n;
+      return 0;
+    }
+    if (attempt == 249) break;
+    struct timespec pause = {.tv_sec = 0, .tv_nsec = 1000000};
+    nanosleep(&pause, NULL);
+  }
+  if (tracing()) {
+    struct stat st = {0};
+    (void)fstat(g->fd, &st);
+    fprintf(stderr, "DRM_METAL_WAIT_TIMEOUT handle=0x%x fd=%d dev=%d ino=%llu pending=%d carrier=%d\n",
+            g->handle, g->fd, (int)st.st_dev, (unsigned long long)st.st_ino,
+            rdgpu_handoff_is_pending_fd(g->fd), rdgpu_handoff_is_carrier_fd(g->fd));
+  }
+  return -EAGAIN;
+}
+
+static int drm_check_fb_ready(uint32_t fb_id) {
+  if (!fb_id) return 0;
+  struct fb_slot* f = fb_find(fb_id);
+  if (!f) return -ENOENT;
+  struct gem_slot* g = gem_find_by_handle(f->handle);
+  if (!g) return 0;         // existing CPU BO path
+  uint64_t generation = 0;
+  return metal_frame_ready(g, &generation);
+}
+
+static int scanout_matches(uint32_t crtc_id, int fd, uint64_t generation) {
+  if (crtc_id < 1 || crtc_id > 2 || fd < 0) return 0;
+  const struct scanout_frame* current = &g_scanout[crtc_id - 1];
+  if (current->fd < 0 || current->generation != generation) return 0;
+  struct stat a, b;
+  return !fstat(current->fd, &a) && !fstat(fd, &b) &&
+         a.st_dev == b.st_dev && a.st_ino == b.st_ino;
+}
+
+/* The ordinary CAMetalLayer path waits for its sample command buffer before
+ * returning. It no longer reads the producer IOSurface after that ACK, so a
+ * compositor may draw into the buffer again. Direct IOSurface scanout retains
+ * the image until a replacement frame is accepted. */
+static int scanout_retains_surface(void) {
+  const char* direct = getenv("RDGPU_SCANOUT_DIRECT_SOURCE");
+  return direct && *direct && *direct != '0';
+}
+
+static void scanout_retire(uint32_t crtc_id, int replacement_fd, uint64_t replacement_generation) {
+  if (crtc_id < 1 || crtc_id > 2) return;
+  struct scanout_frame* old = &g_scanout[crtc_id - 1];
+  if (old->fd < 0) return;
+  if (scanout_matches(crtc_id, replacement_fd, replacement_generation)) return;
+  // The window presenter confirms completion before this point. Never release
+  // a producer frame while a Metal command buffer may still sample it.
+  int released = rdgpu_handoff_consumer_release_fd(old->fd, old->generation);
+  if (released) fprintf(stderr, "DRM_PRESENT_METAL release failed crtc=%u generation=%llu rc=%d\n",
+                        crtc_id, (unsigned long long)old->generation, released);
+  close(old->fd);
+  old->fd = -1;
+  old->generation = 0;
 }
 
 // DRM flip present hook: push the just-committed framebuffer to the Metal window for a given
@@ -792,21 +1006,88 @@ static void fb_forget(uint32_t fb_id) {
 // the BGRA bytes to gpuwin_present_crtc(bgra=1, crtc_id) so the primary (crtc 1) and secondary
 // (crtc 2) outputs each present their own frame. XRGB8888 is already B,G,R,X in memory, so no
 // swizzle — only a stride repack when the dumb pitch has padding the staging upload lacks.
-static void drm_present_fb(uint32_t fb_id, uint32_t crtc_id) {
+static int drm_present_fb(uint32_t fb_id, uint32_t crtc_id) {
   struct fb_slot* f = fb_find(fb_id);
   if (!f || !f->handle) {
     fprintf(stderr, "DRM_PRESENT crtc=%u fb_id=0x%x -> no framebuffer recorded (skip)\n",
             crtc_id, fb_id);
-    return;
+    return -ENOENT;
+  }
+  struct gem_slot* g = gem_find_by_handle(f->handle);
+  if (g) {
+    uint64_t generation = 0;
+    int r = metal_frame_ready(g, &generation);
+    if (r) return r;
+    /* A completed buffer can be presented again after leaving the display.
+     * Hold a consumer reference before resolving it so the producer cannot
+     * begin its next write while Metal is sampling the old generation. */
+    int already_scanning = scanout_matches(crtc_id, g->fd, generation);
+    if (!already_scanning) {
+      r = rdgpu_handoff_consumer_acquire_fd(g->fd, generation);
+      if (r) return r;
+    }
+    IOSurfaceRef surface = rdgpu_handoff_resolve_fd(g->fd);
+    if (!surface) {
+      if (!already_scanning) rdgpu_handoff_consumer_release_fd(g->fd, generation);
+      return -EAGAIN;
+    }
+    if (IOSurfaceGetWidth(surface) != f->width || IOSurfaceGetHeight(surface) != f->height ||
+        IOSurfaceGetBytesPerRow(surface) != f->pitch ||
+        f->format != DRM_FORMAT_XRGB8888) {
+      CFRelease(surface);
+      if (!already_scanning) rdgpu_handoff_consumer_release_fd(g->fd, generation);
+      return -EINVAL;
+    }
+    int next_fd = -1;
+    int retain = scanout_retains_surface();
+    if (retain && crtc_id >= 1 && crtc_id <= 2) {
+      next_fd = fcntl(g->fd, F_DUPFD_CLOEXEC, 0);
+      if (next_fd < 0) {
+        r = -errno;
+        CFRelease(surface);
+        if (!already_scanning) rdgpu_handoff_consumer_release_fd(g->fd, generation);
+        return r;
+      }
+    }
+    uint32_t surface_id = IOSurfaceGetID(surface);
+    pid_t owner = 0;
+    session_gpu_epoch epoch;
+    int native_child = gpu_session_child(&owner, &epoch);
+    if (native_child < 0) r = native_child;
+    else if (native_child > 0) {
+      if (g_master_lock_fd < 0) r = -EACCES;
+      else r = session_gpu_child_present_master(owner, epoch, g_master_lock_fd,
+                 surface, generation, crtc_id, f->width, f->height, 'BGRA');
+    } else r = (int)gpuwin_present_iosurface_crtc(surface, crtc_id, generation);
+    CFRelease(surface);
+    if (r) {
+      if (next_fd >= 0) close(next_fd);
+      if (!already_scanning) rdgpu_handoff_consumer_release_fd(g->fd, generation);
+      return r;
+    }
+    if (retain && crtc_id >= 1 && crtc_id <= 2) {
+      struct scanout_frame* current = &g_scanout[crtc_id - 1];
+      scanout_retire(crtc_id, g->fd, generation);
+      if (current->fd < 0) {
+        current->fd = next_fd;
+        current->generation = generation;
+      } else close(next_fd);
+    } else {
+      scanout_retire(crtc_id, -1, 0);
+      if (!already_scanning) rdgpu_handoff_consumer_release_fd(g->fd, generation);
+    }
+    fprintf(stderr, "DRM_PRESENT_METAL crtc=%u fb_id=0x%x generation=%llu surface=%u\n",
+            crtc_id, fb_id, (unsigned long long)generation, surface_id);
+    return 0;
   }
   struct bo_slot* b = bo_find(f->handle);
   if (!b || !b->map) {
     fprintf(stderr, "DRM_PRESENT crtc=%u fb_id=0x%x handle=0x%x -> no BO backing (skip)\n",
             crtc_id, fb_id, f->handle);
-    return;
+    return -ENOENT;
   }
   uint32_t w = f->width, h = f->height;
-  if (!w || !h || w > 16384 || h > 16384) return;
+  if (!w || !h || w > 16384 || h > 16384) return -EINVAL;
 
   const uint8_t* px = (const uint8_t*)b->map;
   size_t tight = (size_t)w * 4;
@@ -829,15 +1110,21 @@ static void drm_present_fb(uint32_t fb_id, uint32_t crtc_id) {
           crtc_id, n, w, h, nonblack ? "non-black" : "black", f->pitch);
 
   if (f->pitch == tight) {
-    gpuwin_present_crtc(px, w, h, /*bgra=*/1, crtc_id);   // no row repack; host presenter still copies/uploads
+    int r = (int)gpuwin_present_crtc(px, w, h, /*bgra=*/1, crtc_id);
+    if (r) return r;
   } else if (f->pitch >= tight) {
     uint8_t* tmp = (uint8_t*)malloc(tight * h);
-    if (!tmp) return;
+    if (!tmp) return -ENOMEM;
     for (uint32_t y = 0; y < h; y++)
       memcpy(tmp + (size_t)y * tight, px + (size_t)y * f->pitch, tight);
-    gpuwin_present_crtc(tmp, w, h, /*bgra=*/1, crtc_id);
+    int r = (int)gpuwin_present_crtc(tmp, w, h, /*bgra=*/1, crtc_id);
     free(tmp);
+    if (r) return r;
+  } else {
+    return -EINVAL;
   }
+  scanout_retire(crtc_id, -1, 0);
+  return 0;
 }
 
 int drm_enabled(void) {
@@ -934,6 +1221,8 @@ int drm_minor_of_fd(int fd) {
 }
 
 void drm_forget_fd(int fd) {
+  unsigned long long closing_dev = 0, closing_ino = 0;
+  int closing_known = !drm_fd_identity(fd, &closing_dev, &closing_ino);
   if (g_master_owner_fd == fd) {
     unsigned long long dev, ino;
     int replacement = -1;
@@ -949,7 +1238,21 @@ void drm_forget_fd(int fd) {
     else drm_master_release();
   }
   for (int i = 0; i < g_nfd; i++)
-    if (g_fds[i].fd == fd) { g_fds[i] = g_fds[--g_nfd]; return; }
+    if (g_fds[i].fd == fd) { g_fds[i] = g_fds[--g_nfd]; break; }
+  if (closing_known) {
+    // A dup keeps the same open file description. Drop outstanding magic only
+    // when its final tracked descriptor closes, before the host can reuse it.
+    for (int i = 0; i < g_nfd; i++) {
+      unsigned long long d, in;
+      if (!drm_fd_identity(g_fds[i].fd, &d, &in) &&
+          d == closing_dev && in == closing_ino) return;
+    }
+    pthread_mutex_lock(&g_magic_lock);
+    for (int i = 0; i < MAX_DRM_MAGIC; i++)
+      if (g_magic[i].magic && g_magic[i].dev == closing_dev &&
+          g_magic[i].ino == closing_ino) g_magic[i] = (struct drm_magic_slot){0};
+    pthread_mutex_unlock(&g_magic_lock);
+  }
 }
 
 int drm_owns_fd(int fd) {
@@ -1386,6 +1689,16 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
     return result;
   }
 
+  if (type == DRM_TYPE && (nr == DRM_NR_GET_MAGIC || nr == DRM_NR_AUTH_MAGIC)) {
+    long result = (sz == sizeof(uint32_t) &&
+                   dir == (nr == DRM_NR_GET_MAGIC ? 2u : 1u))
+                      ? drm_magic_ioctl(fd, nr, (uint32_t *)(uintptr_t)arg)
+                      : -EINVAL;
+    if (tracing()) fprintf(stderr, "[drm] %s_MAGIC fd=%d -> %ld\n",
+                           nr == DRM_NR_GET_MAGIC ? "GET" : "AUTH", fd, result);
+    return result;
+  }
+
   if (type == DRM_TYPE && nr == DRM_NR_VERSION && arg) {
     struct drm_version_64* v = (struct drm_version_64*)arg;
     v->major = 1; v->minor = 0; v->patchlevel = 0;
@@ -1664,8 +1977,8 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
   // exporter's shared backing (PRIME_HANDLE_TO_FD returns the BO's MAP_SHARED anon file), so we
   // import it as a mappable dumb-BO. The guest's EGL then does drmModeMapDumb + mmap, which now
   // succeed (no -EINVAL -> null deref in rdmetal_dri.so), and the present path reads the pixels.
-  // The mach-port IOSurface handoff stays for the Metal/scanout path (wlsrv.c mac_surface_*,
-  // rdgpu_handoff_resolve_fd directly) — it is not needed for a CPU (softpipe) dumb buffer.
+  // A broker-issued Metal carrier is identity only. Do not mmap it: its bytes
+  // are sparse and are not a CPU framebuffer. Other fds retain the CPU path.
   if (type == DRM_TYPE && nr == DRM_NR_PRIME_FD_TO_HANDLE && arg) {
     struct drm_prime_handle* ph = (struct drm_prime_handle*)arg;
 
@@ -1684,6 +1997,35 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
       fprintf(stderr, "DRM_IMPORT_PRIME fd=%d -> handle=0x%x (own export)\n", ph->fd, ph->handle);
       return 0;
     }
+
+    uint64_t ready_generation = 0;
+    int metal_carrier = rdgpu_handoff_is_pending_fd(ph->fd) ||
+        rdgpu_handoff_frame_ready_fd(ph->fd, &ready_generation);
+    if (metal_carrier) {
+      struct gem_slot* g = gem_find_by_identity(st.st_dev, st.st_ino);
+      if (!g) {
+        for (int i = 0; i < MAX_GEM; i++) if (!g_gem[i].used) { g = &g_gem[i]; break; }
+        if (!g) return -ENOMEM;
+        int owned_fd = fcntl(ph->fd, F_DUPFD_CLOEXEC, 0);
+        if (owned_fd < 0) return -errno;
+        memset(g, 0, sizeof *g);
+        g->fd = owned_fd;
+        g->device = st.st_dev;
+        g->inode = st.st_ino;
+        g->handle = g_next_gem_handle++;
+        if (!g_next_gem_handle) g_next_gem_handle = 1;
+        g->used = 1;
+      }
+      g->handle_refs++;
+      ph->handle = g->handle;
+      fprintf(stderr, "DRM_IMPORT_METAL fd=%d handle=0x%x %s (no CPU mmap)\n",
+              ph->fd, ph->handle, ready_generation ? "ready" : "pending");
+      return 0;
+    }
+    // A marked sparse carrier with no authenticated pending/ready handoff is
+    // never a software framebuffer. In particular, a child compositor must
+    // not turn an absent cross-process broker record into all-black CPU bytes.
+    if (rdgpu_handoff_is_carrier_fd(ph->fd)) return -EACCES;
 
     // Fresh cross-process import: map the shared backing the fd carries.
     int h = bo_import_shared_fd(ph->fd, st.st_dev, st.st_ino);
@@ -1706,7 +2048,9 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
     if (slot) {
       if (tracing())
         fprintf(stderr, "[drm] GEM_CLOSE handle=%u (release surface)\n", gc->handle);
-      gem_release_slot(slot);
+      if (!slot->handle_refs) return -EINVAL;
+      slot->handle_refs--;
+      gem_maybe_release(slot);
       return 0;
     }
     struct bo_slot* b = bo_find(gc->handle);
@@ -1876,12 +2220,17 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
   // hook can resolve the commit's fb_id back to the dumb buffer's host pixels.
   if (type == DRM_TYPE && nr == DRM_NR_MODE_ADDFB2 && arg) {
     struct drm_mode_fb_cmd2* fb = (struct drm_mode_fb_cmd2*)arg;
+    struct gem_slot* imported = gem_find_by_handle(fb->handles[0]);
+    if (imported && (fb->pixel_format != DRM_FORMAT_XRGB8888 || !fb->width || !fb->height ||
+                     fb->width > 16384 || fb->height > 16384)) return -EINVAL;
+    if (imported && fb->pitches[0] < fb->width * 4) return -EINVAL;
     uint32_t old_id = fb->fb_id;
     fb->fb_id = g_next_fb++;
     if (g_next_fb == 0) g_next_fb = 1;
     struct fb_slot* f = NULL;
     for (int i = 0; i < MAX_FB; i++) if (!g_fb[i].used) { f = &g_fb[i]; break; }
     if (f) {
+      if (imported) imported->fb_refs++;
       f->fb_id  = fb->fb_id;
       f->handle = fb->handles[0];
       f->width  = fb->width;
@@ -1889,7 +2238,7 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
       f->pitch  = fb->pitches[0] ? fb->pitches[0] : fb->width * 4;
       f->format = fb->pixel_format;
       f->used   = 1;
-    }
+    } else return -ENOMEM;
     if (tracing())
       fprintf(stderr, "[drm] MODE_ADDFB2 fb_id=%u (was %u) handle=0x%x %ux%u pitch=%u fmt=0x%x\n",
               fb->fb_id, old_id, fb->handles[0], fb->width, fb->height,
@@ -2063,13 +2412,20 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
   if (type == DRM_TYPE && nr == DRM_NR_MODE_PAGE_FLIP && arg) {
     struct drm_mode_crtc_page_flip* pf = (struct drm_mode_crtc_page_flip*)arg;
     uint32_t crtc = pf->crtc_id ? pf->crtc_id : 1;
+    int ready = drm_check_fb_ready(pf->fb_id);
+    if (ready) return ready;
+    if (pf->fb_id && gem_find_by_handle(fb_find(pf->fb_id)->handle)) {
+      int presented = drm_present_fb(pf->fb_id, crtc);
+      if (presented) return presented;
+    }
     struct crtc_state* cr = crtc_by_id(crtc);
     struct plane_state* pl = plane_by_id(crtc);
     cr->fb_id = pf->fb_id;
     pl->fb_id = pf->fb_id;
     pl->crtc_id = crtc;
+    if (pf->fb_id && !gem_find_by_handle(fb_find(pf->fb_id)->handle))
+      (void)drm_present_fb(pf->fb_id, crtc);
     if (pf->flags & DRM_MODE_PAGE_FLIP_EVENT) event_enqueue(fd, pf->user_data, crtc);
-    if (pf->fb_id) drm_present_fb(pf->fb_id, crtc);
     if (tracing())
       fprintf(stderr, "[drm] MODE_PAGE_FLIP crtc_id=%u fb_id=0x%x flags=0x%x user_data=0x%llx%s\n",
               pf->crtc_id, pf->fb_id, pf->flags, (unsigned long long)pf->user_data,
@@ -2093,6 +2449,26 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
     uint32_t* cnts = (uint32_t*)(uintptr_t)a->count_props_ptr;
     uint32_t* props = (uint32_t*)(uintptr_t)a->props_ptr;
     uint64_t* vals = (uint64_t*)(uintptr_t)a->prop_values_ptr;
+
+    // Check every new Metal FB before mutating KMS state or emitting a flip
+    // event. A producer frame is not scanout-ready merely because PRIME import
+    // returned a handle. The broker may still be completing its Metal fence.
+    if (!test_only) {
+      uint32_t check_off = 0;
+      for (uint32_t i = 0; i < a->count_objs; i++) {
+        uint32_t n = cnts ? cnts[i] : 0;
+        for (uint32_t j = 0; j < n; j++) {
+          if (props && props[check_off + j] == DRM_PROP_FB_ID && vals) {
+            int ready = drm_check_fb_ready((uint32_t)vals[check_off + j]);
+            if (ready) return ready;
+          }
+        }
+        check_off += n;
+      }
+    }
+    struct crtc_state old_crtc = g_crtc, old_crtc2 = g_crtc2;
+    struct plane_state old_plane = g_plane, old_plane2 = g_plane2;
+    struct connector_state old_connector = g_connector, old_connector2 = g_connector2;
 
     // Per-plane flips to present after the commit: flip_fb[id-1], resolved to flip_crtc[id-1].
     uint32_t flip_fb[2]   = {0, 0};
@@ -2169,7 +2545,14 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
         uint32_t crtc = pl->crtc_id ? pl->crtc_id : (uint32_t)(pi + 1);
         flip_crtc[pi] = crtc;
         if (!event_crtc) event_crtc = crtc;
-        drm_present_fb(flip_fb[pi], crtc);
+        int presented = drm_present_fb(flip_fb[pi], crtc);
+        struct fb_slot* f = fb_find(flip_fb[pi]);
+        if (presented && f && gem_find_by_handle(f->handle)) {
+          g_crtc = old_crtc; g_crtc2 = old_crtc2;
+          g_plane = old_plane; g_plane2 = old_plane2;
+          g_connector = old_connector; g_connector2 = old_connector2;
+          return presented; // no flip-complete event for an unpresented Metal frame
+        }
       }
     }
     if (!test_only && (a->flags & DRM_MODE_PAGE_FLIP_EVENT))
@@ -2180,6 +2563,11 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
               a->flags, a->count_objs, is_modeset ? " MODESET" : "", test_only ? " TEST" : "",
               (a->flags & DRM_MODE_PAGE_FLIP_EVENT) ? " FLIP" : "", flip_fb[0], flip_fb[1],
               mode_blob, flip_crtc[0], flip_crtc[1]);
+    if (test_only) {
+      g_crtc = old_crtc; g_crtc2 = old_crtc2;
+      g_plane = old_plane; g_plane2 = old_plane2;
+      g_connector = old_connector; g_connector2 = old_connector2;
+    }
     return 0;
   }
 

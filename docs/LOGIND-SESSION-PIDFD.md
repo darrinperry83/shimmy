@@ -8,15 +8,15 @@ the real failure: pushing the session leader pidfd and starting
 `session-c1.scope` both returned `EINVAL`.
 
 Shimmy's local pidfd is a Darwin kqueue. A native `SCM_RIGHTS` probe confirmed
-Darwin rejects passing a kqueue descriptor with `EINVAL`. The new
-`RDPIDFD_TRANSFER=1` path keeps kqueues for local monitoring and substitutes a
+Darwin rejects passing a kqueue descriptor with `EINVAL`. The native-session
+transfer path keeps kqueues for local monitoring and substitutes a
 target-owned Unix socket pidfd only when a pidfd is sent with `SCM_RIGHTS`.
 The native `test_hybrid_pidfd_transfer.c` checks the rejected kqueue send, the
 successful socket send, peer identity, and exit readiness.
 
 With that path alone, dbus-broker forwarded the descriptor but exited after
-the transfer. Its queued-output inspection needs Shimmy's existing
-`RDSOCKETOUTQ_COMPAT=1` path. With both enabled in a disposable root using the
+the transfer. Its queued-output inspection needs Shimmy's Unix output-queue
+compatibility path. With both active in a disposable root using the
 original dbus-broker unit, the real getty/login/PAM flow reported:
 
 ```
@@ -28,9 +28,27 @@ LOGIN_USER_BUS_OK
 
 The journal also recorded `New session 'c1' of user 'shimtest' with class
 'user' and type 'tty'` and `Started Session c1 of User shimtest`. The shell
-reported `XDG_RUNTIME_DIR=/run/user/22001`. `run.sh --init` supplies both
-flags and a private per-boot socket namespace. The live root and running
+reported `XDG_RUNTIME_DIR=/run/user/22001`. `run.sh --init` selects native
+session mode and supplies a private per-boot socket namespace. The two
+translations are now automatic in that mode; explicit `RDPIDFD_TRANSFER=0`
+and `RDSOCKETOUTQ_COMPAT=0` remain diagnostic overrides. The live root and running
 desktop were not changed by this test.
+
+On 18 November, `tests/run-interactive-login.py` was corrected to select the
+same native session mode for all full-boot probes. Without manually setting
+the transfer/output-queue switches or `XDG_RUNTIME_DIR`, an isolated GUI boot
+reached login and reported the runtime directory as `/run/user/22001`, owner
+`22001:22001`, mode `0700`; the user manager and user bus responded. A second
+isolated login started KWin and Plasmashell with that runtime value. The two
+processes were observed at the end of the probe. Native boot now omits the
+nested desktop's `XDG_RUNTIME_DIR=/tmp`, `DISPLAY=:0`, and `WAYLAND_DISPLAY`
+defaults in `build_guest_env()`; no empty `RDENV_XDG_RUNTIME_DIR` override is
+needed. In a later 40-second Plasma probe, `PLASMA_RUNTIME_OK` held and KWin
+kept the same PID; Plasmashell restarted once. This verifies automatic session
+environment setup, not a stable desktop. A separate isolated login/logout
+probe passed `LOGIN_LOGOUT_OK`: after the user exited, getty showed a fresh
+`localhost login:` prompt. Runtime-directory removal after logout was not
+independently checked.
 
 This proves authenticated TTY session creation in the isolated root. It does
 not prove SDDM, a visible Plasma desktop, lock/unlock, or the full Linux pidfd

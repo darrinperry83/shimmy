@@ -1,6 +1,7 @@
 #include "rdgpu_broker.h"
 #include <Security/SecRandom.h>
 #include <pthread.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -54,12 +55,47 @@ static RDGPUSession *create_session(pid_t actualPeer){
 RDGPUSession *rdgpu_local_session_create(void){
     return create_session(getpid());
 }
+bool rdgpu_local_image_geometry(RDGPUSession *s,
+                                const uint8_t lease[16],uint64_t generation,
+                                uint32_t *width,uint32_t *height,uint32_t *stride){
+    if(!s||getpid()!=s->actualPeer||!width||!height||!stride)return false;
+    pthread_mutex_lock(&s->lock);
+    ImageSlot *slot=find(s,lease,generation);
+    IOSurfaceRef surface=slot?rd_metal_image_surface(slot->image):NULL;
+    bool valid=surface!=NULL;
+    if(valid){
+        *width=(uint32_t)IOSurfaceGetWidth(surface);
+        *height=(uint32_t)IOSurfaceGetHeight(surface);
+        *stride=(uint32_t)IOSurfaceGetBytesPerRow(surface);
+    }
+    pthread_mutex_unlock(&s->lock);
+    return valid;
+}
 IOSurfaceRef rdgpu_local_draw_surface(RDGPUSession *s,
                                       const uint8_t lease[16],uint64_t generation){
     if(!s||getpid()!=s->actualPeer)return NULL;
     pthread_mutex_lock(&s->lock);
     ImageSlot *slot=find(s,lease,generation);
     IOSurfaceRef surface=slot&&!slot->fence&&!slot->exportRefs?
+        rd_metal_image_surface(slot->image):NULL;
+    if(surface)CFRetain(surface);
+    pthread_mutex_unlock(&s->lock);
+    return surface;
+}
+IOSurfaceRef rdgpu_local_sample_surface(RDGPUSession *s,
+                                        const uint8_t lease[16],uint64_t generation){
+    if(!s||getpid()!=s->actualPeer)return NULL;
+    pthread_mutex_lock(&s->lock);
+    ImageSlot *slot=find(s,lease,generation);
+    /* GL permits sampling a newly allocated texture whose contents are
+     * undefined. Give that image defined transparent pixels with an actual
+     * GPU clear before it is exposed as a source, avoiding stale IOSurface
+     * bytes or a denied first draw. This does not mark it guest-exportable. */
+    if(slot&&!slot->completed&&!slot->fence&&!slot->exportRefs){
+        uint64_t fence=rd_metal_image_clear(slot->image,0,0,0,0);
+        if(fence&&rd_metal_image_wait(slot->image,fence))slot->completed=true;
+    }
+    IOSurfaceRef surface=slot&&slot->completed&&!slot->fence?
         rd_metal_image_surface(slot->image):NULL;
     if(surface)CFRetain(surface);
     pthread_mutex_unlock(&s->lock);
@@ -74,6 +110,58 @@ bool rdgpu_local_draw_complete(RDGPUSession *s,
     if(valid)slot->completed=true;
     pthread_mutex_unlock(&s->lock);
     return valid;
+}
+int rdgpu_local_upload_image(RDGPUSession *s,
+                             const uint8_t lease[16],uint64_t generation,
+                             uint32_t source_format,const void *pixels,
+                             size_t bytes){
+    if(!s||getpid()!=s->actualPeer||!pixels)return -EPERM;
+    if(source_format!=RDGPU_UPLOAD_BGRA8&&source_format!=RDGPU_UPLOAD_RGBA8&&
+       source_format!=RDGPU_UPLOAD_BGRX8)return -EINVAL;
+    pthread_mutex_lock(&s->lock);
+    ImageSlot *slot=find(s,lease,generation);
+    if(!slot){pthread_mutex_unlock(&s->lock);return -ESTALE;}
+    IOSurfaceRef surface=rd_metal_image_surface(slot->image);
+    size_t width=surface?IOSurfaceGetWidth(surface):0;
+    size_t height=surface?IOSurfaceGetHeight(surface):0;
+    size_t stride=surface?IOSurfaceGetBytesPerRow(surface):0;
+    if(!width||!height||width>RDGPU_MAX_IMAGE_EDGE||
+       height>RDGPU_MAX_IMAGE_EDGE||
+       width>SIZE_MAX/height/4||bytes!=width*height*4||
+       bytes>RDGPU_MAX_IMAGE_BYTES||stride<width*4){
+        pthread_mutex_unlock(&s->lock);return -EINVAL;
+    }
+    if(slot->fence||slot->exportRefs){
+        pthread_mutex_unlock(&s->lock);return -EBUSY;
+    }
+    slot->completed=false;
+    if(IOSurfaceLock(surface,0,NULL)!=kIOReturnSuccess){
+        pthread_mutex_unlock(&s->lock);return -EIO;
+    }
+    uint8_t *dst=IOSurfaceGetBaseAddress(surface);
+    if(!dst){
+        IOSurfaceUnlock(surface,0,NULL);
+        pthread_mutex_unlock(&s->lock);return -EIO;
+    }
+    const uint8_t *src=pixels;
+    for(size_t y=0;y<height;y++){
+        uint8_t *row=dst+y*stride;
+        memset(row,0,stride); /* Do not expose uninitialized row padding. */
+        for(size_t x=0;x<width;x++){
+            const uint8_t *p=src+(y*width+x)*4;
+            uint8_t *q=row+x*4;
+            if(source_format==RDGPU_UPLOAD_RGBA8){
+                q[0]=p[2];q[1]=p[1];q[2]=p[0];q[3]=p[3];
+            }else{
+                q[0]=p[0];q[1]=p[1];q[2]=p[2];
+                q[3]=source_format==RDGPU_UPLOAD_BGRX8?255:p[3];
+            }
+        }
+    }
+    int result=IOSurfaceUnlock(surface,0,NULL)==kIOReturnSuccess?0:-EIO;
+    slot->completed=result==0;
+    pthread_mutex_unlock(&s->lock);
+    return result;
 }
 RDGPUSession *rdgpu_test_session_create(pid_t actualPeer,
                                         RDGPUVerifyTestPeer verify,void *context){
@@ -123,11 +211,17 @@ RDGPUReply rdgpu_dispatch(RDGPUSession *s,const RDGPURequest *q){
         uint64_t bytes=(uint64_t)w*h*4;
         if(!w||!h||w>RDGPU_MAX_IMAGE_EDGE||h>RDGPU_MAX_IMAGE_EDGE||
            bytes>RDGPU_MAX_IMAGE_BYTES){r.status=RDGPU_LIMIT;goto done;}
-        if(bytes>RDGPU_MAX_BYTES_PER_PEER-s->bytes){r.status=RDGPU_LIMIT;goto done;}
+        if(bytes>RDGPU_MAX_BYTES_PER_PEER-s->bytes){
+            if(getenv("RDMETAL_TRACE_DRAW"))fprintf(stderr,"RDMETAL_BROKER_QUOTA_BYTES used=%llu request=%llu limit=%llu\n",(unsigned long long)s->bytes,(unsigned long long)bytes,(unsigned long long)RDGPU_MAX_BYTES_PER_PEER);
+            r.status=RDGPU_LIMIT;goto done;
+        }
         ImageSlot *slot=NULL;
         for(unsigned i=0;i<RDGPU_MAX_IMAGES_PER_PEER;i++)if(!s->images[i].image){
             slot=&s->images[i];break;}
-        if(!slot){r.status=RDGPU_LIMIT;goto done;}
+        if(!slot){
+            if(getenv("RDMETAL_TRACE_DRAW"))fprintf(stderr,"RDMETAL_BROKER_QUOTA_SLOTS count=%u\n",RDGPU_MAX_IMAGES_PER_PEER);
+            r.status=RDGPU_LIMIT;goto done;
+        }
         RDMetalImage *image=rd_metal_image_create(s->core,w,h);
         if(!image){r.status=RDGPU_GPU_FAILED;goto done;}
         uint8_t token[16];

@@ -56,6 +56,7 @@
 #include "execve.h"
 #include "vt.h"
 #include "evdev.h"
+#include "session_gpu_frame.h"
 // PID-1 identity lives in syscalls.c (set from syscalls_set_exe); the fork child clears it because
 // it is a new guest process, not PID 1. Declared here because syscalls.h is a symlink into the
 // shared linux-shim tree that this task must not modify.
@@ -300,8 +301,12 @@ static long route_syscall(unsigned long nr, unsigned long a0, unsigned long a1, 
   if (nr == GPU_SYSCALL)          return gpu_hypercall((struct gpu_req*)a0);
   if (nr == HOSTCALL_SYSCALL)     return hostcall((struct hostcall_req*)a0);
   long r;
+  if (nr == 0x2002 && getenv("RDMETAL_GATE_DEBUG"))
+    fprintf(stderr, "RDMETAL_SYSCALL enter pid=%d op=%lu\n", (int)getpid(), a0);
   if (net_owns_syscall(nr))       r = net_syscall(nr, a0, a1, a2, a3, a4, a5);
   else                            r = linux_syscall(nr, a0, a1, a2, a3, a4, a5);
+  if (nr == 0x2002 && getenv("RDMETAL_GATE_DEBUG"))
+    fprintf(stderr, "RDMETAL_SYSCALL result=%ld pid=%d\n", r, (int)getpid());
   if (getenv("RDEXECDBG") && r == -9)
     fprintf(stderr, "[ebadf] nr=%lu(%#lx,%#lx,%#lx,%#lx,%#lx,%#lx) -> -9\n",
             nr, a0, a1, a2, a3, a4, a5);
@@ -827,7 +832,7 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
     // eight times over, while the top-level process reports the flag set. Same silent-revert-in-
     // the-child shape as every RDX18_* knob above; glmark2 never caught it because glmark2 does
     // not exec and WebKit always does.
-    "RDHOSTCALL", "RDVT_ROOT_PID", "RDVT_STATE", "RDSHIM_BOOT", "RDBOOT_LOCK_FD", "RDNOTIFYDBG", "RDERRDBG", "RDNETSOCK",
+    "RDHOSTCALL", "RDVT_ROOT_PID", "RDVT_STATE", "RDGPU_SESSION_EPOCH", "RDSHIM_BOOT", "RDBOOT_LOCK_FD", "RDNOTIFYDBG", "RDERRDBG", "RDNETSOCK",
     // The VT/console knobs ride across exec too, so a forked+exec'd getty (or a re-exec'd main
     // process after `exec` in a boot script) keeps the same console geometry, trace and dump.
     "RDVT", "RDVT_TRACE", "RDVT_AUTOSWITCH", "RDCONS_DUMP", "RDCONS_DUMPFILE", "RDCONS_COLS", "RDCONS_ROWS", 0
@@ -1998,17 +2003,15 @@ static void* guest_thread(void* arg) {
 }
 
 // --- guest environment -----------------------------------------------------------------------
-// The guest gets a fixed base environment, but every experiment we run (indirect GLX vs Mesa's
-// own software rasterizer, which driver, how much logging) is selected by an env var, so the
-// host must be able to override it. Two mechanisms, both host-side:
+// The guest gets a fixed base environment. Optional host-side diagnostic
+// variables can override it through two mechanisms:
 //
 //   LIBGL_*/MESA_*/GALLIUM_*/EGL_*   forwarded verbatim if set on the host
 //   RDENV_FOO=bar                    passes FOO=bar (escape hatch for anything else)
 //
 // A forwarded name REPLACES the base entry of the same name, and an EMPTY value REMOVES it
-// entirely rather than passing an empty string. That distinction is not pedantry: Mesa tests
-// `getenv("LIBGL_ALWAYS_INDIRECT") != NULL`, so setting it to "0" still selects indirect GLX.
-// `LIBGL_ALWAYS_INDIRECT= ./shim_gui ...` is what actually turns the default off.
+// entirely rather than passing an empty string. Mesa tests
+// `getenv("LIBGL_ALWAYS_INDIRECT") != NULL`, so "0" still selects indirect GLX.
 extern char** environ;
 
 static const char* kEnvPrefixes[] = { "LIBGL_", "MESA_", "GALLIUM_", "EGL_", "GBM_", "LIBVA_", "VDPAU_", 0 };
@@ -2040,10 +2043,19 @@ static char** build_guest_env(void) {
     // which names the X11 display and so reads as an X11 problem, while gtk3-demo in
     // the SAME rootfs presents 1490 frames over Wayland. Two runs lost to it.
     "WAYLAND_DISPLAY=wayland-0",
-    "LIBGL_ALWAYS_INDIRECT=1",   // default: GL over the wire -> our GLX decoder -> Metal
     "LIBVA_DRIVER_NAME=rdva",    // default: VAAPI decode -> our rdva driver -> VideoToolbox
   };
-  const int nbase = (int)(sizeof base / sizeof base[0]);
+  /* A booted Linux system must get its session environment from login/PAM
+   * and its compositor. Supplying the nested desktop's /tmp, DISPLAY or
+   * wayland-0 defaults to PID 1 can suppress pam_systemd's runtime setup. */
+  static char* native_base[] = {
+    "PATH=/bin:/usr/bin", "TERM=xterm", "HOME=/root",
+    "LIBVA_DRIVER_NAME=rdva",
+  };
+  const int native = getenv("RDNATIVE_SESSION") != NULL;
+  char** selected_base = native ? native_base : base;
+  const int nbase = native ? (int)(sizeof native_base / sizeof native_base[0])
+                           : (int)(sizeof base / sizeof base[0]);
 
   // Handed a guest environment by an exec'ing shim: pass it through untouched.
   if (getenv("RDGUESTENV")) {
@@ -2064,7 +2076,7 @@ static char** build_guest_env(void) {
 
   int nhost = 0; for (char** e = environ; *e; e++) nhost++;
   char** out = calloc((size_t)nbase + nhost + 1, sizeof *out);
-  if (!out) return base;                      // OOM: the base env is still valid
+  if (!out) return selected_base;             // OOM: use the matching base env
   int n = 0;
 
   for (char** e = environ; *e; e++) {
@@ -2077,11 +2089,11 @@ static char** build_guest_env(void) {
   }
   // Base entries come last, and only if nothing forwarded already defines that name.
   for (int i = 0; i < nbase; i++) {
-    size_t nl = env_namelen(base[i]);
+    size_t nl = env_namelen(selected_base[i]);
     int shadowed = 0;
     for (int j = 0; j < n && !shadowed; j++)
-      if (!strncmp(out[j], base[i], nl)) shadowed = 1;
-    if (!shadowed) out[n++] = base[i];
+      if (!strncmp(out[j], selected_base[i], nl)) shadowed = 1;
+    if (!shadowed) out[n++] = selected_base[i];
   }
   out[n] = 0;
 
@@ -2309,6 +2321,17 @@ int main(int argc, char** argv) {
     char rpid[32];
     snprintf(rpid, sizeof rpid, "%d", (int)getpid());
     setenv("RDVT_ROOT_PID", rpid, 1);
+  }
+  if (getenv("RDNATIVE_SESSION") && !getenv("RDGPU_SESSION_EPOCH")) {
+    const char* root_pid = getenv("RDVT_ROOT_PID");
+    if (root_pid && atol(root_pid) == (long)getpid()) {
+      session_gpu_epoch epoch = {0};
+      do { arc4random_buf(&epoch, sizeof epoch); }
+      while (!epoch.high || !epoch.low);
+      char token[33];
+      if (session_gpu_epoch_format(epoch, token) == 0)
+        setenv("RDGPU_SESSION_EPOCH", token, 1);
+    }
   }
   // A per-boot token shared by every shim process of this guest (carried across exec in kCarry).
   // It keys the shared guest-child registry (guest_child_register/known) so PID 1 recognises

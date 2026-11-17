@@ -2621,7 +2621,7 @@ static long sys_sendmsg(int fd, const struct lin_msghdr* lm, int lflags) {
   int* transfer_fds = NULL;
   size_t transfer_count = 0;
   const char* transfer_mode = getenv("RDPIDFD_TRANSFER");
-  if (transfer_mode && *transfer_mode == '1' && hctllen) {
+  if ((transfer_mode ? *transfer_mode == '1' : getenv("RDNATIVE_SESSION") != NULL) && hctllen) {
     // Darwin cannot pass kqueue-backed pidfds with SCM_RIGHTS (sendmsg returns
     // EINVAL). Keep kqueues for local child monitoring, but substitute a
     // target-owned socket only for this outbound transfer. Close our temporary
