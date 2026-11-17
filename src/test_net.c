@@ -61,6 +61,7 @@
 #define LEFD_NONBLOCK  0x00800
 #define LEAGAIN 11
 #define LENOENT 2
+#define LECONNREFUSED 111
 #define LEEXIST 17
 #define LSOL_SOCKET 1
 #define LSO_REUSEADDR 2
@@ -243,6 +244,15 @@ static void t_abstract(void) {
   const char* name = "rdx-net-abstract";
   struct lin_sockaddr_un sa; un_abstract(&sa, name);
   uint32_t salen = un_len(&sa, 1 + strlen(name));   // NO trailing NUL for abstract names
+
+  struct lin_sockaddr_un absent; un_abstract(&absent, "rdx-net-no-listener");
+  long missing = SC3(N_socket, LAF_UNIX, LSOCK_STREAM, 0);
+  CHECK(missing >= 0, "missing abstract socket creation failed");
+  long missing_r = SC3(N_connect, missing, &absent,
+                       un_len(&absent, 1 + strlen("rdx-net-no-listener")));
+  CHECK(missing_r == -LECONNREFUSED,
+        "missing abstract listener -> %ld (want -ECONNREFUSED)", missing_r);
+  close((int)missing);
 
   long srv = SC3(N_socket, LAF_UNIX, LSOCK_STREAM, 0);
   CHECK(srv >= 0, "socket -> %ld", srv);

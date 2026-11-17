@@ -108,6 +108,7 @@ enum {
 #define L_ENOSYS 38
 #define L_ENOTSOCK 88
 #define L_ENOTCONN 107
+#define L_ECONNREFUSED 111
 #define L_ENOBUFS 105
 #define L_ENOPROTOOPT 92
 #define L_EAFNOSUPPORT 97
@@ -2215,6 +2216,14 @@ static long sys_connect(int fd, const void* uaddr, uint32_t len) {
   }
   if (r < 0) return r;
   long out = lret(connect(fd, (struct sockaddr*)&hs, hlen));
+  // Linux abstract sockets have no filesystem pathname. A missing listener
+  // yields ECONNREFUSED; the Darwin pathname used to carry the abstract name
+  // yields ENOENT instead. Preserve ENOENT for actual pathname sockets.
+  if (out == -L_ENOENT && uaddr &&
+      len > offsetof(struct lin_sockaddr_un, sun_path) &&
+      ((const struct lin_sockaddr_un*)uaddr)->sun_family == L_AF_UNIX &&
+      ((const struct lin_sockaddr_un*)uaddr)->sun_path[0] == 0)
+    out = -L_ECONNREFUSED;
   if (getenv("RDNETSOCK") && hs.ss_family == AF_UNIX) {
     const char* p = ((struct sockaddr_un*)&hs)->sun_path;
     if (strstr(p, "userdb") || strstr(p, "journal")) {
