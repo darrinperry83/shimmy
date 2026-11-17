@@ -3713,9 +3713,11 @@ static int page_prot(uintptr_t pg) {
   return (int)bi.protection;
 }
 
-// True if `pg` is MAP_JIT. MAP_JIT is the only mapping that reports WRITE+EXECUTE in
-// max_protection on Apple Silicon (plain RWX mmap is EACCES even with the
-// allow-unsigned-executable-memory entitlement), so the test is unambiguous.
+// A plain anonymous RW mapping can have max_protection=RWX even after it is
+// flipped to RX. Using max_protection here misclassified our own W^X pool as
+// MAP_JIT, then the write-fault path MAP_FIXED a fresh zero page over live
+// guest code. Actual MAP_JIT reservations created by gmem_reserve() have
+// current protection RWX; plain W^X pages have current RW or RX.
 static int page_is_mapjit(uintptr_t pg) {
   mach_vm_address_t ra = (mach_vm_address_t)pg;
   mach_vm_size_t rs = 0;
@@ -3725,7 +3727,7 @@ static int page_is_mapjit(uintptr_t pg) {
   if (mach_vm_region(mach_task_self(), &ra, &rs, VM_REGION_BASIC_INFO_64,
                      (vm_region_info_t)&bi, &cnt, &obj) != KERN_SUCCESS) return 0;
   if (ra > pg || pg >= ra + rs) return 0;
-  return (bi.max_protection & VM_PROT_WRITE) && (bi.max_protection & VM_PROT_EXECUTE);
+  return (bi.protection & VM_PROT_WRITE) && (bi.protection & VM_PROT_EXECUTE);
 }
 
 // 1 = flipped a page, resume the faulting thread at the same pc. 0 = not ours; report and die.

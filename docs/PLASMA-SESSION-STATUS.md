@@ -112,3 +112,27 @@ page, but does **not** yet establish how it was cleared or why PCRE2 called its
 entry. A follow-up trace needs PID/thread and mapping-generation identifiers.
 JIT byte and syscall tracing were temporary local instrumentation and were
 removed after this test.
+
+### W^X page replacement root cause and fix (2026-11-17)
+
+`page_is_mapjit()` in `src/gmem.c` tested `mach_vm_region().max_protection`
+for WRITE+EXECUTE. A native probe showed that an ordinary anonymous RW page
+also has maximum RWX protection, including after its current protection is
+changed to RX. The check therefore misidentified a W^X-emulated page as a
+MAP_JIT reservation. On its next write fault, the MAP_JIT branch replaced the
+still-live guest code page with a fresh zero page using `mmap(MAP_FIXED)`.
+This explains the valid first exec sample, missing W^X write-flip log, and
+later zero instructions. The check now uses **current** protection: the
+ordinary W^X page is RW or RX, while the actual MAP_JIT reservation is RWX.
+
+The new `tests/run-wx-rewrite.py` compiles and runs an aarch64 Linux guest
+program in a disposable Arch root. Before the fix, its second execution hit
+an illegal zero instruction at the retained `ret` word. With the fix, it
+returned 7, rewrote the first instruction, then returned 9 with the `ret`
+word intact; the W^X counters recorded two exec flips and one write flip.
+Both CLI and GUI builds passed. This directly verifies the page preservation
+regression, but **not yet** a complete Plasma startup. A bounded GUI boot in
+the disposable clone reached getty and authenticated the throwaway user, but
+the session lacked `XDG_RUNTIME_DIR`; KWin and Plasmashell did not persist.
+The Plasmashell JIT-on acceptance criterion remains to be rerun once that
+separate session setup issue is resolved.
