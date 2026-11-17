@@ -181,6 +181,10 @@ try:
                     runtime = wait_text("SHIMMY_RUNTIME=/run/user/22001", 12)
                     manager = wait_text("SHIMMY_USER_MANAGER_READY", 12)
                     ok = runtime and manager
+                    if ok:
+                        type_keys("stat -c 'SHIMMY_RUNTIME_OWNER=%u:%g:%a' /run/user/22001\n")
+                        ok = wait_text("SHIMMY_RUNTIME_OWNER=22001:22001:700", 8)
+                        print("LOGIN_RUNTIME_OWNER_OK" if ok else "LOGIN_RUNTIME_OWNER_BAD", flush=True)
                     print("LOGIN_USER_SESSION_OK" if ok else "LOGIN_USER_SESSION_MISSING", flush=True)
                     if ok:
                         type_keys("busctl --user list >/dev/null && "

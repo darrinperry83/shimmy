@@ -4080,6 +4080,19 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     }
     {
       long mr = herr(mkdir(host, (mode_t)a2));
+      // Darwin creates this with the host user's UID. Under RDUID0 that is
+      // not the guest creator: an untracked inode otherwise appears owned by
+      // root. D-Bus checks its newly created XDG_RUNTIME_DIR/dbus-1 against
+      // the non-root guest UID and refuses to start if this record is absent.
+      if (mr == 0 && g_uid0 && (guest_cred_uid(1) || guest_cred_gid(1))) {
+        struct stat created;
+        if (lstat(host, &created) < 0 ||
+            guest_ownership_set(&created, guest_cred_uid(1), guest_cred_gid(1)) < 0) {
+          long creation_error = herrno();
+          rmdir(host); // leave no misleading root-owned directory on failure
+          return creation_error;
+        }
+      }
       if (getenv("RDEXECDBG") && mr < 0) {
         FILE* f = fopen("/tmp/rd_exec_dbg.txt", "a");
         if (f) { fprintf(f, "pid=%d MKDIR-FAIL %s host=%s -> %ld\n", (int)getpid(), gabs, host, mr); fclose(f); }

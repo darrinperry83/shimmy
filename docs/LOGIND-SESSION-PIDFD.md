@@ -39,3 +39,23 @@ contract. The socket representation cannot safely deliver nonzero
 returns `ENOTSUP` in socket-only mode. Darwin's socket output charge is also
 not byte-identical to Linux's accounting. Keep those limits explicit in later
 desktop tests.
+
+## Runtime subdirectory ownership
+
+The per-user tmpfs mount fallback itself was not the D-Bus failure: the
+disposable `guest_tmpfs_mount` test returned `EPERM` for both pathname and
+`/proc/self/fd/N` runtime targets, then chown/stat reported the requested
+virtual owner. A separate guest test reproduced the D-Bus failure after
+login: a process with virtual UID/GID 22001 created
+`/run/user/22001/dbus-1`, but stat reported UID/GID 0 because `mkdirat`
+created a host-owned directory without publishing virtual ownership.
+
+`mkdirat` now records the non-root guest creator's UID/GID in the existing
+inode-keyed ownership sidecar. The focused guest test reports
+`runtime child uid=22001 gid=22001 mode=700`. In a fresh isolated full Arch
+login, `stat` reported `/run/user/22001` as `22001:22001:700`, the user
+manager started, and `busctl --user list` succeeded. A separate GUI probe
+reached KWin and Plasmashell processes with XDG_RUNTIME_DIR set; it did not
+prove a correctly rendered desktop or resolve the KWin frame stall. Both
+probes used a disposable root and throwaway account; the installed root was
+untouched.
