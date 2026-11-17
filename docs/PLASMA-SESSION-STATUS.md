@@ -192,3 +192,28 @@ Future GUI boot probes must disable core dumps in the parent process before
 launch. The next presentation investigation is why KWin emits only an initial
 black frame after authenticated Plasma starts; a live process alone does not
 prove continued rendering.
+
+## Black-frame stall thread sample (2026-11-17)
+
+A second on-screen authenticated `run.sh --init` boot in a disposable COW root
+again delivered exactly two 3600x2338 all-black frames to the owner, with
+`present=0`, then no further frames. The frame carrier reached sequence 4.
+The owner-side bridge did not drop either frame.
+
+A three-second native stack sample of the KWin host process showed its guest
+main thread in Shimmy's Linux `read` translation, while the `eDP-1` output
+thread was waiting in a guest futex. LLDB registers identified the blocked call
+as `read(67, ..., 152)`. Host `lsof` identified fd 67 as a blocking pipe whose
+write end, fd 68, was also open in KWin; `fcntl(67, F_GETFL)` returned 0.
+That fd is not the DRM event socket. KWin also had a defunct child. These
+observations do not yet establish which KWin subsystem owns the pipe or why
+its child exited. No DRM flip-event, syncobj, or BO-mapping change is justified
+by this trace alone. The next investigation should trace creation and ownership
+of fd 67/68 and the child's exit, then establish why the read has no writer.
+
+The first trace run generated large host core files despite a parent shell
+`ulimit -c 0`; systemd services can set their own limits. A subsequent
+clone-only `DefaultLimitCORE=0` in system and user manager configuration plus
+`LimitCORE=0` for KWin produced no core files during the bounded observation.
+The test processes and their core files were removed; the live root and
+session were not changed. No visible desktop or logout cycle was proven.
