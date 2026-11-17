@@ -29,6 +29,17 @@ macOS login session or every other Mac app.
 
 ## Current evidence and gaps
 
+17 November broker checkpoint: syscall `0x2002` now selects a same-process
+Metal broker by default and reserves `RDMETAL_LEDGER_MOCK=1` for the older test
+gate. An isolated Linux aarch64 guest without fixture flags completed
+CREATE/CLEAR/WAIT/RELEASE against a real Metal image using
+`tests/run-rdgpu-metal-clear.py`. Both shim binaries build. This verifies the
+broker connection and a Metal clear, **not** full Gallium acceleration: the
+external `rdmetal_screen.c` still constructs a softpipe screen, and its direct
+context retains a hybrid softpipe fallback. The GUI desktop, cross-process
+frame handoff, and zero-fallback acceptance run remain unverified. The
+same-process route does not authenticate an independent broker process.
+
 | Area | Verified or present | Missing for this contract |
 | --- | --- | --- |
 | Boot and TTY | systemd reaches getty; isolated tests logged into Bash; tty1–tty6 gettys and TTY2 prompt verified | login → DE → logout cycle in the GUI |

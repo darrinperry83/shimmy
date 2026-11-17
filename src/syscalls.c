@@ -4048,7 +4048,11 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
 
   // ---------- 0x2002 rdmetal GPU guest syscall ----------
 #ifdef RDGPU_CLIENT
-  case 0x2002: return rdgpu_mock_gate(a0, a1, a2, a3, a4, a5);
+  case 0x2002:
+    return (getenv("RDMETAL_LEDGER_MOCK") &&
+            !strcmp(getenv("RDMETAL_LEDGER_MOCK"),"1")) ?
+        rdgpu_mock_gate(a0, a1, a2, a3, a4, a5) :
+        rdgpu_metal_gate(a0, a1, a2, a3, a4, a5);
 #endif
 
   // ---------- 0x2003 rdmetal VAAPI/VideoToolbox media-engine bridge ----------

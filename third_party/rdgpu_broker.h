@@ -16,8 +16,12 @@ typedef uint64_t (*RDGPUAuthorizeTestExport)(void *context,pid_t actualPeer,
                                               uint64_t generation);
 typedef void (*RDGPURevokeTestExport)(void *context,uint64_t receipt);
 
-/* Host-only fixture entry. Production accepts no peer until a signed shim
- * attests the guest process and authenticates the broker connection. Never
+/* Same-process broker entry. The host shim obtains its peer identity from
+ * getpid(); no guest-provided PID or unauthenticated socket is accepted. */
+RDGPUSession *rdgpu_local_session_create(void);
+
+/* Host-only fixture entry. A broker in a different process still requires
+ * signed-shim attestation and a kernel-authenticated connection. Never
  * construct a session using a guest-supplied PID. */
 RDGPUSession *rdgpu_test_session_create(pid_t actualPeer,
                                         RDGPUVerifyTestPeer verify, void *context);

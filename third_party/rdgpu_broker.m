@@ -3,6 +3,7 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 typedef struct {
     RDMetalImage *image;
@@ -42,17 +43,23 @@ static RDGPUReply reply(const RDGPURequest *q,uint16_t status){
     if(q)memcpy(r.lease,q->lease,16);
     return r;
 }
-RDGPUSession *rdgpu_test_session_create(pid_t actualPeer,
-                                        RDGPUVerifyTestPeer verify,void *context){
-    // A null verifier fails closed. The caller obtains actualPeer from the OS,
-    // not a wire field; this entry is deliberately named as a test API.
-    if(actualPeer<=0||!verify||!verify(actualPeer,context))return NULL;
+static RDGPUSession *create_session(pid_t actualPeer){
     RDGPUSession *s=calloc(1,sizeof *s);if(!s)return NULL;
     if(pthread_mutex_init(&s->lock,NULL)){free(s);return NULL;}
     s->actualPeer=actualPeer;
     s->core=rd_metal_core_create();
     if(!s->core){pthread_mutex_destroy(&s->lock);free(s);return NULL;}
     return s;
+}
+RDGPUSession *rdgpu_local_session_create(void){
+    return create_session(getpid());
+}
+RDGPUSession *rdgpu_test_session_create(pid_t actualPeer,
+                                        RDGPUVerifyTestPeer verify,void *context){
+    // A null verifier fails closed. The caller obtains actualPeer from the OS,
+    // not a wire field; this entry is deliberately named as a test API.
+    if(actualPeer<=0||!verify||!verify(actualPeer,context))return NULL;
+    return create_session(actualPeer);
 }
 void rdgpu_test_set_export_callbacks(RDGPUSession *s,
                                      RDGPUAuthorizeTestExport authorize,

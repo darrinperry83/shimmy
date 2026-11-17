@@ -4,6 +4,10 @@
 #include <IOSurface/IOSurface.h>
 long rdgpu_mock_gate(uint64_t op,uint64_t a1,uint64_t a2,uint64_t a3,
                      uint64_t a4,uint64_t a5);
+/* Host-local Metal broker path. Unlike the fixture, this never creates a
+ * synthetic image when Metal initialization fails. */
+long rdgpu_metal_gate(uint64_t op,uint64_t a1,uint64_t a2,uint64_t a3,
+                      uint64_t a4,uint64_t a5);
 /* Resolve a received dma-buf carrier fd to the in-process metal fixture's
  * retained IOSurface by matching fstat(st_dev, st_ino) against each issued
  * carrier. Returns NULL when the fixture is inactive (socket broker / a

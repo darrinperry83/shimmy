@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdatomic.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -28,6 +29,9 @@ static uint8_t issued_token[16];
 static uint8_t issued_token2[16];
 static int have_token2;
 static int init_failed;
+/* One guest process selects one gate for its lifetime. This is established
+ * before pthread_once, so a later caller cannot switch a live broker to mock. */
+static atomic_int gate_mode; /* 1 = local Metal, 2 = opt-in mock */
 static uint64_t seq;
 static unsigned clear_count;
 static unsigned image_count;
@@ -298,6 +302,7 @@ static RDGPUReply mock_transport(void *opaque,const RDGPURequest *q){
         }
         return r;
     }
+    if(atomic_load(&gate_mode)==1){r.status=RDGPU_DENIED;return r;}
     switch(q->op){
       case RDGPU_CREATE_BGRA8:
         if(image_count>=image_limit()){
@@ -392,7 +397,8 @@ static long mock_stride(void *ctx,pid_t actual,const uint8_t lease[16],
            m->height==height&&width<=4096 ? (long)width*4 : -EPERM;
 }
 static void init(void){
-    const char *socketPath=getenv("RDMETAL_SOCKET_BROKER");
+    const int local_metal=atomic_load(&gate_mode)==1;
+    const char *socketPath=local_metal?NULL:getenv("RDMETAL_SOCKET_BROKER");
     if(socketPath){
         if(strlen(socketPath)>=sizeof(((struct sockaddr_un *)0)->sun_path)){
             init_failed=1;return;
@@ -406,21 +412,21 @@ static void init(void){
         }
     }
     const char *metalOption=getenv("RDMETAL_SAME_IMAGE_METAL_FIXTURE");
-    if(metalOption&&!strcmp(metalOption,"1")){
+    if(local_metal||(metalOption&&!strcmp(metalOption,"1"))){
         static pid_t fixture_pid;
         fixture_pid=getpid();
-        metal_fixture=rdgpu_test_session_create(fixture_pid,
-                                                 exact_fixture_peer,&fixture_pid);
+        metal_fixture=local_metal?rdgpu_local_session_create():
+            rdgpu_test_session_create(fixture_pid,exact_fixture_peer,&fixture_pid);
         if(!metal_fixture){init_failed=1;return;}
         texture_bridge=rdgpu_texture_bridge_create(fixture_pid);
         if(!texture_bridge){init_failed=1;return;}
         atexit(fixture_cleanup);
     }
-    const char *hex=getenv("RDMETAL_LEDGER_MOCK_TOKEN_HEX");
+    const char *hex=local_metal?NULL:getenv("RDMETAL_LEDGER_MOCK_TOKEN_HEX");
     if(hex){
         if(parse_token(hex,issued_token)){init_failed=1;return;}
     }else arc4random_buf(issued_token,16);
-    const char *second=getenv("RDMETAL_LEDGER_MOCK_TOKEN2_HEX");
+    const char *second=local_metal?NULL:getenv("RDMETAL_LEDGER_MOCK_TOKEN2_HEX");
     if(second){
         if(parse_token(second,issued_token2)||
            !memcmp(issued_token2,issued_token,16)){init_failed=1;return;}
@@ -580,7 +586,19 @@ long rdgpu_mock_gate(uint64_t op,uint64_t a1,uint64_t a2,uint64_t a3,
                      uint64_t a4,uint64_t a5){
     const char *enabled=getenv("RDMETAL_LEDGER_MOCK");
     if(!enabled||strcmp(enabled,"1"))return -ENOSYS;
+    int expected=0;
+    if(!atomic_compare_exchange_strong(&gate_mode,&expected,2)&&expected!=2)
+        return -EPERM;
     pthread_once(&once,init);
     if(init_failed)return -EPERM;
+    return rdgpu_guest_syscall(&state,op,a1,a2,a3,a4,a5);
+}
+long rdgpu_metal_gate(uint64_t op,uint64_t a1,uint64_t a2,uint64_t a3,
+                      uint64_t a4,uint64_t a5){
+    int expected=0;
+    if(!atomic_compare_exchange_strong(&gate_mode,&expected,1)&&expected!=1)
+        return -EPERM;
+    pthread_once(&once,init);
+    if(init_failed||!metal_fixture||!texture_bridge)return -ENODEV;
     return rdgpu_guest_syscall(&state,op,a1,a2,a3,a4,a5);
 }
