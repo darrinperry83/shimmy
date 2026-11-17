@@ -217,3 +217,26 @@ clone-only `DefaultLimitCORE=0` in system and user manager configuration plus
 `LimitCORE=0` for KWin produced no core files during the bounded observation.
 The test processes and their core files were removed; the live root and
 session were not changed. No visible desktop or logout cycle was proven.
+
+## Xwayland child failure behind KWin's pipe wait (2026-11-17)
+
+A later bounded pipe/fork trace identified fd 67 as KWin's Xwayland readiness
+pipe, not its DRM event fd. The child wrote a 512-byte Qt process-start error
+to a separate pipe, then exited before `execve(Xwayland)`. The error was
+`EBADF: failed to get file descriptor flags`; the child had called
+`fcntl(-1, F_GETFD)`. KWin retained the readiness pipe's write end, so its
+blocking `read(67, ..., 152)` could not receive data or EOF. This identifies
+the immediate wait, but does not yet prove the cause of the black frame data.
+
+KWin 6.8.2 source identifies the invalid descriptor's origin: `EisBackend`
+opens its Xwayland EIS listening socket with Linux `O_PATH|O_CLOEXEC`, stores
+the result in `FileDescriptor`, and passes it to `XwaylandLauncher` without
+checking validity. That launcher calls `fcntl(F_GETFD)` on each passed fd in
+the child. The Shimmy syscall trace recorded the preceding guest open of
+`/run/user/22001/kwin-xwayland-eis-socket.<pid>` returning host errno 102
+(`Operation not supported on socket`) from the namespaced host socket path;
+the resulting descriptor is `-1`. Shimmy currently translates `O_PATH` to a
+normal Darwin `O_RDONLY` open, which does not provide Linux `O_PATH` semantics
+for this listening socket. The next fix must preserve the socket reference and
+its `/proc/self/fd/N` handoff across fork/exec, including the post-open guest
+unlink, rather than making `fcntl(-1)` falsely succeed. No such fix is landed.
