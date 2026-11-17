@@ -2036,7 +2036,17 @@ static char** build_guest_env(void) {
     "WAYLAND_DISPLAY=wayland-0",
     "LIBVA_DRIVER_NAME=rdva",    // default: VAAPI decode -> our rdva driver -> VideoToolbox
   };
-  const int nbase = (int)(sizeof base / sizeof base[0]);
+  /* A booted Linux system must get its session environment from login/PAM
+   * and its compositor. Supplying the nested desktop's /tmp, DISPLAY or
+   * wayland-0 defaults to PID 1 can suppress pam_systemd's runtime setup. */
+  static char* native_base[] = {
+    "PATH=/bin:/usr/bin", "TERM=xterm", "HOME=/root",
+    "LIBVA_DRIVER_NAME=rdva",
+  };
+  const int native = getenv("RDNATIVE_SESSION") != NULL;
+  char** selected_base = native ? native_base : base;
+  const int nbase = native ? (int)(sizeof native_base / sizeof native_base[0])
+                           : (int)(sizeof base / sizeof base[0]);
 
   // Handed a guest environment by an exec'ing shim: pass it through untouched.
   if (getenv("RDGUESTENV")) {
@@ -2057,7 +2067,7 @@ static char** build_guest_env(void) {
 
   int nhost = 0; for (char** e = environ; *e; e++) nhost++;
   char** out = calloc((size_t)nbase + nhost + 1, sizeof *out);
-  if (!out) return base;                      // OOM: the base env is still valid
+  if (!out) return selected_base;             // OOM: use the matching base env
   int n = 0;
 
   for (char** e = environ; *e; e++) {
@@ -2070,11 +2080,11 @@ static char** build_guest_env(void) {
   }
   // Base entries come last, and only if nothing forwarded already defines that name.
   for (int i = 0; i < nbase; i++) {
-    size_t nl = env_namelen(base[i]);
+    size_t nl = env_namelen(selected_base[i]);
     int shadowed = 0;
     for (int j = 0; j < n && !shadowed; j++)
-      if (!strncmp(out[j], base[i], nl)) shadowed = 1;
-    if (!shadowed) out[n++] = base[i];
+      if (!strncmp(out[j], selected_base[i], nl)) shadowed = 1;
+    if (!shadowed) out[n++] = selected_base[i];
   }
   out[n] = 0;
 

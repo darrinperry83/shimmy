@@ -2933,7 +2933,9 @@ static long do_ioctl(int fd, unsigned long req, unsigned long arg) {
         // Darwin rejects this on AF_UNIX sockets. Inspect the kernel peer's
         // receive-buffer charge, which includes queued SCM_RIGHTS descriptors.
         // Fail closed when the peer cannot be identified or inspected.
-        if (saved != EOPNOTSUPP || !getenv("RDSOCKETOUTQ_COMPAT"))
+        const char* outq_mode = getenv("RDSOCKETOUTQ_COMPAT");
+        if (saved != EOPNOTSUPP ||
+            !(outq_mode ? *outq_mode == '1' : getenv("RDNATIVE_SESSION") != NULL))
           return -(long)linux_errno_from_host(saved);
         if (rd_unix_peer_outq(fd, &n) < 0) return herrno();
       }

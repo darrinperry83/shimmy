@@ -107,14 +107,12 @@ if [ "$BOOT_INIT" = 1 ]; then
   # systemd must believe it is uid 0. (A full systemd-as-PID-1 boot additionally needs the
   # shim to report getpid()==1 to the init process — see the live-boot notes. That mapping
   # lives in the shim's syscall layer, not here; this script only wires the exec path.)
-  # A booted display manager must establish its own seat, runtime directory and display
-  # socket. build_guest_env() otherwise injects the nested shim defaults (wayland-0,
-  # DISPLAY=:0 and XDG_RUNTIME_DIR=/tmp) into PID 1 and every service it
-  # starts. Empty RDENV_* entries shadow those defaults and are then removed from the
-  # guest environment; the display manager can set the real values for its user session.
-  RDENV_WAYLAND_DISPLAY= RDENV_DISPLAY= RDENV_XDG_RUNTIME_DIR= \
+  # Native session mode omits the nested display/runtime defaults. PAM/logind
+  # creates XDG_RUNTIME_DIR after login, and the chosen compositor sets its
+  # own Wayland display. Only remove an explicitly inherited indirect-GL hint.
   RDNATIVE_SESSION=1 RDUID0=1 \
-  RDSOCKETGROUP="$GRP" RDPIDFD_TRANSFER=1 RDSOCKETOUTQ_COMPAT=1 \
+  RDENV_LIBGL_ALWAYS_INDIRECT= \
+  RDSOCKETGROUP="$GRP" \
     exec "$SHIM" "$ROOT" /sbin/init "$@"
 fi
 

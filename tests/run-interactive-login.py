@@ -70,12 +70,12 @@ log = base / "build/interactive-run.log"
 console.unlink(missing_ok=True)
 env = os.environ.copy()
 env.update(RDUID0="1", RDCONS_DUMP="1", RDCONS_DUMPFILE=str(console),
-           RDVT_TEST_INPUT_FIFO=str(fifo), RDSOCKETGROUP=str(tmp / "sockets"))
-if os.environ.get("RD_TEST_PLASMA") == "1":
-    # Match run.sh --init: the display manager/session establishes these itself.
-    env.update(RDNATIVE_SESSION="1", RDENV_WAYLAND_DISPLAY="",
-               RDENV_DISPLAY="", RDENV_XDG_RUNTIME_DIR="",
-               RDENV_LIBGL_ALWAYS_INDIRECT="", LIBGL_ALWAYS_INDIRECT="")
+           RDVT_TEST_INPUT_FIFO=str(fifo), RDSOCKETGROUP=str(tmp / "sockets"),
+           RDNATIVE_SESSION="1", RDENV_LIBGL_ALWAYS_INDIRECT="",
+           LIBGL_ALWAYS_INDIRECT="")
+# Every invocation boots systemd: match run.sh --init even for the login-only
+# probe, so build_guest_env omits the nested display/runtime defaults and
+# PAM/logind owns the runtime directory. No pidfd or socket-queue opt-in is passed here.
 (tmp / "sockets").mkdir(mode=0o700)
 
 def no_core():
@@ -110,7 +110,10 @@ try:
         else:
             print("LOGIN_PROMPT", flush=True)
             type_keys(user + "\n")
-            if not wait_text("Password:", 20):
+            password_wait = int(os.environ.get("RD_LOGIN_PASSWORD_WAIT", "20"))
+            if not 1 <= password_wait <= 90:
+                raise ValueError("RD_LOGIN_PASSWORD_WAIT must be 1..90 seconds")
+            if not wait_text("Password:", password_wait):
                 print("PASSWORD_PROMPT_MISSING", flush=True)
             else:
                 print("PASSWORD_PROMPT", flush=True)
