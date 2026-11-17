@@ -69,6 +69,16 @@ void rdgpu_guest_set_fd_import_transport(RDGPUGuestState *s,
     s->fdImportResolve=resolve;s->fdImportContext=context;
     pthread_mutex_unlock(&s->lock);
 }
+void rdgpu_guest_set_fd_frame_transport(RDGPUGuestState *s,
+                                        RDGPUFDFrameBegin begin,
+                                        RDGPUFDFrameComplete complete,
+                                        void *context){
+    if(!s||!s->ready)return;
+    pthread_mutex_lock(&s->lock);
+    s->fdFrameBegin=begin;s->fdFrameComplete=complete;
+    s->fdFrameContext=context;
+    pthread_mutex_unlock(&s->lock);
+}
 void rdgpu_guest_set_image_stride_transport(RDGPUGuestState *s,
                                             RDGPUImageStrideQuery query,void *context){
     if(!s||!s->ready)return;
@@ -133,7 +143,7 @@ long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
         if(!entry||entry->width!=a2||entry->height!=a3){
             pthread_mutex_unlock(&s->lock);return -ESTALE;
         }
-        if(entry->exported||entry->drawFence||!s->fdExportIssue||
+        if(entry->exported||entry->carrierIssued||entry->drawFence||!s->fdExportIssue||
            !s->imageStrideQuery){pthread_mutex_unlock(&s->lock);return -EPERM;}
         long stride=s->imageStrideQuery(s->imageStrideContext,s->ownerPid,
             entry->lease,entry->generation,entry->width,entry->height);
@@ -143,7 +153,10 @@ long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
         long fd=s->fdExportIssue(s->fdExportContext,s->ownerPid,
              entry->lease,entry->generation,a1,entry->lastCompletedFence,
              entry->width,entry->height,(uint32_t)stride);
-        if(fd>=0)entry->exported=1;
+        if(fd>=0){
+            if(s->fdFrameBegin&&s->fdFrameComplete)entry->carrierIssued=1;
+            else entry->exported=1;
+        }
         pthread_mutex_unlock(&s->lock);
         return fd;
     }
@@ -176,7 +189,15 @@ long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
         }
         int result=s->drawPollTransport(s->drawContext,a2);
         if(result>0||result<-(int)4095){s->disabled=1;result=-EIO;}
-        if(result==0){entry->lastCompletedFence=a2;entry->drawFence=0;entry->producerComplete=1;}
+        if(result==0){
+            if(entry->carrierIssued &&
+               (!s->fdFrameComplete || s->fdFrameComplete(s->fdFrameContext,
+                   s->ownerPid,entry->lease,entry->generation,a2))) {
+                entry->drawFence=0;entry->producerComplete=0;
+                pthread_mutex_unlock(&s->lock);return -EIO;
+            }
+            entry->lastCompletedFence=a2;entry->drawFence=0;entry->producerComplete=1;
+        }
         else if(result!=-EAGAIN){entry->drawFence=0;entry->producerComplete=0;}
         pthread_mutex_unlock(&s->lock);
         return result;
@@ -212,6 +233,11 @@ long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
             .generation=entry->generation,.target_handle=a1,
             .packet_bytes=(uint32_t)a3};
         memcpy(batch.lease,entry->lease,16);
+        if(entry->carrierIssued &&
+           (!s->fdFrameBegin || s->fdFrameBegin(s->fdFrameContext,
+               s->ownerPid,entry->lease,entry->generation))){
+            free(snapshot);pthread_mutex_unlock(&s->lock);return -EBUSY;
+        }
         long result=s->drawTransport(s->drawContext,&batch,snapshot,(size_t)a3);
         free(snapshot);
         if(result>0){entry->drawFence=(uint64_t)result;entry->producerComplete=0;
@@ -294,6 +320,11 @@ long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
         if(op==RDGPU_CLEAR&&entry->exported){
             pthread_mutex_unlock(&s->lock);return -EBUSY;
         }
+        if(op==RDGPU_CLEAR&&entry->carrierIssued&&
+           (!s->fdFrameBegin||s->fdFrameBegin(s->fdFrameContext,
+              s->ownerPid,entry->lease,entry->generation))){
+            pthread_mutex_unlock(&s->lock);return -EBUSY;
+        }
         if(entry->drawFence&&(op==RDGPU_CLEAR||op==RDGPU_RELEASE||
                               op==RDGPU_PREPARE_EXPORT)){
             pthread_mutex_unlock(&s->lock);return -EBUSY;
@@ -360,7 +391,13 @@ long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
             if(r.value0&&r.value0<=INT64_MAX)result=(long)r.value0;
             else{s->disabled=1;result=-EIO;}
         }
-        else if(op==RDGPU_WAIT){entry->producerComplete=1;entry->lastCompletedFence=a2;}
+        else if(op==RDGPU_WAIT){
+            if(entry->carrierIssued&&
+               (!s->fdFrameComplete||s->fdFrameComplete(s->fdFrameContext,
+                   s->ownerPid,entry->lease,entry->generation,a2)))
+                result=-EIO;
+            else {entry->producerComplete=1;entry->lastCompletedFence=a2;}
+        }
         else if(op==RDGPU_PREPARE_EXPORT){
             if(!r.value0||r.value1){s->disabled=1;result=-EIO;}
             else {entry->exportHandle=newHandle;entry->brokerReceipt=r.value0;

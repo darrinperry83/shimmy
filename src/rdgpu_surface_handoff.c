@@ -33,6 +33,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/xattr.h>
 #include <unistd.h>
 
 #define RDGPU_HANDOFF_MAX_SURFACES 64
@@ -54,6 +55,103 @@ typedef struct {
 
 static RDGPUHandoffEntry g_entries[RDGPU_HANDOFF_MAX_SURFACES];
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
+typedef struct {
+    dev_t device;
+    ino_t inode;
+    uint64_t generation;
+    int live, ready, released;
+} RDGPUStagedEntry;
+static RDGPUStagedEntry g_staged[RDGPU_HANDOFF_MAX_SURFACES];
+
+static int staged_index(dev_t device, ino_t inode) {
+    for (int i = 0; i < RDGPU_HANDOFF_MAX_SURFACES; i++)
+        if (g_staged[i].live && g_staged[i].device == device &&
+            g_staged[i].inode == inode) return i;
+    return -1;
+}
+
+static int fd_identity(int fd, struct stat *st) {
+    return fd >= 0 && !fstat(fd, st) && S_ISREG(st->st_mode) &&
+           st->st_dev && st->st_ino;
+}
+
+int rdgpu_handoff_is_carrier_fd(int fd) {
+    static const char marker[]="rdgpu-identity-only-v1";
+    char value[sizeof marker];
+    if (fd < 0) return 0;
+    ssize_t size=fgetxattr(fd,"com.rdx.rdgpu.carrier.v1",value,
+                           sizeof value,0,0);
+    return size==(ssize_t)sizeof marker && !memcmp(value,marker,sizeof marker);
+}
+
+/* These records are intentionally process-local until the Mach receive path
+ * authenticates its sender. A sidecar or bootstrap name is not authority. */
+int rdgpu_handoff_register_pending_fd(int fd) {
+    struct stat st;
+    if (!fd_identity(fd, &st) || !rdgpu_handoff_is_carrier_fd(fd)) return -EINVAL;
+    pthread_mutex_lock(&g_lock);
+    if (staged_index(st.st_dev, st.st_ino) >= 0) {
+        pthread_mutex_unlock(&g_lock); return -EALREADY;
+    }
+    int i = -1;
+    for (int j = 0; j < RDGPU_HANDOFF_MAX_SURFACES; j++)
+        if (!g_staged[j].live) { i = j; break; }
+    if (i >= 0) g_staged[i] = (RDGPUStagedEntry){
+        .device = st.st_dev, .inode = st.st_ino, .live = 1
+    };
+    pthread_mutex_unlock(&g_lock);
+    return i >= 0 ? 0 : -ENOSPC;
+}
+
+int rdgpu_handoff_is_pending_fd(int fd) {
+    struct stat st;
+    if (!fd_identity(fd, &st)) return 0;
+    pthread_mutex_lock(&g_lock);
+    int i = staged_index(st.st_dev, st.st_ino);
+    int pending = i >= 0 && !g_staged[i].ready;
+    pthread_mutex_unlock(&g_lock);
+    return pending;
+}
+
+int rdgpu_handoff_frame_ready_fd(int fd, uint64_t *generation) {
+    if (generation) *generation = 0;
+    struct stat st;
+    if (!generation || !fd_identity(fd, &st)) return 0;
+    pthread_mutex_lock(&g_lock);
+    int i = staged_index(st.st_dev, st.st_ino);
+    int ready = i >= 0 && g_staged[i].ready && !g_staged[i].released;
+    if (ready) *generation = g_staged[i].generation;
+    pthread_mutex_unlock(&g_lock);
+    return ready;
+}
+
+int rdgpu_handoff_begin_write_fd(int fd) {
+    struct stat st;
+    if (!fd_identity(fd, &st)) return -EINVAL;
+    pthread_mutex_lock(&g_lock);
+    int i = staged_index(st.st_dev, st.st_ino);
+    if (i < 0 || (g_staged[i].ready && !g_staged[i].released)) {
+        pthread_mutex_unlock(&g_lock); return -EBUSY;
+    }
+    g_staged[i].ready = 0;
+    g_staged[i].released = 0;
+    pthread_mutex_unlock(&g_lock);
+    return 0;
+}
+
+int rdgpu_handoff_consumer_release_fd(int fd, uint64_t generation) {
+    struct stat st;
+    if (!generation || !fd_identity(fd, &st)) return -EINVAL;
+    pthread_mutex_lock(&g_lock);
+    int i = staged_index(st.st_dev, st.st_ino);
+    if (i < 0 || !g_staged[i].ready || g_staged[i].released ||
+        g_staged[i].generation != generation) {
+        pthread_mutex_unlock(&g_lock); return -ESTALE;
+    }
+    g_staged[i].released = 1;
+    pthread_mutex_unlock(&g_lock);
+    return 0;
+}
 
 /* --- shared file registry (cross-process identity, keyed by dev/ino) ------- */
 /* A mach port cannot be persisted to a file. This registry records the carrier
@@ -371,6 +469,40 @@ int rdgpu_handoff_publish(IOSurfaceRef surface, dev_t device, ino_t inode) {
     return 0;
 }
 
+int rdgpu_handoff_publish_completed_fd(int fd, IOSurfaceRef surface,
+                                       uint64_t generation) {
+    struct stat st;
+    if (!surface || !generation || !fd_identity(fd, &st)) return -EINVAL;
+    pthread_mutex_lock(&g_lock);
+    int i = staged_index(st.st_dev, st.st_ino);
+    if (i < 0 || g_staged[i].ready ||
+        generation <= g_staged[i].generation) {
+        pthread_mutex_unlock(&g_lock); return -ESTALE;
+    }
+    int e = -1;
+    for (int j = 0; j < RDGPU_HANDOFF_MAX_SURFACES; j++) {
+        if (g_entries[j].live && g_entries[j].device == st.st_dev &&
+            g_entries[j].inode == st.st_ino) { e = j; break; }
+    }
+    if (e < 0) for (int j = 0; j < RDGPU_HANDOFF_MAX_SURFACES; j++)
+        if (!g_entries[j].live) { e = j; break; }
+    if (e < 0) { pthread_mutex_unlock(&g_lock); return -ENOSPC; }
+    if (g_entries[e].live) {
+        CFRelease(g_entries[e].surface);
+        if (g_entries[e].port != MACH_PORT_NULL)
+            mach_port_deallocate(mach_task_self(), g_entries[e].port);
+    }
+    CFRetain(surface);
+    g_entries[e] = (RDGPUHandoffEntry){ .device = st.st_dev,
+        .inode = st.st_ino, .surface = surface, .port = MACH_PORT_NULL,
+        .live = 1 };
+    g_staged[i].generation = generation;
+    g_staged[i].released = 0;
+    g_staged[i].ready = 1;
+    pthread_mutex_unlock(&g_lock);
+    return 0;
+}
+
 IOSurfaceRef rdgpu_handoff_resolve_fd(int fd) {
     if (fd < 0) return NULL;
     struct stat st;
@@ -379,6 +511,20 @@ IOSurfaceRef rdgpu_handoff_resolve_fd(int fd) {
     /* In-process publish->resolve (both sides in one shim; unit-tested). */
     pthread_mutex_lock(&g_lock);
     mach_port_t port = MACH_PORT_NULL;
+    int staged = staged_index(st.st_dev, st.st_ino);
+    if (staged >= 0) {
+        IOSurfaceRef local = NULL;
+        if (g_staged[staged].ready && !g_staged[staged].released)
+            for (int i = 0; i < RDGPU_HANDOFF_MAX_SURFACES; i++)
+                if (g_entries[i].live && g_entries[i].device == st.st_dev &&
+                    g_entries[i].inode == st.st_ino) {
+                    local = g_entries[i].surface;
+                    CFRetain(local);
+                    break;
+                }
+        pthread_mutex_unlock(&g_lock);
+        return local;
+    }
     for (int i = 0; i < RDGPU_HANDOFF_MAX_SURFACES; i++)
         if (g_entries[i].live && g_entries[i].device == st.st_dev &&
             g_entries[i].inode == st.st_ino) {
@@ -388,6 +534,11 @@ IOSurfaceRef rdgpu_handoff_resolve_fd(int fd) {
     pthread_mutex_unlock(&g_lock);
     if (port != MACH_PORT_NULL)
         return IOSurfaceLookupFromMachPort(port); /* +1 reference */
+
+    /* An identity-only carrier imported from another process cannot redeem
+     * the legacy unauthenticated Mach channel. Until its audit identity is
+     * verified, a matching sidecar or cached send-right grants no pixels. */
+    if (rdgpu_handoff_is_carrier_fd(fd)) return NULL;
 
     /* Cross-process: the surface lives in shim_cli. Ensure the importer's
      * receive channel is up, then wait (bounded) for the receive thread to
@@ -414,11 +565,14 @@ IOSurfaceRef rdgpu_handoff_resolve_fd(int fd) {
 
 void rdgpu_handoff_revoke(dev_t device, ino_t inode) {
     pthread_mutex_lock(&g_lock);
+    int staged = staged_index(device, inode);
+    if (staged >= 0) memset(&g_staged[staged], 0, sizeof g_staged[staged]);
     for (int i = 0; i < RDGPU_HANDOFF_MAX_SURFACES; i++)
         if (g_entries[i].live && g_entries[i].device == device &&
             g_entries[i].inode == inode) {
             CFRelease(g_entries[i].surface);
-            mach_port_deallocate(mach_task_self(), g_entries[i].port);
+            if (g_entries[i].port != MACH_PORT_NULL)
+                mach_port_deallocate(mach_task_self(), g_entries[i].port);
             g_entries[i].surface = NULL;
             g_entries[i].port = MACH_PORT_NULL;
             g_entries[i].live = 0;

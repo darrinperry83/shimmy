@@ -32,6 +32,11 @@ typedef long (*RDGPUFDExportIssue)(void *context,pid_t attestedGuestPid,
  * success (lease_out filled) or a negative errno. */
 typedef int (*RDGPUFDImportResolve)(void *context,pid_t attestedGuestPid,
                                     int fd,uint8_t lease_out[16]);
+typedef int (*RDGPUFDFrameBegin)(void *context,pid_t attestedGuestPid,
+                                 const uint8_t lease[16],uint64_t generation);
+typedef int (*RDGPUFDFrameComplete)(void *context,pid_t attestedGuestPid,
+                                    const uint8_t lease[16],uint64_t generation,
+                                    uint64_t completedFence);
 typedef RDGPUReply (*RDGPUTransport)(void *context,const RDGPURequest *request);
 /* Positive session-local completion fence or negative errno. */
 typedef long (*RDGPUDrawBatchTransport)(void *context,
@@ -67,7 +72,7 @@ typedef struct {
     uint8_t lease[16];
     uint64_t drawFence;
     uint64_t lastCompletedFence;
-    int producerComplete,exported;
+    int producerComplete,exported,carrierIssued;
 } RDGPUGuestSlot;
 typedef struct {
     pthread_mutex_t lock;
@@ -90,6 +95,9 @@ typedef struct {
     void *fdExportContext;
     RDGPUFDImportResolve fdImportResolve;
     void *fdImportContext;
+    RDGPUFDFrameBegin fdFrameBegin;
+    RDGPUFDFrameComplete fdFrameComplete;
+    void *fdFrameContext;
     RDGPUImageStrideQuery imageStrideQuery;
     void *imageStrideContext;
     void *exportTransportContext;
@@ -118,6 +126,10 @@ void rdgpu_guest_set_fd_export_transport(RDGPUGuestState *state,
                                         RDGPUFDExportIssue issue,void *context);
 void rdgpu_guest_set_fd_import_transport(RDGPUGuestState *state,
                                          RDGPUFDImportResolve resolve,void *context);
+void rdgpu_guest_set_fd_frame_transport(RDGPUGuestState *state,
+                                        RDGPUFDFrameBegin begin,
+                                        RDGPUFDFrameComplete complete,
+                                        void *context);
 void rdgpu_guest_set_image_stride_transport(RDGPUGuestState *state,
                                             RDGPUImageStrideQuery query,void *context);
 long rdgpu_guest_syscall(RDGPUGuestState *state,uint64_t op,uint64_t a1,

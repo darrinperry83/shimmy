@@ -27,6 +27,13 @@ bool rd_carrier_issue(RDCarrier *table,const uint8_t lease[16],
                       int *carrier_fd);
 bool rd_carrier_complete(RDCarrier *table,const uint8_t lease[16],
                          uint64_t generation,uint64_t completed_fence);
+/* Identity may be issued before the first draw. The sparse carrier contains
+ * no pixels; no consumer may import it until the fence is completed. */
+bool rd_carrier_issue_pending(RDCarrier *table,const uint8_t lease[16],
+                              uint64_t generation,RDCarrierFormat format,
+                              RDCarrierCapability capability,int *carrier_fd);
+bool rd_carrier_arm_fence(RDCarrier *table,const uint8_t lease[16],
+                          uint64_t generation,uint64_t fence);
 /* fd and metadata come from the protocol; pid/session/client must come from
  * a trusted compositor's OS identity/object table, never guest fields. */
 bool rd_carrier_import(RDCarrier *table,int fd,RDCarrierFormat format,

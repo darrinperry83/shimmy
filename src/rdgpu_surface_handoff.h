@@ -12,8 +12,9 @@
  * and must resolve it back to the SAME IOSurface.
  *
  * An AF_UNIX SCM_RIGHTS fd cannot carry a mach port, so the send-right from
- * IOSurfaceCreateMachPort is delivered on a separate authenticated channel
- * keyed by the carrier's fstat(st_dev, st_ino) identity. The importing side
+ * IOSurfaceCreateMachPort is delivered on a separate rendezvous channel
+ * keyed by the carrier's fstat(st_dev, st_ino) identity. That channel does
+ * not yet validate the sender's Mach audit identity. The importing side
  * redeems it with IOSurfaceLookupFromMachPort and stores the CFRetained
  * IOSurfaceRef in the DRM gem slot (see drmasahi.c).
  *
@@ -37,6 +38,19 @@ void rdgpu_handoff_import_init(void);
 /* Import side (shim_gui, drmasahi.c PRIME_FD_TO_HANDLE). Returns a CFRetained
  * IOSurfaceRef for the imported carrier fd, or NULL. */
 IOSurfaceRef rdgpu_handoff_resolve_fd(int fd);
+/* Staged local lifecycle. A pending carrier conveys identity only. Generation
+ * becomes visible after the producer has completed and published a surface.
+ * The staged record is process-local: cross-process carrier lookup remains
+ * denied until the Mach sender's audit identity is validated. */
+int rdgpu_handoff_register_pending_fd(int fd);
+int rdgpu_handoff_begin_write_fd(int fd);
+int rdgpu_handoff_publish_completed_fd(int fd, IOSurfaceRef surface,
+                                       uint64_t generation);
+int rdgpu_handoff_is_pending_fd(int fd);
+/* Fail-closed classification only; this marker is not authorization. */
+int rdgpu_handoff_is_carrier_fd(int fd);
+int rdgpu_handoff_frame_ready_fd(int fd, uint64_t *generation);
+int rdgpu_handoff_consumer_release_fd(int fd, uint64_t generation);
 
 /* Export side: drop a published surface (carrier released/destroyed). */
 void rdgpu_handoff_revoke(dev_t device, ino_t inode);

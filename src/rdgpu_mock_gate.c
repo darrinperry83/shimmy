@@ -43,6 +43,8 @@ struct mock_image {
     uint64_t sequence;
     int exported;
     RDCarrier *carrier;
+    int carrierFd;
+    uint64_t frameGeneration;
     IOSurfaceRef retainedSurface;
     dev_t device;         /* carrier identity for the cross-process handoff */
     ino_t inode;
@@ -143,6 +145,7 @@ static void fixture_cleanup(void){
         struct mock_image *m=&images[i];
         if(m->device&&m->inode){rdgpu_handoff_revoke(m->device,m->inode);m->device=0;m->inode=0;}
         if(m->carrier){rd_carrier_destroy(m->carrier);m->carrier=NULL;}
+        if(m->carrierFd>0){close(m->carrierFd);m->carrierFd=0;}
         if(m->retainedSurface&&metal_fixture){
             rdgpu_test_return_surface(metal_fixture,m->lease,1,m->retainedSurface);
             m->retainedSurface=NULL;
@@ -301,6 +304,7 @@ static RDGPUReply mock_transport(void *opaque,const RDGPURequest *q){
                     m->device=0;m->inode=0;
                 }
                 if(m->carrier){rd_carrier_destroy(m->carrier);m->carrier=NULL;}
+                if(m->carrierFd>0){close(m->carrierFd);m->carrierFd=0;}
                 m->exported=0;
                 m->hasExpectedClear=0;
                 memset(m->lease,0,16);
@@ -365,6 +369,8 @@ static void abort_export(void *opaque,pid_t pid,const uint8_t token[16],uint64_t
 }
 static long mock_fd_export(void *,pid_t,const uint8_t [16],uint64_t,
                            uint64_t,uint64_t,uint32_t,uint32_t,uint32_t);
+static int mock_frame_begin(void *,pid_t,const uint8_t [16],uint64_t);
+static int mock_frame_complete(void *,pid_t,const uint8_t [16],uint64_t,uint64_t);
 static int mock_fd_import(void *ctx,pid_t actual,int fd,uint8_t lease_out[16]);
 static long mock_stride(void *ctx,pid_t actual,const uint8_t lease[16],
                          uint64_t generation,uint32_t width,uint32_t height){
@@ -459,6 +465,9 @@ static void init(void){
         rdgpu_guest_set_texture_transport(&state,fixture_texture_upload,
                                           fixture_texture_release,NULL);
     rdgpu_guest_set_fd_export_transport(&state,mock_fd_export,NULL);
+    if(local_metal)
+        rdgpu_guest_set_fd_frame_transport(&state,mock_frame_begin,
+                                           mock_frame_complete,NULL);
     rdgpu_guest_set_fd_import_transport(&state,mock_fd_import,NULL);
     rdgpu_guest_set_image_stride_transport(&state,mock_stride,NULL);
 }
@@ -498,6 +507,37 @@ static long mock_fd_export(void *ctx,pid_t actual,const uint8_t lease[16],
         }
         fprintf(stderr,"RDMESA_SOCKET_CARRIER_ISSUED exact_lease=1 fd=%d\n",received);
         return received;
+    }
+    if(atomic_load(&gate_mode)==1){
+        RDCarrier *table=rd_carrier_create(getpid(),1,mock_return,NULL);
+        RDCarrierFormat format={width,height,stride,RDCARRIER_ARGB8888,0};
+        RDCarrierCapability capability={handle,generation};
+        int fd=-1;
+        if(!table||!rd_carrier_issue_pending(table,lease,generation,format,
+                                              capability,&fd)){
+            rd_carrier_destroy(table);return -EIO;
+        }
+        int keeper=fcntl(fd,F_DUPFD_CLOEXEC,0);
+        struct stat st={0};
+        int pending=keeper<0||fstat(fd,&st)?-EIO:
+                    rdgpu_handoff_register_pending_fd(fd);
+        if(pending){
+            if(keeper>=0)close(keeper);
+            close(fd);rd_carrier_destroy(table);return pending;
+        }
+        m->carrier=table;m->carrierFd=keeper;
+        m->device=st.st_dev;m->inode=st.st_ino;
+        /* Export may also follow an already-completed clear. Publish exactly
+         * that completed fence; a pre-draw export (fence=0) stays pending. */
+        if(fence&&mock_frame_complete(NULL,actual,lease,generation,fence)){
+            rdgpu_handoff_revoke(m->device,m->inode);
+            close(m->carrierFd);m->carrierFd=0;
+            rd_carrier_destroy(m->carrier);m->carrier=NULL;
+            m->device=0;m->inode=0;close(fd);return -EIO;
+        }
+        fprintf(stderr,"RDMESA_CARRIER_PENDING fd=%d dev=%d ino=%llu\n",
+                fd,(int)st.st_dev,(unsigned long long)st.st_ino);
+        return fd;
     }
     IOSurfaceRef image=NULL;
     if(metal_fixture){
@@ -576,6 +616,30 @@ static long mock_fd_export(void *ctx,pid_t actual,const uint8_t lease[16],
     fprintf(stderr,"RDMESA_MOCK_CARRIER_ISSUED exact_lease=1 metal_image=%d\n",
             image!=NULL);
     return fd;
+}
+static int mock_frame_begin(void *ctx,pid_t actual,const uint8_t lease[16],
+                            uint64_t generation){
+    (void)ctx;
+    struct mock_image *m=find_image(lease);
+    if(actual!=getpid()||generation!=1||!m||!m->carrier||m->carrierFd<0)
+        return -EPERM;
+    return rdgpu_handoff_begin_write_fd(m->carrierFd);
+}
+static int mock_frame_complete(void *ctx,pid_t actual,const uint8_t lease[16],
+                               uint64_t generation,uint64_t fence){
+    (void)ctx;
+    struct mock_image *m=find_image(lease);
+    if(actual!=getpid()||generation!=1||!fence||!m||!m->carrier||
+       m->carrierFd<0||!metal_fixture)return -EPERM;
+    if(!rd_carrier_arm_fence(m->carrier,lease,generation,fence)||
+       !rd_carrier_complete(m->carrier,lease,generation,fence))return -EIO;
+    IOSurfaceRef image=rdgpu_test_export_surface(metal_fixture,lease,generation);
+    if(!image)return -EIO;
+    uint64_t next=m->frameGeneration+1;
+    int result=rdgpu_handoff_publish_completed_fd(m->carrierFd,image,next);
+    rdgpu_test_return_surface(metal_fixture,lease,generation,image);
+    if(!result)m->frameGeneration=next;
+    return result;
 }
 /* op 12 IMPORT_FD: resolve a re-imported dma-buf carrier fd back to the broker
  * lease of the exact image the guest just exported. The fd's fstat(st_dev,

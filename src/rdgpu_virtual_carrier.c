@@ -4,6 +4,10 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/xattr.h>
+
+#define RDCARRIER_XATTR "com.rdx.rdgpu.carrier.v1"
+static const char carrier_marker[]="rdgpu-identity-only-v1";
 
 struct RDCarrier {
     pid_t compositor_pid;
@@ -54,6 +58,12 @@ bool rd_carrier_issue(RDCarrier *t,const uint8_t lease[16],
     if(ftruncate(writer,(off_t)format.stride*format.height)){
         unlink(path);close(writer);return false;
     }
+    /* A receiving DRM process must be able to reject this sparse identity
+     * file as CPU pixels even before an authenticated handoff is available. */
+    if(fsetxattr(writer,RDCARRIER_XATTR,carrier_marker,
+                 sizeof carrier_marker,0,0)){
+        unlink(path);close(writer);return false;
+    }
     // The FD is only an identity carrier. No shader, lease, or IOSurface
     // content is stored in it. The broker keeps its reference until release.
     int keeper=open(path,O_RDONLY|O_CLOEXEC);
@@ -72,10 +82,26 @@ bool rd_carrier_issue(RDCarrier *t,const uint8_t lease[16],
 }
 bool rd_carrier_complete(RDCarrier *t,const uint8_t lease[16],
                          uint64_t generation,uint64_t completed){
-    if(!t||!t->issued||t->complete||t->bound||!lease||
+    if(!t||!t->issued||t->complete||t->bound||!t->fence||!lease||
        generation!=t->generation||completed!=t->fence||
        memcmp(lease,t->lease,16))return false;
     t->complete=true;return true;
+}
+bool rd_carrier_issue_pending(RDCarrier *t,const uint8_t lease[16],
+                              uint64_t generation,RDCarrierFormat format,
+                              RDCarrierCapability capability,int *carrier_fd){
+    if(!rd_carrier_issue(t,lease,generation,format,UINT64_MAX,capability,
+                         carrier_fd))return false;
+    t->fence=0;
+    return true;
+}
+bool rd_carrier_arm_fence(RDCarrier *t,const uint8_t lease[16],
+                          uint64_t generation,uint64_t fence){
+    if(!t||!t->issued||t->bound||!lease||!fence||
+       generation!=t->generation||memcmp(lease,t->lease,16))return false;
+    t->fence=fence;
+    t->complete=false;
+    return true;
 }
 bool rd_carrier_import(RDCarrier *t,int fd,RDCarrierFormat format,
                        uint64_t sequence,pid_t pid,uint64_t session,
