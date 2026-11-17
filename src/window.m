@@ -1857,7 +1857,8 @@ static void rdgpu_scanout_selfcheck(IOSurfaceRef surface) {
 //   YES — every frame is unique and slow to arrive (an ordinary X window), so dropping one
 //         would lose content rather than a stale duplicate.
 static long present_source(id<MTLTexture> src, id<MTLCommandQueue> q, int may_block,
-                           dispatch_block_t done, uint64_t feedbackSequence) {
+                           dispatch_block_t done, uint64_t feedbackSequence,
+                           atomic_int* completionStatus) {
   CAMetalLayer* layer = gLayer;                    // assigned once, on main, before we get here
   if (!q) return -19;
 
@@ -1885,6 +1886,7 @@ static long present_source(id<MTLTexture> src, id<MTLCommandQueue> q, int may_bl
                           "windowserver_present=0\n", n, (unsigned)IOSurfaceGetID(src.iosurface),
                   IOSurfaceGetWidth(src.iosurface), IOSurfaceGetHeight(src.iosurface), sr);
         if (sr == 0) {
+          if (completionStatus) atomic_store(completionStatus, 1);
           if (done) done();
           if (feedbackSequence) rd_feedback_finish(0, feedbackSequence);
           return 0;
@@ -1899,7 +1901,11 @@ static long present_source(id<MTLTexture> src, id<MTLCommandQueue> q, int may_bl
 
   if (dynamic_regions_enabled()) {
     NSArray<RDRegionFrame*>* regions = region_frames_snapshot();
-    if (!regions.count) { if (done) done(); return 0; }
+    if (!regions.count) {
+      if (completionStatus) return -ENODEV;
+      if (done) done();
+      return 0;
+    }
     dispatch_semaphore_t inflight = inflight_sem();
     dispatch_time_t deadline = may_block ? dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC)
                                          : DISPATCH_TIME_NOW;
@@ -1958,8 +1964,11 @@ static long present_source(id<MTLTexture> src, id<MTLCommandQueue> q, int may_bl
     // 500 ms. GPU completion is the correct reuse fence for the source texture;
     // each CAMetalLayer's drawable pool still applies display back-pressure.
     [cb addCompletedHandler:^(id<MTLCommandBuffer> b) {
-      (void)b;
+      if (completionStatus)
+        atomic_store(completionStatus, b.status == MTLCommandBufferStatusCompleted ? 1 : -EIO);
       dispatch_semaphore_signal(inflight);
+      if (completionStatus)
+        atomic_store(completionStatus, cb.status == MTLCommandBufferStatusCompleted ? 1 : -EIO);
       if (done) done();
     }];
     int hz = atomic_load(&gRefreshHz);
@@ -2154,10 +2163,14 @@ static long present_source(id<MTLTexture> src, id<MTLCommandQueue> q, int may_bl
       [cb commit];
       [cb waitUntilCompleted];
       rdgpu_scanout_selfcheck(scanSurface);
-      if (done) done();
       dispatch_semaphore_signal(inflight);   // the presented handler we skip would have released it
       if (feedbackSequence) rd_feedback_finish(0, feedbackSequence);
       int sr = rdgpu_scanout_present(scanSurface, RDGPU_SCANOUT_ROLE_PRIMARY);
+      if (sr == 0) {
+        if (completionStatus)
+          atomic_store(completionStatus, cb.status == MTLCommandBufferStatusCompleted ? 1 : -EIO);
+        if (done) done();
+      }
       static unsigned primaryScanoutFrames;
       if (++primaryScanoutFrames <= 3 || primaryScanoutFrames % 100 == 0)
         fprintf(stderr, "[rdgpu-scanout] primary handoff frame=%u id=%u %zux%zu rc=%d\n",
@@ -2171,7 +2184,11 @@ static long present_source(id<MTLTexture> src, id<MTLCommandQueue> q, int may_bl
                       "falling back to WindowServer present\n"); }
   }
 
-  if (done) [cb addCompletedHandler:^(id<MTLCommandBuffer> b) { (void)b; done(); }];
+  if (done) [cb addCompletedHandler:^(id<MTLCommandBuffer> b) {
+    if (completionStatus)
+      atomic_store(completionStatus, b.status == MTLCommandBufferStatusCompleted ? 1 : -EIO);
+    done();
+  }];
 
   // Ask for EVEN pacing, not just "as soon as possible". With several drawables in flight the
   // producer is free to bunch two frames together and then stall, and because a client like
@@ -2367,7 +2384,7 @@ static long present_fb(const uint8_t* rgba, uint64_t w, uint64_t h, int bgra,
              bytesPerRow:(NSUInteger)w * 4];
 
     dispatch_semaphore_t sem = gStageSem;
-    rc = present_source(stage, q, /*may_block=*/1, ^{ dispatch_semaphore_signal(sem); }, 0);
+    rc = present_source(stage, q, /*may_block=*/1, ^{ dispatch_semaphore_signal(sem); }, 0, NULL);
     if (rc < 0) dispatch_semaphore_signal(sem);    // nothing was queued; take the slot back
     if (rc < 0) return rc;
     record_cpu_present(path, w, h);
@@ -2466,6 +2483,22 @@ static long present_secondary_fb(const uint8_t* bgra, uint64_t w, uint64_t h) {
 // Strong override of drmasahi.c's weak per-CRTC hook. With two displays, external CRTC 1
 // is primary and builtin CRTC 2 is secondary. With only the builtin display, CRTC 2 uses
 // the existing primary window rather than creating a second window over the same screen.
+static enum drm_output_route current_drm_route(uint32_t crtc_id) {
+  static _Atomic(uint64_t) routeGeneration = UINT64_MAX;
+  static _Atomic(int) externalConnected, builtinConnected;
+  uint64_t generation = atomic_load(&gHotplugGeneration);
+  if (atomic_load(&routeGeneration) != generation) {
+    int external = rdgpu_drm_connector_output(1, NULL, NULL) == 0;
+    int builtin = rdgpu_drm_connector_output(2, NULL, NULL) == 0;
+    atomic_store(&externalConnected, external);
+    atomic_store(&builtinConnected, builtin);
+    atomic_store(&routeGeneration, generation);
+    fprintf(stderr, "[drm-present] route generation=%llu external=%d builtin=%d\n",
+            (unsigned long long)generation, external, builtin);
+  }
+  return drm_output_route(crtc_id, atomic_load(&externalConnected), atomic_load(&builtinConnected));
+}
+
 long gpuwin_present_crtc(const uint8_t* px, uint64_t w, uint64_t h, int bgra, uint32_t crtc_id) {
   // A systemd-launched compositor is another host shim process. It must hand
   // its DRM framebuffer to PID 1's existing GUI, never create an AppKit window
@@ -2487,24 +2520,88 @@ long gpuwin_present_crtc(const uint8_t* px, uint64_t w, uint64_t h, int bgra, ui
                       "direct scanout)\n",
               crtc_id, drmFlipScanoutFrames, (unsigned)w, (unsigned)h, bgra);
   }
-  static _Atomic(uint64_t) routeGeneration = UINT64_MAX;
-  static _Atomic(int) externalConnected, builtinConnected;
-  uint64_t generation = atomic_load(&gHotplugGeneration);
-  if (atomic_load(&routeGeneration) != generation) {
-    int external = rdgpu_drm_connector_output(1, NULL, NULL) == 0;
-    int builtin = rdgpu_drm_connector_output(2, NULL, NULL) == 0;
-    atomic_store(&externalConnected, external);
-    atomic_store(&builtinConnected, builtin);
-    atomic_store(&routeGeneration, generation);
-    fprintf(stderr, "[drm-present] route generation=%llu external=%d builtin=%d\n",
-            (unsigned long long)generation, external, builtin);
-  }
-  enum drm_output_route route = drm_output_route(crtc_id,
-      atomic_load(&externalConnected), atomic_load(&builtinConnected));
+  enum drm_output_route route = current_drm_route(crtc_id);
   if (route == DRM_ROUTE_SECONDARY) return present_secondary_fb(px, w, h);
   if (route == DRM_ROUTE_NONE) return -19;
   vt_graphics_frame();
   return present_fb(px, w, h, bgra, CPU_PRESENT_DRM_PRIMARY);
+}
+
+// Same-process virtual KMS present. The broker guarantees this IOSurface was
+// published only after the producer's Metal fence completed. Wrap that exact
+// image as a texture; no carrier mmap, readback or replaceRegion CPU upload.
+// Return only after the host's sample command buffer finishes so DRM may retire
+// the previous scanout generation without racing a GPU read.
+long gpuwin_present_iosurface_crtc(IOSurfaceRef surface, uint32_t crtc_id,
+                                  uint64_t generation) {
+  if (!surface || !generation) return -EINVAL;
+  if (getenv("RDNATIVE_SESSION")) {
+    const char* root = getenv("RDVT_ROOT_PID");
+    if (root && atol(root) != (long)getpid()) return -ENODEV; // owner channel is separate
+  }
+  uint64_t w = IOSurfaceGetWidth(surface), h = IOSurfaceGetHeight(surface);
+  if (!w || !h || w > 16384 || h > 16384 ||
+      IOSurfaceGetPixelFormat(surface) != 'BGRA') return -EINVAL;
+  enum drm_output_route route = current_drm_route(crtc_id);
+  if (route == DRM_ROUTE_NONE || route == DRM_ROUTE_SECONDARY) return -ENODEV;
+  if (gCAPresLayer) return -ENODEV;
+  vt_graphics_frame();
+  refresh_dynamic_regions((NSUInteger)w, (NSUInteger)h);
+  refresh_split_width((NSUInteger)w, (NSUInteger)h);
+  atomic_store(&gFbW, (int)w);
+  atomic_store(&gFbH, (int)h);
+  if (!gLayer || !gPipe || atomic_load(&gDrawableW) != w || atomic_load(&gDrawableH) != h) {
+    __block long setup = 0;
+    run_on_main(^{ @autoreleasepool { setup = ensure_ready_on_main((NSUInteger)w, (NSUInteger)h); }});
+    if (setup) return setup;
+  }
+  id<MTLDevice> dev = gpu_metal_device();
+  id<MTLCommandQueue> q = gpu_metal_queue();
+  if (!dev || !q) return -ENODEV;
+  MTLTextureDescriptor* desc = [MTLTextureDescriptor
+      texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                  width:(NSUInteger)w height:(NSUInteger)h mipmapped:NO];
+  desc.usage = MTLTextureUsageShaderRead;
+  desc.storageMode = MTLStorageModeShared;
+  id<MTLTexture> src = [dev newTextureWithDescriptor:desc iosurface:surface plane:0];
+  if (!src) return -EINVAL;
+  struct metal_present_wait {
+    atomic_int refs;
+    atomic_int status;
+    dispatch_semaphore_t sem;
+  };
+  struct metal_present_wait* wait = calloc(1, sizeof *wait);
+  if (!wait) return -ENOMEM;
+  atomic_init(&wait->refs, 2); // caller and eventual Metal completion callback
+  atomic_init(&wait->status, 0);
+  wait->sem = dispatch_semaphore_create(0);
+  CFRetain(surface); // outlives a bounded caller timeout until Metal stops sampling it
+  long rc = present_source(src, q, /*may_block=*/1,
+                           ^{
+                             dispatch_semaphore_signal(wait->sem);
+                             CFRelease(surface);
+                             if (atomic_fetch_sub(&wait->refs, 1) == 1) free(wait);
+                           }, 0, &wait->status);
+  if (rc) {
+    CFRelease(surface);
+    free(wait); // present_source did not enqueue the callback
+    return rc;
+  }
+  int timed_out = dispatch_semaphore_wait(wait->sem,
+                                           dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC));
+  int completed = atomic_load(&wait->status);
+  if (atomic_fetch_sub(&wait->refs, 1) == 1) free(wait);
+  if (timed_out) return -ETIMEDOUT;
+  if (completed != 1) return -EIO;
+  if (getenv("RDGPU_PRESENT_STATS")) {
+    static atomic_uint_fast64_t frames;
+    uint64_t n = atomic_fetch_add(&frames, 1) + 1;
+    if (n == 1 || n % 120 == 0)
+      fprintf(stderr, "[present-stats] path=drm_iosurface_metal frames=%llu generation=%llu "
+                      "cpu_framebuffer_bytes=0\n", (unsigned long long)n,
+              (unsigned long long)generation);
+  }
+  return 0;
 }
 
 static long session_frame_present_owned(const uint8_t* bgra, uint32_t w,
@@ -2636,7 +2733,8 @@ long gpuwin_present_texture(void* mtl_texture, void* mtl_queue, uint64_t w, uint
     // No staging semaphore here: glbridge already bounds itself to GLB_FRAMES_IN_FLIGHT, and
     // ordering against the next frame's writes comes from sharing its command queue.
     rc = present_source(tex, mtl_queue ? (__bridge id<MTLCommandQueue>)mtl_queue
-                                       : gpu_metal_queue(), /*may_block=*/0, nil, feedbackSequence);
+                                       : gpu_metal_queue(), /*may_block=*/0, nil, feedbackSequence,
+                        NULL);
   }
   if (rc < 0 && feedbackSequence) rd_feedback_finish(0, feedbackSequence);
   if (rc < 0) return rc;
