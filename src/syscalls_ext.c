@@ -1637,7 +1637,36 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   }
   case 272: return -LX_ENOSYS;                                  // kcmp
   case 273: return -LX_EPERM;                                   // finit_module
-  case 274: case 275: return -LX_ENOSYS;                        // sched_setattr/getattr
+  case 274: return -LX_ENOSYS;                                  // sched_setattr
+  case 275: {                                                   // sched_getattr
+    /* Shimmy exposes SCHED_OTHER for guest threads.  Report only the v0
+     * sched_attr fields, with the nice value backed by the host process's
+     * actual priority.  Do not invent RT, deadline or uclamp state. */
+    struct lx_sched_attr_v0 {
+      uint32_t size, policy;
+      uint64_t flags;
+      int32_t nice;
+      uint32_t priority;
+      uint64_t runtime, deadline, period;
+    } attr = {0};
+    _Static_assert(sizeof(attr) == 48, "Linux sched_attr v0 ABI");
+    long target = (long)(int)a0;
+    size_t size = (size_t)(unsigned int)a2;
+    if (!a1 || target < 0 || size < sizeof(attr) || size > 4096)
+      return -LX_EINVAL;
+    if (target && target != guest_tid() &&
+        !(target == (long)getpid() && guest_tid() == 1))
+      return guest_tid_known((int)target) ? -LX_EOPNOTSUPP : -LX_ESRCH;
+    if (a3) return -LX_EINVAL;  /* No SCHED_DEADLINE dynamic fields. */
+    errno = 0;
+    int nice = getpriority(PRIO_PROCESS, 0);
+    if (nice == -1 && errno) return eret();
+    attr.size = sizeof(attr);
+    attr.nice = nice;
+    memcpy((void *)a1, &attr, sizeof(attr));
+    if (size > sizeof(attr)) memset((char *)a1 + sizeof(attr), 0, size - sizeof(attr));
+    return 0;
+  }
   case 276: {                                                   // renameat2
     unsigned flags = (unsigned)a4;
     e  = resolve_at_nf((int)a0, (const char*)a1, host,  sizeof host,  &hdirfd,  1);
