@@ -1067,7 +1067,29 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return r;
   }
   case 74: return signalfd4_shim((int)a0, (const uint64_t*)a1, (size_t)a2, (int)a3);
-  case 75: return -LX_ENOSYS;                                  // vmsplice
+  case 75: {                                                   // vmsplice(pipe, iov, nr_segs, flags)
+    // vmsplice's observable operation is to append iovec bytes to a pipe.
+    // Darwin writev copies the bytes rather than gifting pages to the pipe;
+    // SPLICE_F_MOVE, MORE and GIFT are hints and do not change their contents.
+    // A blocking pipe plus SPLICE_F_NONBLOCK cannot be implemented without
+    // changing the shared open-file description's flags, so refuse that case
+    // rather than unexpectedly blocking another guest thread.
+    const unsigned flags = (unsigned)a3;
+    if (flags & ~0xfu) return -LX_EINVAL;
+    if (a2 > 1024) return -LX_EINVAL;                         // Linux UIO_MAXIOV
+    if (a2 && !a1) return -LX_EFAULT;
+    struct stat st;
+    if (fstat((int)a0, &st) != 0) return eret();
+    if (!S_ISFIFO(st.st_mode)) return -LX_EINVAL;
+    if (flags & 0x2u) {                                       // SPLICE_F_NONBLOCK
+      int fl = fcntl((int)a0, F_GETFL);
+      if (fl < 0) return eret();
+      if (!(fl & O_NONBLOCK)) return -LX_EOPNOTSUPP;
+    }
+    if (!a2) return 0;
+    ssize_t r = writev((int)a0, (const struct iovec*)a1, (int)a2);
+    return r < 0 ? eret() : r;
+  }
   case 76: {                                                   // splice
     long long ioff, ooff, *ip = 0, *op = 0;
     if (a1) { ioff = *(long long*)a1; ip = &ioff; }
