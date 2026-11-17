@@ -187,6 +187,15 @@ static int fixture_texture_release(void *context,uint64_t handle,uint64_t genera
             (unsigned long long)handle,(unsigned long long)generation,rc);
     return rc;
 }
+static int fixture_image_upload(void *context,pid_t actual,
+                                const uint8_t lease[16],uint64_t generation,
+                                uint32_t source_format,const void *snapshot,
+                                size_t bytes){
+    (void)context;
+    if(actual!=getpid()||!metal_fixture)return -EPERM;
+    return rdgpu_local_upload_image(metal_fixture,lease,generation,
+                                    source_format,snapshot,bytes);
+}
 static void *fixture_texture_resolve(uint64_t handle,uint64_t generation,void *context){
     (void)context;
     return rdgpu_texture_bridge_acquire(texture_bridge,handle,generation);
@@ -470,6 +479,8 @@ static void init(void){
                                            mock_frame_complete,NULL);
     rdgpu_guest_set_fd_import_transport(&state,mock_fd_import,NULL);
     rdgpu_guest_set_image_stride_transport(&state,mock_stride,NULL);
+    if(local_metal)
+        rdgpu_guest_set_image_upload_transport(&state,fixture_image_upload,NULL);
 }
 static void mock_return(void *context,const uint8_t lease[16],uint64_t generation){
     (void)context;(void)generation;

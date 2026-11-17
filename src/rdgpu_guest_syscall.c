@@ -86,6 +86,13 @@ void rdgpu_guest_set_image_stride_transport(RDGPUGuestState *s,
     s->imageStrideQuery=query;s->imageStrideContext=context;
     pthread_mutex_unlock(&s->lock);
 }
+void rdgpu_guest_set_image_upload_transport(RDGPUGuestState *s,
+                                             RDGPUImageUpload upload,void *context){
+    if(!s||!s->ready)return;
+    pthread_mutex_lock(&s->lock);
+    s->imageUpload=upload;s->imageUploadContext=context;
+    pthread_mutex_unlock(&s->lock);
+}
 static RDGPUGuestSlot *slot(RDGPUGuestState *s,uint64_t handle){
     if(!handle)return NULL;
     for(unsigned i=0;i<RDGPU_MAX_IMAGES_PER_PEER;i++)
@@ -117,6 +124,50 @@ static int valid_reply(const RDGPURequest *q,const RDGPUReply *r){
 long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
                           uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5){
     if(!s||!s->ready||s->disabled||getpid()!=s->ownerPid)return -EPERM;
+    if(op==RDGPU_GUEST_IMAGE_UPLOAD){
+        if(!a1||!a2||!a3||a5||
+           (a4!=RDGPU_UPLOAD_BGRA8&&a4!=RDGPU_UPLOAD_RGBA8&&
+            a4!=RDGPU_UPLOAD_BGRX8))return -EINVAL;
+        pthread_mutex_lock(&s->lock);
+        RDGPUGuestSlot *entry=slot(s,a1);
+        if(!entry){pthread_mutex_unlock(&s->lock);return -ESTALE;}
+        uint64_t expected=(uint64_t)entry->width*entry->height*4;
+        if(a3!=expected||expected>RDGPU_MAX_IMAGE_BYTES){
+            pthread_mutex_unlock(&s->lock);return -EINVAL;
+        }
+        if(entry->drawFence||entry->exported||!s->imageUpload){
+            pthread_mutex_unlock(&s->lock);return -EBUSY;
+        }
+        void *snapshot=malloc((size_t)expected);
+        if(!snapshot){pthread_mutex_unlock(&s->lock);return -ENOMEM;}
+        mach_vm_size_t copied=0;
+        kern_return_t status=mach_vm_read_overwrite(mach_task_self(),
+            (mach_vm_address_t)a2,(mach_vm_size_t)expected,
+            (mach_vm_address_t)snapshot,&copied);
+        if(status!=KERN_SUCCESS||copied!=expected){
+            free(snapshot);pthread_mutex_unlock(&s->lock);return -EFAULT;
+        }
+        if(entry->carrierIssued&&
+           (!s->fdFrameBegin||s->fdFrameBegin(s->fdFrameContext,s->ownerPid,
+             entry->lease,entry->generation))){
+            free(snapshot);pthread_mutex_unlock(&s->lock);return -EBUSY;
+        }
+        entry->producerComplete=0;
+        int uploaded=s->imageUpload(s->imageUploadContext,s->ownerPid,
+            entry->lease,entry->generation,(uint32_t)a4,snapshot,
+            (size_t)expected);
+        free(snapshot);
+        if(uploaded){pthread_mutex_unlock(&s->lock);return uploaded;}
+        uint64_t completed=++s->nextRequest;
+        if(!completed || (entry->carrierIssued&&
+           (!s->fdFrameComplete||s->fdFrameComplete(s->fdFrameContext,
+             s->ownerPid,entry->lease,entry->generation,completed)))){
+            pthread_mutex_unlock(&s->lock);return -EIO;
+        }
+        entry->producerComplete=1;
+        entry->lastCompletedFence=completed;
+        pthread_mutex_unlock(&s->lock);return 0;
+    }
     if(op==RDGPU_GUEST_IMAGE_STRIDE){
         if(!a1||!a2||!a3||a4||a5)return -EINVAL;
         pthread_mutex_lock(&s->lock);
