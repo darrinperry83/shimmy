@@ -43,6 +43,7 @@
 #include <sys/time.h>
 #include <sys/select.h>
 #include <sys/uio.h>
+#include <sys/xattr.h>
 #include <sys/proc_info.h>
 #include <libproc.h>
 #include <netinet/in.h>
@@ -54,6 +55,7 @@
 #include "pidfd_shim.h"
 #include "netlink_route_transport.h"
 #include "guest_cred_registry.h"
+#include "guest_ownership.h"
 // Standalone net tests do not link the optional virtual DRM backend.
 __attribute__((weak_import)) extern void drm_register_received_fd(int fd);
 
@@ -399,6 +401,94 @@ static char g_group_prefix[512];
 static size_t g_group_prefix_len;
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 
+// Darwin cannot open a socket pathname, even with O_EVTONLY. Keep both the
+// pathname inode and the bound socket object's identity: they are *different*
+// (dev, ino) pairs on macOS. Path identity prevents a stale bind from matching
+// a replacement socket; fd identity prevents a recycled descriptor from doing so.
+struct bound_socket_ref {
+  int fd;
+  dev_t path_dev, socket_dev;
+  ino_t path_ino, socket_ino;
+  struct bound_socket_ref* next;
+};
+static struct bound_socket_ref* g_bound_sockets;
+
+static void opath_private_dir(char* out, size_t cap) {
+  if (g_group_prefix_len && g_group_prefix_len < 60)
+    snprintf(out, cap, "%s/.opath", g_group_prefix);
+  else snprintf(out, cap, "/tmp/rdx-opath-%ld", (long)getpid());
+}
+
+// The guest receives an anonymous metadata-only fd. Its xattr carries the
+// record across fork, exec and SCM_RIGHTS without exposing the record through
+// read(2). The native listener never becomes a guest O_PATH fd.
+struct opath_socket_token {
+  uint64_t magic_a, magic_b;
+  uint64_t backing_dev, backing_ino;
+  struct stat path_stat;
+  char link_path[104];
+};
+#define OPATH_MAGIC_A UINT64_C(0x7264782d6f706174)
+#define OPATH_MAGIC_B UINT64_C(0x682d736f636b6574)
+#define OPATH_XATTR "com.shimmy.opath.socket"
+
+static int opath_token_read(int fd, struct opath_socket_token* token) {
+  struct stat backing;
+  if (fd < 0 || !token || fstat(fd, &backing) < 0 || !S_ISREG(backing.st_mode) ||
+      backing.st_size != 0) return 0;
+  if (fgetxattr(fd, OPATH_XATTR, token, sizeof *token, 0, 0) != sizeof *token ||
+      token->magic_a != OPATH_MAGIC_A || token->magic_b != OPATH_MAGIC_B ||
+      token->backing_dev != (uint64_t)backing.st_dev ||
+      token->backing_ino != (uint64_t)backing.st_ino ||
+      !S_ISSOCK(token->path_stat.st_mode) ||
+      !memchr(token->link_path, 0, sizeof token->link_path)) return 0;
+  return 1;
+}
+
+static void bound_socket_forget_locked(int fd) {
+  struct bound_socket_ref** p = &g_bound_sockets;
+  while (*p) {
+    if ((*p)->fd == fd) { struct bound_socket_ref* old = *p; *p = old->next; free(old); }
+    else p = &(*p)->next;
+  }
+}
+
+int net_opath_socket_stat(int fd, struct stat* out) {
+  if (!out) return 0;
+  struct opath_socket_token token;
+  if (!opath_token_read(fd, &token)) return 0;
+  *out = token.path_stat;
+  return 1;
+}
+
+int net_opath_socket_is(int fd) {
+  struct opath_socket_token token;
+  return opath_token_read(fd, &token);
+}
+
+int net_opath_socket_host_path(int fd, char* out, size_t out_size) {
+  struct opath_socket_token token;
+  if (!out || !out_size || !opath_token_read(fd, &token)) return 0;
+  // The fd may have arrived from another guest process over SCM_RIGHTS. Its
+  // private link belongs to the sender's namespace, not this process's.
+  char dir[sizeof token.link_path];
+  const char* slash = strrchr(token.link_path, '/');
+  if (!slash || strncmp(slash, "/s-", 3)) return 0;
+  size_t dlen = (size_t)(slash - token.link_path);
+  if (!dlen || dlen >= sizeof dir) return 0;
+  memcpy(dir, token.link_path, dlen); dir[dlen] = 0;
+  struct stat dir_stat;
+  if (lstat(dir, &dir_stat) < 0 || !S_ISDIR(dir_stat.st_mode) ||
+      dir_stat.st_uid != geteuid() || (dir_stat.st_mode & 077) != 0) return 0;
+  struct stat link_stat;
+  if (lstat(token.link_path, &link_stat) < 0 || !S_ISSOCK(link_stat.st_mode) ||
+      link_stat.st_dev != token.path_stat.st_dev ||
+      link_stat.st_ino != token.path_stat.st_ino) return 0;
+  if (strlen(token.link_path) + 1 > out_size) return 0;
+  strcpy(out, token.link_path);
+  return 1;
+}
+
 void net_set_unix_prefix(const char* host_prefix) {
   if (!host_prefix) host_prefix = "";
   snprintf(g_prefix, sizeof g_prefix, "%s", host_prefix);
@@ -595,6 +685,77 @@ static long unix_path_to_host(const char* sp, size_t splen, int for_bind,
   if (n < 0 || (size_t)n >= osz) return -L_ENAMETOOLONG;
   if (for_bind) mkdir_parent(out);
   return 0;
+}
+
+// A path-only guest reference to a pathname socket in the guest namespace.
+long net_open_bound_socket_opath(const char* guest_path, int cloexec) {
+  if (!guest_path || guest_path[0] != '/') return NET_OPATH_NOT_BOUND;
+  char host[PATH_MAX]; int abstract = 0;
+  long e = unix_path_to_host(guest_path, strlen(guest_path) + 1, 0,
+                             host, sizeof host, &abstract);
+  if (e < 0 || abstract) return NET_OPATH_NOT_BOUND;
+  struct stat path_stat;
+  if (lstat(host, &path_stat) < 0 || !S_ISSOCK(path_stat.st_mode)) return NET_OPATH_NOT_BOUND;
+  pthread_mutex_lock(&g_lock);
+  // A socket may have been bound by another guest process. The path inode is
+  // the cross-process identity; the local registry is only an extra check
+  // against a recycled fd when this process itself performed the bind.
+  for (struct bound_socket_ref* r = g_bound_sockets; r; r = r->next) {
+    if (r->path_dev != path_stat.st_dev || r->path_ino != path_stat.st_ino) continue;
+    struct stat socket_stat;
+    if (fstat(r->fd, &socket_stat) < 0 || !S_ISSOCK(socket_stat.st_mode) ||
+        socket_stat.st_dev != r->socket_dev || socket_stat.st_ino != r->socket_ino) {
+      pthread_mutex_unlock(&g_lock); return NET_OPATH_NOT_BOUND;
+    }
+    break;
+  }
+    char dir[PATH_MAX]; opath_private_dir(dir, sizeof dir);
+    if (mkdir(dir, 0700) < 0 && errno != EEXIST) {
+      long err = lerr(); pthread_mutex_unlock(&g_lock); return err;
+    }
+    struct stat dir_stat;
+    if (lstat(dir, &dir_stat) < 0 || !S_ISDIR(dir_stat.st_mode) ||
+        dir_stat.st_uid != geteuid() || (dir_stat.st_mode & 077) != 0) {
+      pthread_mutex_unlock(&g_lock); return -L_EACCES;
+    }
+    char link_path[104];
+    int len = snprintf(link_path, sizeof link_path, "%s/s-XXXXXX", dir);
+    if (len < 0 || len >= (int)sizeof link_path) {
+      pthread_mutex_unlock(&g_lock); return -L_ENAMETOOLONG;
+    }
+    int placeholder = mkstemp(link_path);
+    if (placeholder < 0) { long err = lerr(); pthread_mutex_unlock(&g_lock); return err; }
+    close(placeholder); unlink(link_path);
+    if (link(host, link_path) < 0) {
+      long err = lerr(); pthread_mutex_unlock(&g_lock); return err;
+    }
+    struct stat linked;
+    if (lstat(link_path, &linked) < 0 || linked.st_dev != path_stat.st_dev ||
+        linked.st_ino != path_stat.st_ino) {
+      unlink(link_path); pthread_mutex_unlock(&g_lock); return -L_EAGAIN;
+    }
+    char temp[PATH_MAX];
+    snprintf(temp, sizeof temp, "%s/ref-XXXXXX", dir);
+    int writable = mkstemp(temp);
+    if (writable < 0) { long err = lerr(); pthread_mutex_unlock(&g_lock); return err; }
+    struct stat backing = {0};
+    int ok = fstat(writable, &backing) == 0;
+    struct opath_socket_token token = { .magic_a = OPATH_MAGIC_A,
+      .magic_b = OPATH_MAGIC_B, .backing_dev = (uint64_t)backing.st_dev,
+      .backing_ino = (uint64_t)backing.st_ino, .path_stat = path_stat };
+    snprintf(token.link_path, sizeof token.link_path, "%s", link_path);
+    if (ok) ok = fsetxattr(writable, OPATH_XATTR, &token, sizeof token, 0, 0) == 0;
+    if (ok) ok = fchmod(writable, 0400) == 0;
+    int copy = ok ? open(temp, O_EVTONLY | (cloexec ? O_CLOEXEC : 0)) : -1;
+    int saved = errno;
+    unlink(temp);
+    close(writable);
+    if (copy < 0) {
+      unlink(link_path);
+      pthread_mutex_unlock(&g_lock); errno = saved; return lerr();
+    }
+    pthread_mutex_unlock(&g_lock);
+    return copy;
 }
 
 // The inverse, for getsockname/getpeername/accept/recvfrom.
@@ -1501,6 +1662,9 @@ static void ep_unapply(int kq, int fd) {
 // forever — fcntl(11)+close(11) in a 100%-CPU loop until the 90s start timeout.
 void net_fd_closed(int fd) {
   if (fd < 0) return;
+  pthread_mutex_lock(&g_lock);
+  bound_socket_forget_locked(fd);
+  pthread_mutex_unlock(&g_lock);
   rd_rtnl_close(fd);
   if (notifyfd_is(fd)) notifydbg("pid=%d CLOSE notify fd=%d\n", (int)getpid(), fd);
   notifyfd_del(fd);
@@ -2185,6 +2349,29 @@ static long sys_bind(int fd, const void* uaddr, uint32_t len) {
     }
   }
   long out = lret(bind(fd, (struct sockaddr*)&hs, hlen));
+  if (out == 0 && hs.ss_family == AF_UNIX &&
+      ((struct sockaddr_un*)&hs)->sun_path[0]) {
+    struct stat path_stat, socket_stat;
+    const char* path = ((struct sockaddr_un*)&hs)->sun_path;
+    if (lstat(path, &path_stat) == 0 && S_ISSOCK(path_stat.st_mode) &&
+        fstat(fd, &socket_stat) == 0 && S_ISSOCK(socket_stat.st_mode)) {
+      if (g_uid0 && guest_ownership_set(&path_stat, guest_cred_uid(1),
+                                         guest_cred_gid(1)) < 0 && getenv("RDCREDLOG"))
+        fprintf(stderr, "[cred] socket ownership record failed for %s: %s\n",
+                path, strerror(errno));
+      struct bound_socket_ref* ref = malloc(sizeof *ref);
+      pthread_mutex_lock(&g_lock);
+      bound_socket_forget_locked(fd);
+      if (ref) {
+        *ref = (struct bound_socket_ref){ .fd = fd,
+          .path_dev = path_stat.st_dev, .path_ino = path_stat.st_ino,
+          .socket_dev = socket_stat.st_dev, .socket_ino = socket_stat.st_ino,
+          .next = g_bound_sockets };
+        g_bound_sockets = ref;
+      }
+      pthread_mutex_unlock(&g_lock);
+    }
+  }
   if (getenv("RDNETSOCK") && out < 0) fprintf(stderr, "[netsock] bind result=%ld errno=%d\n", out, errno);
   if (out >= 0 && uaddr && len >= 2) {
     uint16_t fam; memcpy(&fam, uaddr, 2);
@@ -2204,7 +2391,32 @@ static long sys_connect(int fd, const void* uaddr, uint32_t len) {
     return -L_EOPNOTSUPP; // no connected netlink peer state
   }
   struct sockaddr_storage hs; socklen_t hlen = 0;
-  long r = sa_to_host(uaddr, len, 0, &hs, &hlen);
+  long r;
+  int opath_target = 0;
+  if (uaddr && len > offsetof(struct lin_sockaddr_un, sun_path) &&
+      *(const uint16_t*)uaddr == L_AF_UNIX) {
+    const struct lin_sockaddr_un* lu = (const struct lin_sockaddr_un*)uaddr;
+    size_t cap = len - offsetof(struct lin_sockaddr_un, sun_path);
+    if (cap > sizeof lu->sun_path) cap = sizeof lu->sun_path;
+    size_t n = strnlen(lu->sun_path, cap);
+    static const char prefix[] = "/proc/self/fd/";
+    if (n < cap && !strncmp(lu->sun_path, prefix, sizeof prefix - 1)) {
+      const char* number = lu->sun_path + sizeof prefix - 1;
+      char* end = NULL;
+      long ref = strtol(number, &end, 10);
+      if (number != end && end && !*end && ref >= 0 && ref <= INT_MAX) {
+        struct sockaddr_un* su = (struct sockaddr_un*)&hs;
+        memset(&hs, 0, sizeof hs);
+        if (net_opath_socket_host_path((int)ref, su->sun_path, sizeof su->sun_path)) {
+          hlen = (socklen_t)(offsetof(struct sockaddr_un, sun_path) + strlen(su->sun_path) + 1);
+          su->sun_len = (uint8_t)hlen;
+          su->sun_family = AF_UNIX;
+          opath_target = 1;
+        }
+      }
+    }
+  }
+  r = opath_target ? 0 : sa_to_host(uaddr, len, 0, &hs, &hlen);
   if (getenv("RDNETSOCK") && uaddr && len >= 2) {
     uint16_t fam; memcpy(&fam, uaddr, 2);
     if (fam == L_AF_UNIX) {

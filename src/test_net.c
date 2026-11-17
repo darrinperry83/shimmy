@@ -16,6 +16,7 @@
 #include <poll.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <sys/proc_info.h>
 #include <libproc.h>
 #include "net.h"
@@ -179,6 +180,63 @@ static void t_unix_prefix(void) {
 
   CHECK(SC2(N_listen, srv, 8) == 0, "listen failed");
 
+  // O_PATH on Darwin's socket pathname cannot use open(2). The bridge must
+  // duplicate this precise listener, preserving its path inode for stat.
+  struct stat path_stat, opath_stat;
+  CHECK(lstat(host, &path_stat) == 0, "socket path stat failed");
+  long opath = net_open_bound_socket_opath(guest, 1);
+  CHECK(opath >= 0, "bound socket O_PATH -> %ld", opath);
+  if (opath >= 0) {
+    CHECK(net_opath_socket_is((int)opath) == 1 && net_opath_socket_is((int)srv) == 0,
+          "O_PATH token confused with listening socket");
+    CHECK(net_opath_socket_stat((int)opath, &opath_stat) == 1 &&
+          S_ISSOCK(opath_stat.st_mode) && opath_stat.st_ino == path_stat.st_ino &&
+          opath_stat.st_dev == path_stat.st_dev, "O_PATH socket stat identity mismatch");
+    CHECK((fcntl((int)opath, F_GETFD) & FD_CLOEXEC) != 0, "O_PATH CLOEXEC missing");
+    int copied = dup((int)opath);
+    CHECK(copied >= 0 && net_opath_socket_stat(copied, &opath_stat) == 1,
+          "O_PATH duplicate lost metadata");
+    net_fd_closed(copied); close(copied);
+    int carrier[2];
+    if (socketpair(AF_UNIX, SOCK_DGRAM, 0, carrier) == 0) {
+      char byte = 's', control[CMSG_SPACE(sizeof(int))];
+      struct iovec iov = { .iov_base = &byte, .iov_len = 1 };
+      struct msghdr msg = { .msg_iov = &iov, .msg_iovlen = 1,
+                            .msg_control = control, .msg_controllen = sizeof control };
+      memset(control, 0, sizeof control);
+      struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
+      cmsg->cmsg_level = SOL_SOCKET; cmsg->cmsg_type = SCM_RIGHTS;
+      cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+      int send_fd = (int)opath;
+      memcpy(CMSG_DATA(cmsg), &send_fd, sizeof send_fd);
+      CHECK(sendmsg(carrier[0], &msg, 0) == 1, "O_PATH SCM_RIGHTS send failed");
+      memset(control, 0, sizeof control); msg.msg_controllen = sizeof control;
+      CHECK(recvmsg(carrier[1], &msg, 0) == 1, "O_PATH SCM_RIGHTS receive failed");
+      cmsg = CMSG_FIRSTHDR(&msg);
+      int received = -1;
+      if (cmsg && cmsg->cmsg_type == SCM_RIGHTS)
+        memcpy(&received, CMSG_DATA(cmsg), sizeof received);
+      CHECK(received >= 0 && net_opath_socket_stat(received, &opath_stat) == 1 &&
+            opath_stat.st_ino == path_stat.st_ino, "O_PATH metadata lost across SCM_RIGHTS");
+      if (received >= 0) {
+        pid_t child = fork();
+        if (child == 0) {
+          char target[104];
+          _exit(net_opath_socket_host_path(received, target, sizeof target) ? 0 : 1);
+        }
+        int status = 0;
+        CHECK(child > 0 && waitpid(child, &status, 0) == child &&
+              WIFEXITED(status) && WEXITSTATUS(status) == 0,
+              "SCM_RIGHTS socket reference lost link in a different process");
+      }
+      net_fd_closed(received); if (received >= 0) close(received);
+      close(carrier[0]); close(carrier[1]);
+    } else CHECK(0, "socketpair for O_PATH fd passing failed");
+    net_fd_closed((int)opath); close((int)opath);
+  }
+  CHECK(net_open_bound_socket_opath("/tmp/.X11-unix/not-a-socket", 0) == NET_OPATH_NOT_BOUND,
+        "unknown path should retain normal open behavior");
+
   long cli = SC3(N_socket, LAF_UNIX, LSOCK_STREAM, 0);
   CHECK(cli >= 0, "client socket -> %ld", cli);
   r = SC3(N_connect, cli, &sa, salen);
@@ -234,7 +292,19 @@ static void t_unix_prefix(void) {
   r = SC3(N_connect, c2, &bad, un_len(&bad, strlen(bad.sun_path) + 1));
   CHECK(r == -LENOENT, "connect to missing path -> %ld (want -2)", r);
   OK("missing path -> -ENOENT(-2), the LINUX value");
-  close((int)c2); close((int)acc); close((int)cli); close((int)srv);
+  close((int)c2); close((int)acc); close((int)cli);
+  net_fd_closed((int)srv); close((int)srv);
+  unlink(host);
+  CHECK(net_open_bound_socket_opath(guest, 0) == NET_OPATH_NOT_BOUND,
+        "unlinked listener must not resolve to a stale socket");
+  long replacement = SC3(N_socket, LAF_UNIX, LSOCK_STREAM, 0);
+  CHECK(replacement >= 0 && SC3(N_bind, replacement, &sa, salen) == 0,
+        "replacement listener bind failed");
+  CHECK(SC2(N_listen, replacement, 1) == 0, "replacement listener listen failed");
+  long replacement_path = net_open_bound_socket_opath(guest, 0);
+  CHECK(replacement_path >= 0, "replacement O_PATH returned stale reference");
+  if (replacement_path >= 0) { net_fd_closed((int)replacement_path); close((int)replacement_path); }
+  net_fd_closed((int)replacement); close((int)replacement);
   unlink(host);
 }
 

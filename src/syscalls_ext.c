@@ -57,6 +57,7 @@ void fx_note(const char* fmt, ...);
 #include <sys/xattr.h>
 
 #include "syscalls.h"       // linux_errno_from_host()
+#include "net.h"
 #include "syscalls_ext.h"
 #include "signalfd_shim.h"
 #include "timerfd_shim.h"
@@ -491,7 +492,8 @@ static long do_statx(int lx_dirfd, const char* gpath, int lxflags, unsigned mask
 
   if ((lxflags & LX_AT_EMPTY_PATH) && (!gpath || !gpath[0])) {
     int fd = (lx_dirfd == LX_AT_FDCWD) ? AT_FDCWD : lx_dirfd;
-    if (fd == AT_FDCWD) r = stat(".", &st); else r = fstat(fd, &st);
+    if (fd == AT_FDCWD) r = stat(".", &st);
+    else r = net_opath_socket_stat(fd, &st) ? 0 : fstat(fd, &st);
   } else {
     char host[PATH_MAX]; int hdirfd;
     long e = resolve_at_nf(lx_dirfd, gpath, host, sizeof host, &hdirfd,

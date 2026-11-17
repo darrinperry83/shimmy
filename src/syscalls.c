@@ -59,6 +59,7 @@ static int g_idle_saw_address;
 #include <sys/sysctl.h>
 
 #include "syscalls.h"
+#include "net.h"
 #include "syscalls_ext.h"
 #include "signalfd_shim.h"
 #include "timerfd_shim.h"
@@ -3058,10 +3059,12 @@ static long do_fcntl(int fd, int cmd, unsigned long arg) {
     case LF_GETFD:         return herr(fcntl(fd, F_GETFD));
     case LF_SETFD:         return herr(fcntl(fd, F_SETFD, (int)arg));
     case LF_GETFL: {
+      if (net_opath_socket_is(fd)) return LO_PATH;
       int r = fcntl(fd, F_GETFL);
       return r < 0 ? herrno() : open_flags_m2l(r);
     }
     case LF_SETFL: {
+      if (net_opath_socket_is(fd)) return -LX_EBADF;
       int mf = 0;
       if (arg & LO_NONBLOCK) mf |= O_NONBLOCK;
       if (arg & LO_APPEND)   mf |= O_APPEND;
@@ -4430,6 +4433,10 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
       }
     }
     int mf = open_flags_l2m((int)a2);
+    if ((a2 & LO_PATH) && !(a2 & LO_NOFOLLOW)) {
+      long socket_fd = net_open_bound_socket_opath(gabs, (a2 & LO_CLOEXEC) != 0);
+      if (socket_fd != NET_OPATH_NOT_BOUND) return socket_fd;
+    }
     int fd = open(host, mf, (mode_t)a3);
     if (fd < 0) {
       if (getenv("RDEXECDBG")) {
@@ -4721,7 +4728,7 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     if (!out) return -LX_EFAULT;
     const char* p = (const char*)a1;
     if ((a3 & LX_AT_EMPTY_PATH) && (!p || !*p)) {
-      if (fstat((int)a0, &st) < 0) return herrno();
+      if (!net_opath_socket_stat((int)a0, &st) && fstat((int)a0, &st) < 0) return herrno();
       if (stat_m2l(&st, out)<0) return herrno();
       if (drm_is_node(gabs)) drm_fake_stat(&out->st_mode, &out->st_rdev, gabs);
       if (cam_is_node(gabs)) cam_fake_stat(&out->st_mode, &out->st_rdev);
@@ -4827,7 +4834,7 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   case 80: {
     struct stat st;
     if (!a1) return -LX_EFAULT;
-    if (fstat((int)a0, &st) < 0) return herrno();
+    if (!net_opath_socket_stat((int)a0, &st) && fstat((int)a0, &st) < 0) return herrno();
     if (stat_m2l(&st, (struct linux_stat*)a1)<0) return herrno();
     if (drm_owns_fd((int)a0)) {
       struct linux_stat* o = (struct linux_stat*)a1;

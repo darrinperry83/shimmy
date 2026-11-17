@@ -4,6 +4,8 @@
 // unix socket, so it must be routed BEFORE linux_syscall() in the trap handler.
 #ifndef RDRIFT_NET_H
 #define RDRIFT_NET_H
+#include <stddef.h>
+#include <sys/stat.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -19,6 +21,20 @@ void net_set_unix_prefix(const char* host_prefix);
 // this process's non-CLOEXEC fds. See net.c: macOS cannot report the peer of a socketpair, so the
 // shim has to remember which process it handed the other end to.
 void net_note_spawned_child(int pid);
+
+// Return a guest-visible reference token for a pathname socket in the guest
+// namespace. NET_OPATH_NOT_BOUND means no socket at the path; other negative
+// values are Linux errnos. Do not reserve the fd:
+// unlike shim-owned transport fds it belongs to the guest and may be inherited.
+#define NET_OPATH_NOT_BOUND (-4096L)
+long net_open_bound_socket_opath(const char* guest_path, int cloexec);
+// Path metadata for a reference token (1=found, 0=ordinary fd).
+int net_opath_socket_stat(int fd, struct stat* out);
+int net_opath_socket_is(int fd);
+// Resolve a /proc/self/fd/<N> socket reference to the private hard link that
+// survives unlink of the original pathname. 1=ours, 0=not an O_PATH token.
+int net_opath_socket_host_path(int fd, char* out, size_t out_size);
+void net_fd_closed(int fd);
 
 // True for the syscall numbers this module implements. Must cover at least:
 //   19 eventfd2, 20/21/22 epoll_create1/epoll_ctl/epoll_pwait, 441 epoll_pwait2,
