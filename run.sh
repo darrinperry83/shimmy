@@ -130,11 +130,10 @@ if [ "$ROOTFS_TYPE" = omarchy ]; then
   # flip is what drm_present_fb stages and window.m hands to the Dock's direct-scanout
   # service — no nested wayland-0 involved. Its inner wayland-1 socket (where
   # quickshell/foot connect) is shared via RDSOCKETGROUP/RDUNIXPREFIX.
-  # Route the compositor's clear/draw through the in-process host Metal broker
-  # (rdmetal direct mode) instead of the softpipe fallback.  Host-side vars turn
-  # on the shim syscall-0x2002 broker (rdgpu_mock_gate.c) + the same-image Metal
-  # fixture; RDENV_* vars are forwarded to the guest driver (rdmetal_screen.c).
-  RDMETAL_LEDGER_MOCK=1 RDMETAL_SAME_IMAGE_METAL_FIXTURE=1 \
+  # The shim's default syscall-0x2002 route is the local Metal broker. The
+  # older Mesa binary still calls its direct-mode selector SHIM_OP5_MOCK;
+  # that guest setting does not enable the host mock gate. RDENV_* is passed
+  # to the guest driver. The Mesa softpipe fallback remains a separate gap.
   RDMETAL_VIRTUAL_DMABUF_TEST=1 \
   RDSOCKETGROUP="$GRP" RDUNIXPREFIX="$GRP" \
   RDENV_XDG_RUNTIME_DIR=/tmp \

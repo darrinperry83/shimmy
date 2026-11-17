@@ -47,7 +47,10 @@ Arch run reached the Metal draw host with `result=0`; an opt-in diagnostic
 readback showed a nonblack center pixel. `tests/run-rdgpu-metal-triangle.py`
 reproduces that check. The production route does not perform that diagnostic
 IOSurface CPU readback unless `RDMETAL_VERIFY_DRAW_PIXEL=1` is set. This is
-one GLES draw, not a zero-softpipe desktop proof.
+one GLES draw, not a zero-softpipe desktop proof. The Omarchy launcher no
+longer requests the host mock and same-image fixture; it selects the local
+broker on the next launch. An end-to-end Omarchy GUI run with that launcher
+is still unverified.
 
 | Area | Verified or present | Missing for this contract |
 | --- | --- | --- |
@@ -68,7 +71,7 @@ Source checkpoints: `src/vt.c`, `src/window.m`, `src/drmasahi.c`, `src/rdgpu_moc
 `src/shim.c`, `run.sh`; the external Mesa source currently used to build rdmetal is
 `integrated-mesa-next/mesa/src/gallium/drivers/rdmetal/rdmetal_screen.c` and
 `rdmetal_clear_context.c` in the existing development workspace. The direct Omarchy launcher
-currently enables `RDMETAL_LEDGER_MOCK` and `RDMETAL_SAME_IMAGE_METAL_FIXTURE`. The DRM flip
+uses the local broker, while its installed Mesa driver still has a hybrid softpipe path. The DRM flip
 path reads a CPU BO and calls `gpuwin_present_crtc` with bytes. These facts make a visible
 desktop insufficient proof of the full-GPU requirement.
 
