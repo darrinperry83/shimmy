@@ -1565,7 +1565,43 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (a0) *(int*)a0 = 0;                                      // MPOL_DEFAULT
     return 0;
   case 237: return 0;                                           // set_mempolicy: no-op
-  case 238: case 239: return -LX_ENOSYS;                        // migrate_pages/move_pages
+  case 238: return -LX_ENOSYS;                                  // migrate_pages
+  case 239: {                                                   // move_pages: query current process
+    /* Shimmy presents one NUMA node. Darwin has no equivalent to migrating
+     * Linux pages, but a query can report an actual resident guest page on
+     * that node. Do not report a fabricated location for holes or pages the
+     * host has not made resident. */
+    long pid = (long)(int)a0;
+    size_t count = (size_t)a1;
+    void *const *pages = (void *const *)a2;
+    const int *nodes = (const int *)a3;
+    int *status = (int *)a4;
+    unsigned flags = (unsigned)a5;
+    if (flags & ~3u) return -LX_EINVAL;  // MPOL_MF_MOVE / MOVE_ALL
+    if (pid && pid != syscalls_guest_pid()) return -LX_EOPNOTSUPP;
+    if (nodes || flags) return -LX_EOPNOTSUPP; // no page migration
+    if (!count) return 0;
+    if (!pages || !status) return -LX_EFAULT;
+    if (count > SIZE_MAX / sizeof(*pages) ||
+        count > SIZE_MAX / sizeof(*status)) return -LX_EINVAL;
+    if (!host_range_mapped((unsigned long)pages, count * sizeof(*pages)) ||
+        !host_range_mapped((unsigned long)status, count * sizeof(*status)))
+      return -LX_EFAULT;
+    const size_t page = (size_t)getpagesize();
+    for (size_t i = 0; i < count; ++i) {
+      unsigned long addr = (unsigned long)pages[i];
+      unsigned char resident = 0;
+      if (addr < FOUR_GB || (addr & (page - 1)) ||
+          !host_range_mapped(addr, page)) {
+        status[i] = -LX_EFAULT;
+      } else if (mincore((void *)addr, page, (char *)&resident) < 0) {
+        status[i] = -LX_EFAULT;
+      } else {
+        status[i] = resident & 1 ? 0 : -LX_ENOENT;
+      }
+    }
+    return 0;
+  }
   case 241: return -LX_EPERM;                                   // perf_event_open
   // 243 recvmmsg is now HANDLED in net.c, next to sendmmsg. net_owns() claims both
   // before this table is reached; leaving either at -ENOSYS is a hard failure for any

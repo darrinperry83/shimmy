@@ -16,6 +16,7 @@ void syscalls_set_exe(const char* guest_path);
 // The guest cwd. execve is serviced by re-exec'ing the shim, so this must be carried across it
 // explicitly or every exec'd program silently restarts at "/" — see the note in syscalls.c.
 const char* syscalls_get_cwd(void);
+long syscalls_guest_pid(void);
 void syscalls_set_cwd(const char* guest_cwd);
 // RDUID0=1: report uid/gid 0 to the guest (the shim IS its kernel, so it can map). Opt-in — file
 // operations still run as the real uid. Read once in syscalls_set_root; see syscalls.c case 174.
