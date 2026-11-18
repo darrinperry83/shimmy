@@ -22,6 +22,9 @@ This file records bounded behavior that has been implemented and tested. A dispa
 | 33 | `mknodat` | `syscall/33-mknodat` | Merged at `b390262`; partial | Regular-file and FIFO creation plus invalid-type errno distinctions pass a disposable ARM64 guest test. Device nodes and sockets remain unsupported; ownership, ACL, and path races unverified. |
 | 288 | `pkey_mprotect` | `syscall/288-pkey-mprotect` | Merged at `1de7cb2`; bounded subset | Default key 0 and legacy key -1 route through guest memory protection; invalid key, alignment, and protection checks pass. Hardware keys, allocation, and MTE remain unsupported. |
 | 438 | `pidfd_getfd` | `syscall/438-pidfd-getfd` | Merged at `f6be319`; bounded subset | A self-process kqueue pidfd can duplicate a regular guest-root file with shared offset and `CLOEXEC`; guest test passes. Cross-process, socket pidfd, synthetic and nonregular fd transfer remain unsupported. |
+| 454 | `futex_wake` | `syscall/454-futex-wake` | Merged at `d74578d`; bounded subset | Private aligned U32 wake routes through the existing futex queue. Flags, mask, count, and invalid addresses are checked in a disposable ARM64 guest test. Shared and NUMA futexes remain unsupported. |
+| 464 | `getxattrat` | `syscall/464-getxattrat` | Merged at `dc82da6`; bounded subset | Guest-root path and dirfd xattr reads, size queries, versioned arguments, flags, and bad-address handling pass a disposable ARM64 guest test. `AT_EMPTY_PATH` fd reads remain unsupported. |
+| 465 | `listxattrat` | `syscall/465-listxattrat` | Merged at `8abbe0f`; bounded subset | Guest-root path, dirfd, and ordinary guest-root fd empty-path xattr lists, size queries, flags, and symlink behavior pass a disposable ARM64 guest test. Broader synthetic fd and filesystem behavior remain unverified. |
 
 ## Already merged before this batch
 
@@ -34,3 +37,5 @@ At the isolated integration head, `./build.sh cli`, `tests/run-inotify-rm-watch.
 After merging the second batch, `./build.sh cli` and `python3 tests/run-kcmp.py`, `python3 tests/run-preadv2.py`, and `python3 tests/run-pwritev2.py` (each with `--sysroot <installed-Arch-root>`) passed together on 2026-11-18. The native ARM64 offset interpretation was checked against Linux `fs/read_write.c` `pos_from_hilo` and both vectored I/O tests exercise x3/x4 separately.
 
 After merging the third batch, `./build.sh cli` and `python3 tests/run-mknodat.py`, `python3 tests/run-pkey-mprotect.py`, and `python3 tests/run-pidfd-getfd.py` (each with `--sysroot <installed-Arch-root>`) passed together on 2026-11-18. No live GUI or installed rootfs was modified.
+
+After merging the fourth batch, `./build.sh cli`, `python3 tests/run-futex-wake2.py`, `python3 tests/run-getxattrat.py --sysroot <installed-Arch-root>`, and `python3 tests/run-listxattrat.py --sysroot <installed-Arch-root>` passed together on 2026-11-18. The `getxattrat`/`listxattrat` switch conflict was resolved by retaining both syscall cases. No live GUI or installed rootfs was modified.
