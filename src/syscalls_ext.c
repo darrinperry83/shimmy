@@ -89,6 +89,7 @@ extern void rd_rtnl_dup(int oldfd, int newfd);
 #define LX_EACCES         13
 #define LX_EFAULT         14
 #define LX_EINVAL         22
+#define LX_ESPIPE         29
 #define LX_ERANGE         34
 #define LX_ENAMETOOLONG   36
 #define LX_ENOSYS         38
@@ -2096,7 +2097,21 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (!path) return -LX_EFAULT;
     return guest_execve(path, gargv, genvp);
   }
-  case 223: return 0;                                          // fadvise64: advisory, ignore
+  case 223: {                                                  // fadvise64: bounded NORMAL advice
+    // ARM64 uses (int fd, loff_t offset, loff_t len, int advice). An advice
+    // request is nonbinding, but success must still validate its descriptor,
+    // range and policy. Shimmy has no per-open-file readahead state, so only
+    // NORMAL (the initial/default state) is a truthful no-op today.
+    int fd = (int)a0, advice = (int)a3;
+    if (fd < 0 || shim_fd_reserved(fd)) return -LX_EBADF;
+    struct stat st;
+    if (fstat(fd, &st) < 0) return -LX_EBADF;
+    if (S_ISFIFO(st.st_mode)) return -LX_ESPIPE;
+    if ((int64_t)a1 < 0 || (int64_t)a2 < 0) return -LX_EINVAL;
+    if (advice < 0 || advice > 5) return -LX_EINVAL;
+    if (!S_ISREG(st.st_mode) || advice != 0) return -LX_EOPNOTSUPP;
+    return 0;
+  }
   case 224: case 225: return -LX_EPERM;                        // swapon/swapoff
   case 227: {                                                  // msync (MS_SYNC value differs!)
     int lf = (int)a2, hf = 0;
