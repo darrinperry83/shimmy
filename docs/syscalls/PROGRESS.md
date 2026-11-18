@@ -86,6 +86,7 @@ This file records bounded behavior that has been implemented and tested. A dispa
 | 270 | `process_vm_readv` | `syscall/270-process-vm-readv` | Squash merged at `3cdd854`; bounded subset | Self-guest reads use checked vectors and guest-memory range checks, with partial remote-fault byte counts. Other processes and overlapping vectors remain unsupported. ARM64 guest probe and private Arch boot gate pass. |
 | 450 | `set_mempolicy_home_node` | `syscall/450-set-mempolicy-home-node` | Squash merged at `827551a`; default-policy ABI subset | Validates alignment, flags, node and length; zero length succeeds and nonempty ranges return `ENOENT` because no per-VMA BIND/PREFERRED_MANY policy exists. No home-node change is claimed. ARM64 probe and private Arch boot gate pass. |
 | 69 | `preadv` | `syscall/69-preadv` | Squash merged at `2f49696`; bounded subset | Checked guest vectors and copyout for regular files up to 1 MiB, including full 64-bit ARM64 offset and short read behavior. Nonregular fds and broader Linux semantics remain unsupported. ARM64 guest probe and private Arch boot gate pass. |
+| 70 | `pwritev` | `syscall/70-pwritev` | Squash merged; bounded subset | Checked guest vectors and staged up to 1 MiB before a positioned write to a regular file; the 64-bit ARM64 offset and unchanged file position pass a focused guest probe and private Arch boot gate. Append, nonregular fds, larger calls and concurrent mutation remain unsupported. |
 
 ## Already merged before this batch
 

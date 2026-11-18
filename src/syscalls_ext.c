@@ -1736,7 +1736,49 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return (long)copied;
   }
   case 70: {                                                   // pwritev
-    ssize_t r = pwritev((int)a0, (const struct iovec*)a1, (int)a2, (off_t)a3);
+    /* ARM64 carries the full signed offset in x3. Gather bounded, checked
+     * guest vectors before letting the host write any bytes. */
+    int64_t pos = (int64_t)a3;
+    if (pos < 0 || a2 > 1024) return -LX_EINVAL;
+    int fd = (int)a0;
+    if (fd < 0 || shim_fd_reserved(fd)) return -LX_EBADF;
+    int fl = fcntl(fd, F_GETFL);
+    if (fl < 0 || (fl & O_ACCMODE) == O_RDONLY) return -LX_EBADF;
+    if (fl & O_APPEND) return -LX_EOPNOTSUPP;
+    struct stat st;
+    if (fstat(fd, &st) < 0) return eret();
+    if (!S_ISREG(st.st_mode)) return -LX_ESPIPE;
+    if (!a2) return 0;
+    if (!a1) return -LX_EFAULT;
+    struct iovec vec[1024];
+    size_t nvec = (size_t)a2;
+    if (gmem_guest_export_copyin(NULL, a1, vec, nvec * sizeof vec[0]) != 0)
+      return -LX_EFAULT;
+    size_t requested = 0;
+    for (size_t i = 0; i < nvec; i++) {
+      if (vec[i].iov_len > SSIZE_MAX - requested) return -LX_EINVAL;
+      requested += vec[i].iov_len;
+    }
+    size_t count = requested > 1024 * 1024 ? 1024 * 1024 : requested;
+    if (!count) return 0;
+    if (pos > INT64_MAX - (int64_t)count) return -LX_EINVAL;
+    char *buf = malloc(count);
+    if (!buf) return -LX_ENOMEM;
+    size_t gathered = 0;
+    for (size_t i = 0; i < nvec && gathered < count; i++) {
+      size_t part = vec[i].iov_len;
+      if (part > count - gathered) part = count - gathered;
+      if (part && gmem_guest_export_copyin(NULL,
+            (uint64_t)(uintptr_t)vec[i].iov_base, buf + gathered, part) != 0) {
+        free(buf);
+        return -LX_EFAULT;
+      }
+      gathered += part;
+    }
+    ssize_t r = pwrite(fd, buf, count, (off_t)pos);
+    int saved_errno = errno;
+    free(buf);
+    errno = saved_errno;
     return r < 0 ? eret() : r;
   }
   case 71: {                                                   // sendfile(out, in, off*, count)
