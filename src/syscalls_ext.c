@@ -3267,6 +3267,27 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (rounded > ULONG_MAX - a0) return -LX_EINVAL;
     return rounded ? -LX_ENOENT : 0;
   }
+  case 459: {                                                   // lsm_get_self_attr
+    // The guest has no active LSM attribute hooks. Match Linux's zero-hook
+    // path, including its validation order and size=0 writeback. No label is
+    // invented and a successful security-context read is never claimed.
+    if ((uint32_t)a0 == 0 || !a2) return -LX_EINVAL;           // undefined attr, null size
+    uint32_t available;
+    if (gmem_guest_export_copyin(NULL, a2, &available, sizeof available) != 0)
+      return -LX_EFAULT;
+    (void)available;
+    if ((uint32_t)a3) {
+      if ((uint32_t)a3 != 1 || !a1) return -LX_EINVAL;          // LSM_FLAG_SINGLE only
+      uint64_t id;
+      if (gmem_guest_export_copyin(NULL, a1, &id, sizeof id) != 0)
+        return -LX_EFAULT;
+      if (!id) return -LX_EINVAL;
+    }
+    const uint32_t required = 0;
+    if (gmem_guest_copyout_checked(a2, &required, sizeof required) != 0)
+      return -LX_EFAULT;
+    return -LX_EOPNOTSUPP;                                     // no getselfattr hook
+  }
   case 461: {                                                   // lsm_list_modules
     // No Linux Security Module is modeled in this guest. Linux permits an
     // empty active-module list: write its byte length (zero), return count

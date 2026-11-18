@@ -89,6 +89,7 @@ This file records bounded behavior that has been implemented and tested. A dispa
 | 70 | `pwritev` | `syscall/70-pwritev` | Squash merged; bounded subset | Checked guest vectors and staged up to 1 MiB before a positioned write to a regular file; the 64-bit ARM64 offset and unchanged file position pass a focused guest probe and private Arch boot gate. Append, nonregular fds, larger calls and concurrent mutation remain unsupported. |
 | 461 | `lsm_list_modules` | `syscall/461-lsm-list-modules` | Squash merged; empty-list ABI | Reports zero guest LSMs with checked size input/output and leaves the ID buffer untouched. Focused ARM64 probe passes; no LSM enforcement, `lsm_get_self_attr`, or `lsm_set_self_attr` is implemented. |
 | 95 | `waitid` | `syscall/95-waitid` | Squash merged; bounded subset | Validates Linux idtype/options and guest result buffer before waiting; translates child status and virtual UID, and does not turn an unknown pidfd into `P_ALL`. ARM64 WNOHANG/WNOWAIT/reap probe and private Arch boot gate pass. Raw rusage and broader child/signal cases remain unsupported. |
+| 459 | `lsm_get_self_attr` | `syscall/459-lsm-get-self-attr` | Squash merged; absent-hook ABI | Validates attr, size and optional ID, writes zero required bytes, then returns `EOPNOTSUPP` because no guest LSM self-attribute hook exists. ARM64 probe and private Arch boot gate pass; no security label is exposed. |
 
 ## Already merged before this batch
 
