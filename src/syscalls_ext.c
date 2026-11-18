@@ -1693,8 +1693,47 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
 
   // ===== 69..77: vectored / zero-copy IO ====================================
   case 69: {                                                   // preadv
-    ssize_t r = preadv((int)a0, (const struct iovec*)a1, (int)a2, (off_t)a3);
-    return r < 0 ? eret() : r;
+    /* ARM64 passes the full signed offset in x3; x4 is redundant.  Read
+     * into a bounded host buffer, then copy into admitted guest ranges. */
+    int64_t pos = (int64_t)a3;
+    if (pos < 0 || a2 > 1024) return -LX_EINVAL;
+    int fd = (int)a0;
+    if (fd < 0 || shim_fd_reserved(fd)) return -LX_EBADF;
+    int fl = fcntl(fd, F_GETFL);
+    if (fl < 0 || (fl & O_ACCMODE) == O_WRONLY) return -LX_EBADF;
+    struct stat st;
+    if (fstat(fd, &st) < 0) return eret();
+    if (!S_ISREG(st.st_mode)) return -LX_ESPIPE;
+    if (!a2) return 0;
+    if (!a1) return -LX_EFAULT;
+    struct iovec vec[1024];
+    size_t nvec = (size_t)a2;
+    if (gmem_guest_export_copyin(NULL, a1, vec, nvec * sizeof vec[0]) != 0)
+      return -LX_EFAULT;
+    size_t requested = 0;
+    for (size_t i = 0; i < nvec; i++) {
+      if (vec[i].iov_len > SSIZE_MAX - requested) return -LX_EINVAL;
+      requested += vec[i].iov_len;
+    }
+    size_t count = requested > 1024 * 1024 ? 1024 * 1024 : requested;
+    if (!count) return 0;
+    char *buf = malloc(count);
+    if (!buf) return -LX_ENOMEM;
+    ssize_t n = pread(fd, buf, count, (off_t)pos);
+    if (n < 0) { long error = eret(); free(buf); return error; }
+    size_t copied = 0;
+    for (size_t i = 0; i < nvec && copied < (size_t)n; i++) {
+      size_t part = vec[i].iov_len;
+      if (part > (size_t)n - copied) part = (size_t)n - copied;
+      if (part && gmem_guest_copyout_checked((uint64_t)(uintptr_t)vec[i].iov_base,
+                                              buf + copied, part) != 0) {
+        free(buf);
+        return copied ? (long)copied : -LX_EFAULT;
+      }
+      copied += part;
+    }
+    free(buf);
+    return (long)copied;
   }
   case 70: {                                                   // pwritev
     ssize_t r = pwritev((int)a0, (const struct iovec*)a1, (int)a2, (off_t)a3);
