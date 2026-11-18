@@ -2351,7 +2351,13 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   }
   case 265: return -LX_EOPNOTSUPP;                            // open_by_handle_at (no stored handles)
   case 266: return -LX_EPERM;                                   // clock_adjtime
-  case 267: sync(); return 0;                                   // syncfs
+  case 267: {                                                  // syncfs
+    /* Darwin sync() may return before writeback completes and cannot report
+     * Linux's per-superblock errors.  Validate the fd, but do not claim a
+     * durable filesystem flush that the host API cannot provide. */
+    if (fcntl((int)a0, F_GETFD) < 0) return eret();
+    return -LX_ENOSYS;
+  }
   case 268: return -LX_EPERM;                                   // setns
   // 269 sendmmsg is now HANDLED in net.c -- it is not optional, glibc's
   // getaddrinfo(AF_UNSPEC) sends its A and AAAA queries in one sendmmsg and treats a
