@@ -4343,8 +4343,19 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   case 32: return herr(flock((int)a0, (int)a1));
 
   // ---------- 34 mkdirat ----------
-  case 34:
-    if ((r = resolve_f((int)a0, (const char*)a1, RSV_NOFOLLOW, host, sizeof host, gabs, sizeof gabs)) < 0)
+  case 34: {
+    // Snapshot the pathname before the resolver dereferences guest memory.
+    // A bad guest pointer must return EFAULT without creating a host folder.
+    if (!a1) return -LX_EFAULT;
+    char guest_path[PATH_MAX];
+    size_t i;
+    for (i = 0; i < sizeof guest_path; ++i) {
+      if (gmem_guest_export_copyin(NULL, a1 + i, &guest_path[i], 1) != 0)
+        return -LX_EFAULT;
+      if (!guest_path[i]) break;
+    }
+    if (i == sizeof guest_path) return -LX_ENAMETOOLONG;
+    if ((r = resolve_f((int)a0, guest_path, RSV_NOFOLLOW, host, sizeof host, gabs, sizeof gabs)) < 0)
       return r;
     // cgroup v2 child cgroups live in the in-memory registry, not the rootfs.
     if (cgroup_under(gabs)) {
@@ -4377,6 +4388,7 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
       }
       return mr;
     }
+  }
 
   // ---------- 35 unlinkat ----------
   case 35: {

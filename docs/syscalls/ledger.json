@@ -698,7 +698,7 @@
       "verified_compatible": false
     },
     {
-      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "classification_reason": "bounded: checked guest pathname and ordinary directory creation verified",
       "dispatch_locations": [
         {
           "file": "src/syscalls.c",
@@ -708,12 +708,12 @@
       ],
       "dispatch_state": "case",
       "name": "mkdirat",
-      "notes": "",
+      "notes": "Guest pathname copied before resolution; virtual cgroup and broader permission semantics unverified. See docs/syscalls/34-mkdirat-guest-path.md.",
       "number": 34,
       "priority": "P2_other",
       "runtime_evidence": [],
-      "semantic_status": "unknown",
-      "test_evidence": [],
+      "semantic_status": "partial_or_unknown",
+      "test_evidence": ["tests/run-mkdirat-path.py"],
       "trap_override": false,
       "verified_compatible": false
     },
