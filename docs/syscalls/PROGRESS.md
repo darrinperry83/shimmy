@@ -58,6 +58,12 @@ This file records bounded behavior that has been implemented and tested. A dispa
 | 118 | `sched_setparam` | `syscall/118-sched-setparam` | Squash merged at `405fa07`; bounded subset | Current guest thread/default priority zero only; checked pointer and target errors. Other thread scheduling remains unsupported. ARM64 guest test passes. |
 | 119 | `sched_setscheduler` | `syscall/119-sched-setscheduler` | Squash merged at `052e41a`; bounded subset | Current guest thread/default `SCHED_OTHER` and priority zero only; rejects unsupported policies instead of false success. ARM64 guest test passes. |
 | 120 | `sched_getscheduler` | `syscall/120-sched-getscheduler` | Squash merged at `888fcc0`; bounded subset | Reports current guest thread's `SCHED_OTHER`; rejects invalid, absent, or other known guest thread targets. ARM64 guest test passes. |
+| 121 | `sched_getparam` | `syscall/121-sched-getparam` | Squash merged at `6a5c55c`; bounded subset | Current guest thread's priority zero with checked copyout; invalid and unknown targets rejected. ARM64 guest test passes. |
+| 125 | `sched_get_priority_max` | `syscall/125-sched-priority-max` | Squash merged at `d8fba10`; Linux ABI range | FIFO/RR 99, valid non-RT policy 0, invalid policy `EINVAL`; no Darwin priority passthrough. ARM64 guest test passes. |
+| 126 | `sched_get_priority_min` | `syscall/126-sched-get-priority-min` | Squash merged at `c4e060a`; Linux ABI range | FIFO/RR 1, valid non-RT policy 0, invalid policy `EINVAL`; no Darwin priority passthrough. ARM64 guest test passes. |
+| 127 | `sched_rr_get_interval` | `syscall/127-sched-rr-get-interval` | Squash merged at `4341d2a`; honest errors | Removes fabricated fixed 1 ms interval. Valid current-thread requests remain unsupported until a guest scheduler slice is modeled. ARM64 guest test passes. |
+| 122 | `sched_setaffinity` | `syscall/122-sched-setaffinity` | Squash merged at `eca4858`; bounded subset | Checked guest mask, current-thread unrestricted virtual CPU set only; restricted masks remain unsupported. ARM64 guest test passes. |
+| 123 | `sched_getaffinity` | `syscall/123-sched-getaffinity` | Squash merged at `604a899`; bounded subset | Checked eight-byte virtual CPU mask capped to 32 guest CPUs; invalid target and pointer errors. ARM64 guest test passes. |
 
 ## Already merged before this batch
 
@@ -70,6 +76,8 @@ The CLI build and all eleven disposable ARM64 guest tests for native AIO (0–4,
 The next six squash merges (`syslog`, `personality`, `mbind`, `get_mempolicy`, `set_mempolicy`, `process_madvise`) passed a combined CLI build and all six disposable ARM64 guest tests on 2026-11-18. Their individual docs identify the supported subset and unsupported Linux semantics. No live desktop or production rootfs was changed or tested by this batch.
 
 The scheduler trio (118–120) passed a combined CLI build and all three disposable ARM64 guest tests on 2026-11-18. This is only the current guest thread's default scheduler policy and priority; other-thread policy changes, real-time scheduling, and timing guarantees are not supported.
+
+The next scheduler/affinity set (121–123 and 125–127) passed a combined CLI build and six disposable ARM64 guest tests on 2026-11-18. Guest PID identity and the virtual CPU topology are under additional review before this set is pushed; the host `/proc/cpuinfo` presentation is not yet unified with the 32-CPU status/sysfs cap.
 
 ## Batch integration proof
 
