@@ -136,3 +136,35 @@ place of `dbus-broker-launch`. The daemon stayed up, but SDDM again left its
 the observation. The clone-only service override was removed afterward.
 This does not prove the D-Bus exchange is correct, but replacing the broker
 alone does not resolve the observed SDDM parent wait.
+
+## Repeat-registration isolation and next gate
+
+SDDM 0.21.0 [calls `QDBusConnection::registerService`](https://github.com/sddm/sddm/blob/v0.21.0/src/daemon/DisplayManager.cpp)
+in its display-manager, seat, and session constructors. A temporary aarch64 `LD_PRELOAD` probe was
+compiled outside the repository and used only by the disposable Arch clone.
+It logged two calls from the **same SDDM parent PID**, at executable offsets
+`0x5e85c` and `0x5e648`. Forwarding the first call and returning success from
+only the repeat call let the parent drain the previously queued 44-byte helper
+authentication message and send its reply. Without that bypass, the parent
+remained in a futex wait and left those bytes unread. This is a causal
+diagnostic for the SDDM parent wait, not a suitable Shimmy or package fix;
+the interposer was removed. The proper fix must preserve normal Qt/D-Bus
+behavior for unmodified packages.
+
+The same bypass boot exposed a second gate. PAM opened the `sddm` user's
+session, then logind timed out after 25 seconds each while starting
+`user-runtime-dir@962.service` and `user@962.service`. It returned
+`io.systemd.System` from CreateSession. The greeter KWin process then started
+without `XDG_RUNTIME_DIR` and exited because it could not create a Wayland
+socket. In an isolated debug rerun, PID 1's guest thread was parked in
+`sys_epoll_wait_ts`/`kevent` during the stalled handoff, and no
+`systemd-user-runtime-dir` helper was observed in the process inventory.
+That does not yet establish whether the start request was dropped, delayed,
+or rejected before reaching PID 1. The logind-to-manager request/reply is the
+next trace target. The clone-only interposer and service overrides were
+removed; no live root or session was changed.
+
+An A/B boot masked the clone's noisy `sshd.service`, which had been logging
+unsupported masked `ppoll` calls and inflating the test journal. SDDM still
+stalled with 44 bytes queued, so SSH log volume alone did not cause the parent
+wait. The SSH mask was removed from the clone afterward.
