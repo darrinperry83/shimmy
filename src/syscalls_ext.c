@@ -3455,14 +3455,21 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (target < 0) return -LX_EINVAL;
     if (target && target != guest_tid())
       return guest_tid_known((int)target) ? -LX_EOPNOTSUPP : -LX_ESRCH;
-    uint32_t size = *(const uint32_t *)a1;
+    uint32_t size;
+    if (gmem_guest_export_copyin(NULL, a1, &size, sizeof size) != 0)
+      return -LX_EFAULT;
     if (size && size < sizeof(attr)) return -LX_EINVAL;
     if (size > 4096) return -LX_E2BIG;
-    memcpy(&attr, (const void *)a1, sizeof(attr));
+    if (gmem_guest_export_copyin(NULL, a1, &attr, sizeof attr) != 0)
+      return -LX_EFAULT;
     if (size > sizeof(attr)) {
-      const uint8_t *extra = (const uint8_t *)a1 + sizeof(attr);
-      for (uint32_t i = sizeof(attr); i < size; i++)
-        if (extra[i - sizeof(attr)]) return -LX_E2BIG;
+      uint8_t extra[4096 - sizeof(attr)];
+      if (a1 > UINT64_MAX - size ||
+          gmem_guest_export_copyin(NULL, a1 + sizeof(attr), extra,
+                                   size - sizeof(attr)) != 0)
+        return -LX_EFAULT;
+      for (uint32_t i = 0; i < size - sizeof(attr); i++)
+        if (extra[i]) return -LX_E2BIG;
     }
     if (attr.policy != 0 || attr.flags || attr.priority || attr.runtime ||
         attr.deadline || attr.period) return -LX_EOPNOTSUPP;
