@@ -210,6 +210,8 @@ An isolated #282 userfaultfd fault/copy/wake experiment passed ARM64 guest and p
 
 `clock_getres` (#114) now validates its guest output, propagates host query errors, and leaves a null output pointer valid. The isolated branch passed an ARM64 guest probe and private Arch login/D-Bus boot; the combined integration CLI build and guest probe also passed. The existing boottime and coarse-clock approximations were not changed.
 
+`renameat2` (#276) now rejects unsupported or conflicting flags before touching paths and snapshots both guest pathnames before host rename. The ARM64 guest probe covers invalid pointers and flags, NOREPLACE, EXCHANGE, and ordinary rename with final file contents. CLI build, focused probe, and isolated Arch login/D-Bus boot passed. WHITEOUT remains unsupported.
+
 The combined integration head also passed a fresh private Arch login/D-Bus boot after the #424 merge; the exact clone and guest were cleaned. The `prlimit64` v2 branch remains withheld because its separate controlled Arch boot reached login without D-Bus settling, while a fresh baseline settled normally. The #425 io_uring and #77 tee opt-in branches remain isolated pending private descriptor and performance reviews.
 ## Batch integration proof
 

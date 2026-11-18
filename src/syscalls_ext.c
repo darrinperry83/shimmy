@@ -3221,16 +3221,23 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   }
   case 276: {                                                   // renameat2
     unsigned flags = (unsigned)a4;
-    e  = resolve_at_nf((int)a0, (const char*)a1, host,  sizeof host,  &hdirfd,  1);
+    // Linux forbids combining NOREPLACE and EXCHANGE. WHITEOUT and unknown
+    // bits cannot be reproduced by Darwin's renameatx_np. Check these before
+    // any guest pathname access or host filesystem operation.
+    if ((flags & ~(unsigned)(LX_RENAME_NOREPLACE | LX_RENAME_EXCHANGE)) ||
+        flags == (LX_RENAME_NOREPLACE | LX_RENAME_EXCHANGE)) return -LX_EINVAL;
+    char old_guest[PATH_MAX], new_guest[PATH_MAX];
+    e = copy_guest_cstr(a1, old_guest, sizeof old_guest);
     if (e < 0) return e;
-    e  = resolve_at_nf((int)a2, (const char*)a3, host2, sizeof host2, &hdirfd2, 1);
+    e = copy_guest_cstr(a3, new_guest, sizeof new_guest);
+    if (e < 0) return e;
+    e  = resolve_at_nf((int)a0, old_guest, host,  sizeof host,  &hdirfd,  1);
+    if (e < 0) return e;
+    e  = resolve_at_nf((int)a2, new_guest, host2, sizeof host2, &hdirfd2, 1);
     if (e < 0) return e;
     if (flags == 0) return ok0(renameat(hdirfd, host, hdirfd2, host2));
 #ifdef RENAME_EXCL
-    unsigned hf = 0;
-    if (flags & LX_RENAME_NOREPLACE) hf |= RENAME_EXCL;
-    if (flags & LX_RENAME_EXCHANGE)  hf |= RENAME_SWAP;
-    if (flags & ~(unsigned)(LX_RENAME_NOREPLACE | LX_RENAME_EXCHANGE)) return -LX_EINVAL;
+    unsigned hf = flags == LX_RENAME_NOREPLACE ? RENAME_EXCL : RENAME_SWAP;
     return ok0(renameatx_np(hdirfd, host, hdirfd2, host2, hf));
 #else
     return -LX_EINVAL;
