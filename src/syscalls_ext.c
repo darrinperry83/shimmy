@@ -2505,12 +2505,27 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return 0;
   }
   case 164: {                                                  // setrlimit
+    // Only Linux resources with a compatible per-process Darwin limit can
+    // be changed here. An unsupported limit must not report success, and
+    // RLIMIT_RSS (5) aliases RLIMIT_AS on Darwin.
+    if (a0 > 15) return -LX_EINVAL;
+    if (a0 == 5 || a0 >= 10) return -LX_EOPNOTSUPP;
     int hr = host_rlimit((int)a0);
-    const struct lx_rlimit* n = (const struct lx_rlimit*)a1;
-    if (!n) return -LX_EFAULT;
-    if (hr < 0) return 0;                                      // limits macOS has no notion of
+    if (hr < 0) return -LX_EOPNOTSUPP;
+    struct lx_rlimit n;
+    if (!a1 || gmem_guest_export_copyin(NULL, a1, &n, sizeof n) != 0)
+      return -LX_EFAULT;
+    if (n.rlim_cur > n.rlim_max) return -LX_EINVAL;
+    // The shim advertises at most 4096 open files through prlimit64 and
+    // getrlimit; accepting a larger soft limit would contradict that view.
+    if (a0 == 7 && n.rlim_cur > 4096) return -LX_EOPNOTSUPP;
+    // Linux's infinity is all-ones, whereas Darwin has a smaller ceiling.
+    // Do not silently turn an otherwise finite Linux value into infinity.
+    if ((n.rlim_cur != LX_RLIM_INFINITY && n.rlim_cur > (uint64_t)RLIM_INFINITY) ||
+        (n.rlim_max != LX_RLIM_INFINITY && n.rlim_max > (uint64_t)RLIM_INFINITY))
+      return -LX_EOPNOTSUPP;
     struct rlimit rl;
-    rl.rlim_cur = host_rlim(n->rlim_cur); rl.rlim_max = host_rlim(n->rlim_max);
+    rl.rlim_cur = host_rlim(n.rlim_cur); rl.rlim_max = host_rlim(n.rlim_max);
     return ok0(setrlimit(hr, &rl));
   }
   case 166: return (long)umask((mode_t)(a0 & 0777));           // umask: Linux masks to S_IRWXUGO
