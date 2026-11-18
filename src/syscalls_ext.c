@@ -2393,7 +2393,11 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return -LX_EOPNOTSUPP;
   }
   case 157: {                                                  // setsid
-    pid_t r = setsid(); return r < 0 ? eret() : r;
+    // The new session is created only for this shim process. Darwin returns
+    // its host PID as the SID, but guest init has PID 1 and must never see
+    // the host PID. The Linux return value is the caller's guest PID.
+    if (setsid() < 0) return eret();
+    return syscalls_guest_pid();
   }
   case 158: {                                                  // getgroups (gid_t is u32 on both)
     // RDUID0=1: the host process is uid 501 and its group list is the HOST's; the guest is uid 0 and
