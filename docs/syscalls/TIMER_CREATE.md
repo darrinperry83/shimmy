@@ -1,13 +1,13 @@
-# `timer_create` (ARM64 syscall 107): requires a POSIX timer backend
+# `timer_create` (ARM64 syscall 107): bounded POSIX timer backend
 
 Linux `timer_create(clockid, sigevent *, timer_t *)` allocates a process-owned timer ID and publishes it to the caller. A null event requests signal delivery by default; `SIGEV_NONE` suppresses notification, while signal and thread-ID modes need delivery through the guest signal system. A newly created timer is disarmed, but the ID must work with `timer_settime`, `timer_gettime`, `timer_getoverrun`, and `timer_delete`. Timers are shared among threads, removed on `fork`, and removed on `exec`.
 
-Shimmy currently returns `ENOSYS` for the entire POSIX timer family (107–111). It has no per-process timer table or expiration worker, and its virtual signal delivery is incomplete. Adding only an integer ID allocator to syscall 107 would report success for a timer that cannot be armed, queried, deleted, or notify its owner. That would be a false compatibility claim. Keep the existing `ENOSYS` result until the family has a coherent backend.
+Shimmy now supports a bounded process-owned timer family for `CLOCK_REALTIME` and `CLOCK_MONOTONIC` with explicit `SIGEV_NONE`. Creation, arming, querying, overrun readback, and deletion work together. Default signal delivery, `SIGEV_SIGNAL`, thread notification, and other clocks remain unsupported because the virtual signal path is incomplete.
 
-## Staged backend branch
+## Supported subset and next work
 
-The separate `syscall/107-timer-create-backend` branch now contains a process-owned registry and a Linux ARM64 `sigevent` reader. It creates disarmed `CLOCK_REALTIME` or `CLOCK_MONOTONIC` timers only with explicit `SIGEV_NONE`, writes stable 32-bit IDs through checked guest memory, serializes concurrent creation, and clears the registry in a fork child. A disposable static ARM64 guest test covers pointer, clock, and notification errors, sequential IDs, and fork isolation. `./build.sh cli` passes. This branch **must remain unmerged** while `timer_settime`, `timer_gettime`, `timer_getoverrun`, and `timer_delete` still return `ENOSYS`; the new ID cannot yet be used. The test establishes a registry foundation, not useful POSIX timer support.
+The registry writes stable 32-bit IDs through checked guest memory, serializes concurrent creation, and clears in a fork child. Disposable static ARM64 tests cover pointer, clock, and notification errors, sequential IDs, fork isolation, arming, readback, overrun, and deletion. The CLI build and all five family tests pass together.
 
-The first bounded implementation should handle `CLOCK_MONOTONIC` and `CLOCK_REALTIME` with `SIGEV_NONE`: define a per-process timer registry with stable IDs, a locking/lifecycle rule for concurrent threads, and working create, settime, gettime, overrun, and delete operations. Add default and explicit signal notification only after the guest signal path can queue `SI_TIMER` with the correct timer ID and value. Tests should cover ARM64 `sigevent` and `timer_t` layouts, bad guest pointers, clock validation, disarmed state, one-shot and periodic expirations, concurrent deletion, and fork/exec cleanup. Compare the result against Linux before enabling syscall 107.
+Add default and explicit signal notification only after the guest signal path can queue `SI_TIMER` with the correct timer ID and value. Further tests should cover concurrent deletion, exec cleanup, and a Linux ARM64 oracle before claiming broader compatibility.
 
 Primary source: [Linux `kernel/time/posix-timers.c`, `do_timer_create` and `SYSCALL_DEFINE3(timer_create)`](https://github.com/torvalds/linux/blob/master/kernel/time/posix-timers.c).

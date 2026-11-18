@@ -6,6 +6,6 @@ Only flag 0 or `TIMER_ABSTIME` is supported. Other flag bits return `EOPNOTSUPP`
 
 Focused disposable ARM64 test: `python3 tests/run-timer-settime.py`. It covers relative deadlines, realtime and monotonic absolute deadlines, disarm, periodic forwarding, huge-duration saturation, old-value copyout, and validation errors. Run it with the create and delete tests after `./build.sh cli`.
 
-**Do not merge or publish this branch alone.** `timer_gettime` and `timer_getoverrun` remain `ENOSYS`. The full staged family must pass combined tests before it can be called usable.
+The bounded `SIGEV_NONE` family now passes combined disposable ARM64 tests. Signal delivery and broader POSIX timer behavior remain unsupported.
 
 Primary source: [Linux `kernel/time/posix-timers.c`, `timer_settime` and `common_timer_get`](https://codebrowser.dev/linux/linux/kernel/time/posix-timers.c.html).
