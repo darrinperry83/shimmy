@@ -1840,7 +1840,16 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     }
     return r;
   }
-  case 74: return signalfd4_shim((int)a0, (const uint64_t*)a1, (size_t)a2, (int)a3);
+  case 74: {                                                   // signalfd4
+    // The backend consumes a host pointer; the ARM64 mask lives in guest
+    // memory and must be staged before even its diagnostic dereference.
+    if (!a1) return -LX_EFAULT;
+    if (a2 != sizeof(uint64_t)) return -LX_EINVAL;
+    uint64_t mask;
+    if (gmem_guest_export_copyin(NULL, a1, &mask, sizeof mask) != 0)
+      return -LX_EFAULT;
+    return signalfd4_shim((int)a0, &mask, (size_t)a2, (int)a3);
+  }
   case 75: {                                                   // vmsplice(pipe, iov, nr_segs, flags)
     // vmsplice's observable operation is to append iovec bytes to a pipe.
     // Darwin writev copies the bytes rather than gifting pages to the pipe;
