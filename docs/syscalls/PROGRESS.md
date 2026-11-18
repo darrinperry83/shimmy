@@ -308,3 +308,5 @@ The merged head through #147 passed the combined CLI build and focused probes fo
 `move_mount` (#429) remains withheld. A fresh isolated `ENOSYS` correction passed CLI build and ARM64 guest probe but failed the private Arch login/D-Bus gate at 120 seconds; a fresh published baseline passed under the same fixture. Both exact guests and clones were cleaned. The direct boot call has not yet been traced, so this result establishes a regression for the candidate but not its detailed cause. The candidate was not merged.
 
 The merged head through #152 passed CLI build and the focused probes for #39, #151, and #152. Its fresh private Arch boot reached login with D-Bus broker and launcher settled. The harness stopped its exact guest and the disposable clone was removed. This remains a boot smoke test, not full mount or credential compatibility.
+
+After rebasing this batch onto concurrent `0d920f2` (`drmasahi.c` and SDDM documentation), the CLI rebuild, three focused probes, and a second fresh private Arch login/D-Bus boot passed. The exact rebased test guest and clone were cleaned before publication.
