@@ -2,6 +2,8 @@
 
 This file records bounded behavior that has been implemented and tested. A dispatch case or a successful boot is not proof of full Linux compatibility. The static inventory in `AUDIT.md` is a triage list and may lag later commits.
 
+Current safety and refusal status is summarized in [`SAFEGUARDS.md`](SAFEGUARDS.md).
+
 ## Integration baseline
 
 - Base: `3e47e28` (`development` as tracked on 2026-11-18).
