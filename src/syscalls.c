@@ -4754,7 +4754,17 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     // it close the pty masters leaves the console slave with no master, and the NEXT
     // open(/dev/console) blocks forever waiting for a master that will never come back. Refuse
     // vacuously (as close_range already does) so the guest believes the close succeeded.
-    if (shim_fd_reserved((int)a0)) return 0;
+    if (shim_fd_reserved((int)a0)) {
+      // A signalfd read end is reserved only to survive the shared host fd
+      // table of a vfork child. An ordinary guest close owns this descriptor:
+      // retire its backend and epoll interest before closing the read end.
+      // A vfork child must leave the parent's shared fd table intact.
+      if (!guest_is_vfork_child() && signalfd_shim_closed((int)a0)) {
+        net_fd_closed((int)a0);
+        return herr(close((int)a0));
+      }
+      return 0;
+    }
     // A pidfd (kqueue) is never actually closed: systemd recycles the pidfd NUMBER across its
     // pidref lifecycle (open -> close -> reopen the same number for a DIFFERENT pid), so closing it
     // here would let the fd number be recycled and a later waitid(P_PIDFD, fd) would resolve the

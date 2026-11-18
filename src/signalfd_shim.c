@@ -178,17 +178,20 @@ long signalfd4_shim(int fd, const uint64_t* mask, size_t size, int flags) {
   pthread_mutex_unlock(&lock);
   return pair[0];
 }
-void signalfd_shim_closed(int fd) {
+int signalfd_shim_closed(int fd) {
   sfdbg("signalfd_shim_closed fd=%d pid=%d\n", fd, (int)getpid());
   pthread_mutex_lock(&lock);
   int n = atomic_load(&count);
   for (int i = 0; i < n; i++) if (atomic_load(&slots[i].read_fd) == fd) {
     atomic_store(&slots[i].mask, 0);
     atomic_store(&slots[i].read_fd, -1);
+    shim_fd_unreserve(fd);
     int writer = atomic_exchange(&slots[i].write_fd, -1);
     if (writer >= 0) { sfdbg("  -> closing writer=%d\n", writer); shim_fd_unreserve(writer); close(writer); }
     restore_unused();
-    break;
+    pthread_mutex_unlock(&lock);
+    return 1;
   }
   pthread_mutex_unlock(&lock);
+  return 0;
 }
