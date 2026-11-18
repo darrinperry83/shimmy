@@ -3889,6 +3889,25 @@ static void syncur_drop(int fd) {
   for (int i = 0; i < SYNCUR_MAX; i++) if (g_syncur[i].fd == fd) { g_syncur[i].fd = 0; g_syncur[i].pos = 0; return; }
 }
 
+// Synthetic getdents64 emits d_off = next entry index + 1 (and offset zero
+// before the first entry). Host lseek only moves the empty backing directory;
+// route guest directory seeks through the cursor that getdents64 actually uses.
+static long syncur_lseek(int fd, int64_t offset, int whence, int count) {
+  int slot = syncur_slot(fd);
+  if (slot < 0) return -LX_EMFILE;
+  int64_t current = g_syncur[slot].pos ? (int64_t)g_syncur[slot].pos + 1 : 0;
+  int64_t target;
+  if (whence == SEEK_SET) target = offset;
+  else if (whence == SEEK_CUR) {
+    if (__builtin_add_overflow(current, offset, &target)) return -LX_EOVERFLOW;
+  } else return -LX_EINVAL;
+  if (target == 0) g_syncur[slot].pos = 0;
+  else if (target >= 2 && target <= (int64_t)count + 1)
+    g_syncur[slot].pos = (int)(target - 1);
+  else return -LX_EINVAL; // only zero and emitted directory cookies are valid
+  return (long)target;
+}
+
 // Idempotently create a host directory and any missing parents (absolute path). EEXIST counts as
 // success, so it is safe to call for /proc, /sys/class, /dev that install.sh already placed.
 static int mkdir_p(const char* path) {
@@ -4833,6 +4852,14 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   case 62: {
     int w = lseek_whence_l2m((int)a2);
     if (w < 0) return -LX_EINVAL;
+    char dpath[GPATH_MAX] = {0};
+    if (cgroup_dir_path((int)a0, dpath, sizeof dpath) != 0)
+      (void)guest_path_of_fd((int)a0, dpath, sizeof dpath);
+    if (dpath[0]) {
+      int count = 0;
+      if (synth_entries(dpath, &count))
+        return syncur_lseek((int)a0, (int64_t)a1, w, count);
+    }
     off_t o = lseek((int)a0, (off_t)a1, w);
     return o < 0 ? herrno() : (long)o;
   }
