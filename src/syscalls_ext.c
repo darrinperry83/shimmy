@@ -1643,7 +1643,17 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
 
   // ===== 116..128: logging + scheduling ====================================
   case 112: return -LX_EPERM;                                  // clock_settime
-  case 116: return 0;                                          // syslog: stub success
+  case 116: {                                                  // syslog: no virtual printk ring
+    // Linux permits READ_ALL (3) and SIZE_BUFFER (10) without CAP_SYSLOG
+    // when dmesg_restrict is off. Shimmy has a guest /dev/kmsg transport but
+    // no kernel printk ring with Linux's read/clear/size state, so neither
+    // request can truthfully return a count or buffer capacity yet.
+    if ((int)a0 == 3 || (int)a0 == 10) return -LX_ENOSYS;
+    // Every other action is capability-gated in Linux before type-specific
+    // validation. Shimmy's capget currently exposes no CAP_SYSLOG, including
+    // under RDUID0, so reporting EPERM is coherent with that capability ABI.
+    return -LX_EPERM;
+  }
   case 117: return -LX_EPERM;                                  // ptrace
   case 118: case 119: return 0;                                // sched_setparam/setscheduler
   case 120: return 0;                                          // sched_getscheduler -> SCHED_OTHER
