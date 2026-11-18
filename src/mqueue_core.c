@@ -24,6 +24,7 @@ struct mq_core_queue {
   char name[MQ_CORE_MAX_NAME + 1];
   size_t max_messages, message_size, count, refs;
   int linked;
+  pthread_cond_t not_empty, not_full;
   struct mq_core_message* head;
 };
 
@@ -64,6 +65,8 @@ static void mq_destroy_locked(struct mq_core_queue* queue) {
     mq_free_message(msg);
     msg = next;
   }
+  pthread_cond_destroy(&queue->not_empty);
+  pthread_cond_destroy(&queue->not_full);
   free(queue);
 }
 
@@ -91,6 +94,15 @@ int mq_core_open(const char* name, int create, int exclusive,
     if (total >= MQ_CORE_MAX_QUEUES) { pthread_mutex_unlock(&g_mq_mu); return ENOSPC; }
     queue = calloc(1, sizeof *queue);
     if (!queue) { pthread_mutex_unlock(&g_mq_mu); return ENOMEM; }
+    int err = pthread_cond_init(&queue->not_empty, NULL);
+    if (err) { free(queue); pthread_mutex_unlock(&g_mq_mu); return err; }
+    err = pthread_cond_init(&queue->not_full, NULL);
+    if (err) {
+      pthread_cond_destroy(&queue->not_empty);
+      free(queue);
+      pthread_mutex_unlock(&g_mq_mu);
+      return err;
+    }
     memcpy(queue->name, name, strlen(name) + 1);
     queue->max_messages = max_messages;
     queue->message_size = message_size;
@@ -132,14 +144,27 @@ void mq_core_close(struct mq_core_handle* handle) {
   pthread_mutex_unlock(&g_mq_mu);
 }
 
-int mq_core_send(struct mq_core_handle* handle, const void* data,
-                 size_t length, unsigned priority) {
+static int mq_deadline_valid(const struct timespec* deadline) {
+  return !deadline ||
+      (deadline->tv_sec >= 0 && deadline->tv_nsec >= 0 && deadline->tv_nsec < 1000000000L);
+}
+
+static int mq_send(struct mq_core_handle* handle, const void* data,
+                   size_t length, unsigned priority, int wait,
+                   const struct timespec* deadline) {
   if (!handle || (length && !data)) return EFAULT;
   if (priority > MQ_CORE_MAX_PRIORITY) return EINVAL;
+  if (!mq_deadline_valid(deadline)) return EINVAL;
   pthread_mutex_lock(&g_mq_mu);
   struct mq_core_queue* queue = handle->queue;
   if (length > queue->message_size) { pthread_mutex_unlock(&g_mq_mu); return EMSGSIZE; }
-  if (queue->count == queue->max_messages) { pthread_mutex_unlock(&g_mq_mu); return EAGAIN; }
+  while (queue->count == queue->max_messages) {
+    if (!wait) { pthread_mutex_unlock(&g_mq_mu); return EAGAIN; }
+    int err = deadline
+        ? pthread_cond_timedwait(&queue->not_full, &g_mq_mu, deadline)
+        : pthread_cond_wait(&queue->not_full, &g_mq_mu);
+    if (err) { pthread_mutex_unlock(&g_mq_mu); return err; }
+  }
   struct mq_core_message* msg = malloc(sizeof *msg + length);
   if (!msg) { pthread_mutex_unlock(&g_mq_mu); return ENOMEM; }
   msg->next = NULL;
@@ -152,26 +177,58 @@ int mq_core_send(struct mq_core_handle* handle, const void* data,
   msg->next = *link;
   *link = msg;
   ++queue->count;
+  pthread_cond_signal(&queue->not_empty);
   pthread_mutex_unlock(&g_mq_mu);
   return 0;
 }
 
-int mq_core_receive(struct mq_core_handle* handle, void* data,
-                    size_t capacity, size_t* length, unsigned* priority) {
+int mq_core_send(struct mq_core_handle* handle, const void* data,
+                 size_t length, unsigned priority) {
+  return mq_send(handle, data, length, priority, 0, NULL);
+}
+
+int mq_core_timedsend(struct mq_core_handle* handle, const void* data,
+                      size_t length, unsigned priority,
+                      const struct timespec* abs_realtime) {
+  return mq_send(handle, data, length, priority, 1, abs_realtime);
+}
+
+static int mq_receive(struct mq_core_handle* handle, void* data,
+                      size_t capacity, size_t* length, unsigned* priority,
+                      int wait, const struct timespec* deadline) {
   if (!handle || !length || (capacity && !data)) return EFAULT;
+  if (!mq_deadline_valid(deadline)) return EINVAL;
   pthread_mutex_lock(&g_mq_mu);
   struct mq_core_queue* queue = handle->queue;
   if (capacity < queue->message_size) { pthread_mutex_unlock(&g_mq_mu); return EMSGSIZE; }
+  while (!queue->head) {
+    if (!wait) { pthread_mutex_unlock(&g_mq_mu); return EAGAIN; }
+    int err = deadline
+        ? pthread_cond_timedwait(&queue->not_empty, &g_mq_mu, deadline)
+        : pthread_cond_wait(&queue->not_empty, &g_mq_mu);
+    if (err) { pthread_mutex_unlock(&g_mq_mu); return err; }
+  }
   struct mq_core_message* msg = queue->head;
-  if (!msg) { pthread_mutex_unlock(&g_mq_mu); return EAGAIN; }
   queue->head = msg->next;
   --queue->count;
   if (msg->length) memcpy(data, msg->data, msg->length);
   *length = msg->length;
   if (priority) *priority = msg->priority;
   mq_free_message(msg);
+  pthread_cond_signal(&queue->not_full);
   pthread_mutex_unlock(&g_mq_mu);
   return 0;
+}
+
+int mq_core_receive(struct mq_core_handle* handle, void* data,
+                    size_t capacity, size_t* length, unsigned* priority) {
+  return mq_receive(handle, data, capacity, length, priority, 0, NULL);
+}
+
+int mq_core_timedreceive(struct mq_core_handle* handle, void* data,
+                         size_t capacity, size_t* length, unsigned* priority,
+                         const struct timespec* abs_realtime) {
+  return mq_receive(handle, data, capacity, length, priority, 1, abs_realtime);
 }
 
 int mq_core_status(struct mq_core_handle* handle, size_t* count,
