@@ -970,7 +970,17 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (prio != 0) return -LX_EOPNOTSUPP;
     return 0;
   }
-  case 31: return 0;                                           // ioprio_get: legacy no-op, separate work
+  case 31: {                                                    // ioprio_get: raw self priority
+    // Linux returns the raw priority for IOPRIO_WHO_PROCESS. The only
+    // priority accepted by our ioprio_set subset is the unset default (0),
+    // so that value is truthful for the current guest task. Group/user
+    // queries need a task registry and effective-priority aggregation.
+    int which = (int)a0, who = (int)a1;
+    if (which < 1 || which > 3) return -LX_EINVAL;
+    if (which != 1) return -LX_EOPNOTSUPP;
+    if (who < 0 || (who && who != syscalls_guest_pid())) return -LX_ESRCH;
+    return 0;
+  }
   case 33: {                                                   // mknodat
     mode_t mode = (mode_t)a2;
     // Linux's may_mknod() rejects invalid file types before pathname lookup.
