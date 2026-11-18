@@ -98,7 +98,7 @@
   "header_sha256": "a6277c8757890bd4fe8afaf76a8ea79274e7b0484ec147e717634c16fe54e1d9",
   "method": "installed native asm/unistd_64.h table, generic-header compat exclusion, inventory.py case-label scan, and manually reviewed source-risk flags; no guest ABI test",
   "schema_version": 1,
-  "source_commit": "2c64cf7633fd59bdf063f9f68e08dfaca0c0a9cd",
+  "source_commit": "cdae7f4946de9d4bfe689c4bc165053b77f4c570",
   "source_dirty_at_scan": false,
   "syscalls": [
     {
@@ -397,7 +397,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 4289,
+          "line": 4311,
           "tier": "main"
         }
       ],
@@ -533,7 +533,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 4299,
+          "line": 4322,
           "tier": "main"
         }
       ],
@@ -601,7 +601,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 4302,
+          "line": 4325,
           "tier": "main"
         }
       ],
@@ -652,7 +652,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 4320,
+          "line": 4343,
           "tier": "main"
         }
       ],
@@ -686,7 +686,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 4323,
+          "line": 4346,
           "tier": "main"
         }
       ],
@@ -703,7 +703,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 4359,
+          "line": 4382,
           "tier": "main"
         }
       ],
@@ -737,7 +737,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 4383,
+          "line": 4406,
           "tier": "main"
         }
       ],
@@ -754,7 +754,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 4405,
+          "line": 4428,
           "tier": "main"
         }
       ],
@@ -839,7 +839,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 4433,
+          "line": 4456,
           "tier": "main"
         }
       ],
@@ -856,7 +856,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 4442,
+          "line": 4465,
           "tier": "main"
         }
       ],
@@ -890,7 +890,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 4465,
+          "line": 4488,
           "tier": "main"
         }
       ],
@@ -924,7 +924,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 4484,
+          "line": 4507,
           "tier": "main"
         }
       ],
@@ -941,7 +941,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 4514,
+          "line": 4537,
           "tier": "main"
         }
       ],
@@ -958,7 +958,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 4550,
+          "line": 4573,
           "tier": "main"
         }
       ],
@@ -1060,7 +1060,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 4579,
+          "line": 4602,
           "tier": "main"
         }
       ],
@@ -1077,7 +1077,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 4778,
+          "line": 4801,
           "tier": "main"
         }
       ],
@@ -1150,7 +1150,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 4844,
+          "line": 4867,
           "tier": "main"
         }
       ],
@@ -1167,7 +1167,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 4864,
+          "line": 4887,
           "tier": "main"
         }
       ],
@@ -1184,7 +1184,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 4880,
+          "line": 4903,
           "tier": "main"
         }
       ],
@@ -1201,7 +1201,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 4933,
+          "line": 4956,
           "tier": "main"
         }
       ],
@@ -1218,7 +1218,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 4986,
+          "line": 5009,
           "tier": "main"
         }
       ],
@@ -1235,7 +1235,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5038,
+          "line": 5061,
           "tier": "main"
         }
       ],
@@ -1252,7 +1252,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5095,
+          "line": 5118,
           "tier": "main"
         }
       ],
@@ -1269,7 +1269,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5119,
+          "line": 5142,
           "tier": "main"
         }
       ],
@@ -1439,7 +1439,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5149,
+          "line": 5172,
           "tier": "main"
         }
       ],
@@ -1456,7 +1456,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5255,
+          "line": 5252,
           "tier": "main"
         }
       ],
@@ -1473,7 +1473,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5388,
+          "line": 5385,
           "tier": "main"
         }
       ],
@@ -1694,7 +1694,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5417,
+          "line": 5414,
           "tier": "main"
         }
       ],
@@ -1711,7 +1711,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5431,
+          "line": 5428,
           "tier": "main"
         }
       ],
@@ -1745,7 +1745,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5452,
+          "line": 5449,
           "tier": "main"
         }
       ],
@@ -1779,7 +1779,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5455,
+          "line": 5452,
           "tier": "main"
         }
       ],
@@ -1796,7 +1796,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5471,
+          "line": 5468,
           "tier": "main"
         }
       ],
@@ -2034,7 +2034,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5474,
+          "line": 5471,
           "tier": "main"
         }
       ],
@@ -2051,7 +2051,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5485,
+          "line": 5482,
           "tier": "main"
         }
       ],
@@ -2068,7 +2068,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5498,
+          "line": 5495,
           "tier": "main"
         }
       ],
@@ -2187,7 +2187,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5538,
+          "line": 5535,
           "tier": "main"
         }
       ],
@@ -2204,7 +2204,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5559,
+          "line": 5556,
           "tier": "main"
         }
       ],
@@ -2306,7 +2306,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5591,
+          "line": 5588,
           "tier": "main"
         }
       ],
@@ -2391,7 +2391,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5607,
+          "line": 5604,
           "tier": "main"
         }
       ],
@@ -2408,7 +2408,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5629,
+          "line": 5626,
           "tier": "main"
         }
       ],
@@ -2442,7 +2442,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5654,
+          "line": 5651,
           "tier": "main"
         },
         {
@@ -2481,7 +2481,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5709,
+          "line": 5706,
           "tier": "main"
         }
       ],
@@ -2719,7 +2719,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5712,
+          "line": 5709,
           "tier": "main"
         },
         {
@@ -2843,7 +2843,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5731,
+          "line": 5728,
           "tier": "main"
         }
       ],
@@ -2928,7 +2928,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5746,
+          "line": 5743,
           "tier": "main"
         }
       ],
@@ -3047,7 +3047,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5768,
+          "line": 5765,
           "tier": "main"
         }
       ],
@@ -3064,7 +3064,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5769,
+          "line": 5766,
           "tier": "main"
         }
       ],
@@ -3081,7 +3081,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5778,
+          "line": 5775,
           "tier": "main"
         }
       ],
@@ -3098,7 +3098,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5779,
+          "line": 5776,
           "tier": "main"
         }
       ],
@@ -3115,7 +3115,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5780,
+          "line": 5777,
           "tier": "main"
         }
       ],
@@ -3132,7 +3132,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5781,
+          "line": 5778,
           "tier": "main"
         }
       ],
@@ -3149,7 +3149,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5794,
+          "line": 5791,
           "tier": "main"
         }
       ],
@@ -3166,7 +3166,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5797,
+          "line": 5794,
           "tier": "main"
         }
       ],
@@ -3761,7 +3761,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5821,
+          "line": 5818,
           "tier": "main"
         }
       ],
@@ -3778,7 +3778,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5824,
+          "line": 5821,
           "tier": "main"
         }
       ],
@@ -3795,7 +3795,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5827,
+          "line": 5824,
           "tier": "main"
         }
       ],
@@ -3897,7 +3897,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5880,
+          "line": 5877,
           "tier": "main"
         }
       ],
@@ -3965,7 +3965,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5898,
+          "line": 5895,
           "tier": "main"
         }
       ],
@@ -4084,7 +4084,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5901,
+          "line": 5898,
           "tier": "main"
         }
       ],
@@ -4271,7 +4271,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5931,
+          "line": 5928,
           "tier": "main"
         },
         {
@@ -4293,7 +4293,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5985,
+          "line": 5982,
           "tier": "main"
         }
       ],
@@ -4582,7 +4582,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 6027,
+          "line": 6024,
           "tier": "main"
         }
       ],
@@ -4837,7 +4837,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 6048,
+          "line": 6045,
           "tier": "main"
         }
       ],
@@ -5092,7 +5092,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 4572,
+          "line": 4595,
           "tier": "main"
         }
       ],
@@ -5271,7 +5271,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5459,
+          "line": 5456,
           "tier": "main"
         }
       ],
@@ -5344,7 +5344,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5462,
+          "line": 5459,
           "tier": "main"
         }
       ],
@@ -5361,7 +5361,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5465,
+          "line": 5462,
           "tier": "main"
         }
       ],
@@ -5378,7 +5378,7 @@
       "locations": [
         {
           "file": "src/syscalls.c",
-          "line": 5468,
+          "line": 5465,
           "tier": "main"
         }
       ],
