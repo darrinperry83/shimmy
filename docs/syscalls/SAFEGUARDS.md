@@ -7,6 +7,7 @@ full syscall compatibility.
 
 | ARM64 number | Family | Published default | Safeguard / evidence | Remaining gate |
 | ---: | --- | --- | --- | --- |
+| 19 | `eventfd2` semaphore/counter | Datagram-backed zero/NONBLOCK/CLOEXEC subset; semaphore refused | Unknown flags now return `EINVAL`; `EFD_SEMAPHORE` returns `EOPNOTSUPP` before a host resource is created. Raw ARM64 probe, CLI build and private Arch boot pass in isolation. | Replace the datagram approximation with a guest counter preserving aggregation, saturation, short-read and shared descriptor semantics before claiming full eventfd compatibility. |
 | 23 | `dup` descriptor ownership | Existing handler | A proposed blanket `shim_fd_reserved` refusal was withheld before editing: the reserved set also contains guest-owned timerfd and signalfd read ends, so that guard would reject valid guest duplicates. | Separate shim-private descriptors from guest-owned reserved descriptors, then test duplication and metadata/lifetime propagation. |
 | 26–28 | `inotify` | Bounded file and directory events | Named create/delete, watched-file events, alias close, guest probes and private boot passed. | Coalesced/transient events, moves, overflow, inherited workers and broader close paths. |
 | 32 | `flock` descriptor ownership | Existing handler | The analogous blanket reserved-fd guard was withheld before editing for the same guest-owned timerfd/signalfd ambiguity. | Define and test descriptor ownership before changing lock eligibility; preserve ordinary file locks. |

@@ -2405,6 +2405,12 @@ static long sys_pselect6(int nfds, uint64_t raddr, uint64_t waddr, uint64_t eadd
 // straight to syscalls.c and never come back through here. An 8-byte write becomes one datagram;
 // an 8-byte read takes it back. That is faithful enough for libc/toolkit wakeup use.
 static long sys_eventfd2(unsigned int initval, int flags) {
+  // Linux admits only these three flag bits. The socket-backed counter does
+  // not implement semaphore reads, so refuse that mode before creating any
+  // private path or host descriptor rather than returning a false success.
+  if (flags & ~(L_EFD_SEMAPHORE | L_EFD_NONBLOCK | L_EFD_CLOEXEC))
+    return -L_EINVAL;
+  if (flags & L_EFD_SEMAPHORE) return -L_EOPNOTSUPP;
   char dir[PATH_MAX];
   private_dir(dir, sizeof dir, "eventfd");
   if (mkdir_p(dir) < 0 && errno != EEXIST) return lerr();
