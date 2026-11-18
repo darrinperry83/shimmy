@@ -2280,7 +2280,13 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
       return -LX_EFAULT;
     return syscalls_guest_sethostname(name, (size_t)a1);
   }
-  case 162: return -LX_EPERM;                                  // setdomainname
+  case 162: {                                                  // setdomainname
+    if (a1 > 64) return -LX_EINVAL;
+    char name[65] = {0};
+    if (a1 && gmem_guest_export_copyin(NULL, a0, name, (size_t)a1) != 0)
+      return -LX_EFAULT;
+    return syscalls_guest_setdomainname(name, (size_t)a1);
+  }
   case 163: {                                                  // getrlimit
     int hr = host_rlimit((int)a0);
     struct lx_rlimit* o = (struct lx_rlimit*)a1;
