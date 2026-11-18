@@ -944,6 +944,16 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   case 30: case 31: return 0;                                  // ioprio_set/get: no-op
   case 33: {                                                   // mknodat
     mode_t mode = (mode_t)a2;
+    // Linux's may_mknod() rejects invalid file types before pathname lookup.
+    // A directory has its own EPERM result; symlinks and other unsupported
+    // types return EINVAL.  Keep these failures distinct from valid device
+    // types, which this shim cannot create on the host.
+    switch (mode & S_IFMT) {
+      case 0: case S_IFREG: case S_IFIFO: case S_IFCHR:
+      case S_IFBLK: case S_IFSOCK: break;
+      case S_IFDIR: return -LX_EPERM;
+      default: return -LX_EINVAL;
+    }
     e = resolve_at_nf((int)a0, (const char*)a1, host, sizeof host, &hdirfd, 1);
     if (e < 0) return e;
     if (S_ISFIFO(mode)) {
