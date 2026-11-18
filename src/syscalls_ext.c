@@ -704,57 +704,6 @@ static void lx_shmid_put(struct lx_shmid64_ds* d, const struct shmid_ds* s) {
   d->shm_nattch    = (unsigned long long)(unsigned short)s->shm_nattch;  // macOS: short
 }
 
-// Linux aarch64 `struct msqid64_ds` (asm-generic/msgbuf.h) and the ipc64_perm it embeds.
-// Same translation story as shmid64_ds above: Darwin's msqid_ds orders cbytes/qnum/qbytes/
-// lspid/lrpid BEFORE the timestamps and pads differently, so msgctl(IPC_STAT) must be filled
-// field-by-field. Offsets are pinned by static asserts, not trusted to compiler padding.
-struct lx_msqid64_ds {
-  struct lx_ipc64_perm msg_perm;
-  long long            msg_stime, msg_rtime, msg_ctime;
-  unsigned long long   msg_cbytes, msg_qnum, msg_qbytes;
-  int                  msg_lspid, msg_lrpid;
-  unsigned long long   __unused4, __unused5;
-};
-_Static_assert(sizeof(struct lx_msqid64_ds)  == 120, "linux msqid64_ds is 120 bytes");
-_Static_assert(offsetof(struct lx_msqid64_ds, msg_stime)  == 48, "msg_stime at 48");
-_Static_assert(offsetof(struct lx_msqid64_ds, msg_cbytes)  == 72, "msg_cbytes at 72");
-_Static_assert(offsetof(struct lx_msqid64_ds, msg_qnum)    == 80, "msg_qnum at 80");
-_Static_assert(offsetof(struct lx_msqid64_ds, msg_qbytes)  == 88, "msg_qbytes at 88");
-_Static_assert(offsetof(struct lx_msqid64_ds, msg_lspid)   == 96, "msg_lspid at 96");
-_Static_assert(offsetof(struct lx_msqid64_ds, msg_lrpid)   == 100, "msg_lrpid at 100");
-
-// Field-by-field by NAME. Darwin's msqid_ds and Linux's msqid64_ds agree on nothing past msg_perm.
-static void lx_msqid_put(struct lx_msqid64_ds* d, const struct msqid_ds* s) {
-  memset(d, 0, sizeof *d);
-  d->msg_perm.key  = (int)s->msg_perm._key;
-  d->msg_perm.uid  = (unsigned)s->msg_perm.uid;
-  d->msg_perm.gid  = (unsigned)s->msg_perm.gid;
-  d->msg_perm.cuid = (unsigned)s->msg_perm.cuid;
-  d->msg_perm.cgid = (unsigned)s->msg_perm.cgid;
-  d->msg_perm.mode = (unsigned)s->msg_perm.mode;
-  d->msg_perm.seq  = (unsigned short)s->msg_perm._seq;
-  d->msg_stime     = (long long)s->msg_stime;
-  d->msg_rtime     = (long long)s->msg_rtime;
-  d->msg_ctime     = (long long)s->msg_ctime;
-  d->msg_cbytes    = (unsigned long long)s->msg_cbytes;
-  d->msg_qnum      = (unsigned long long)s->msg_qnum;
-  d->msg_qbytes    = (unsigned long long)s->msg_qbytes;
-  d->msg_lspid     = (int)s->msg_lspid;
-  d->msg_lrpid     = (int)s->msg_lrpid;
-}
-
-// IPC_SET direction: Linux honors only msg_perm.{uid,gid,mode} and msg_qbytes, which is also the
-// subset Darwin honors, so those are the only fields that need to survive the trip back.
-static void lx_msqid_get(struct msqid_ds* d, const struct lx_msqid64_ds* s) {
-  memset(d, 0, sizeof *d);
-  d->msg_perm.uid  = (uid_t)s->msg_perm.uid;
-  d->msg_perm.gid  = (gid_t)s->msg_perm.gid;
-  d->msg_perm.cuid = (uid_t)s->msg_perm.cuid;
-  d->msg_perm.cgid = (gid_t)s->msg_perm.cgid;
-  d->msg_perm.mode = (mode_t)(s->msg_perm.mode & 0xffff);
-  d->msg_qbytes    = (msglen_t)s->msg_qbytes;
-}
-
 // ---------------------------------------------------------------------------
 // Signal number translation (Linux -> macOS). They diverge badly above 6.
 // ---------------------------------------------------------------------------
@@ -2810,28 +2759,11 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
               return r < 0 ? eret() : 0; }
   case 188: { ssize_t r = msgrcv((int)a0, (void*)a1, (size_t)a2, (long)a3, (int)a4);  // msgrcv
               return r < 0 ? eret() : (long)r; }
-  case 187: {                                                  // msgctl(msqid, cmd, buf)
-    // IPC_STAT/IPC_SET must translate the struct, not pass it through: Linux msqid64_ds and
-    // Darwin msqid_ds disagree on field order (Darwin puts cbytes/qnum/qbytes/lspid/lrpid BEFORE
-    // the timestamps and pads differently), so a raw forward reports qbytes/qnum out of the
-    // middle of the reserved words. See lx_msqid_put / lx_msqid_get.
-    if ((int)a1 == IPC_RMID) { int r = msgctl((int)a0, IPC_RMID, 0); return r < 0 ? eret() : 0; }
-    if ((int)a1 == IPC_SET) {
-      if (!a2) return -LX_EFAULT;
-      struct msqid_ds hs;
-      lx_msqid_get(&hs, (const struct lx_msqid64_ds*)a2);
-      int r = msgctl((int)a0, IPC_SET, &hs);
-      return r < 0 ? eret() : 0;
-    }
-    if ((int)a1 == IPC_STAT) {
-      if (!a2) return -LX_EFAULT;
-      struct msqid_ds hs;
-      if (msgctl((int)a0, IPC_STAT, &hs) < 0) return eret();
-      lx_msqid_put((struct lx_msqid64_ds*)a2, &hs);
-      return 0;
-    }
-    return -LX_ENOSYS;                          // IPC_INFO/MSG_INFO/MSG_STAT: nothing asks
-  }
+  // Darwin message queue IDs are host-global numbers. A guest can supply any
+  // host ID here even though msgget is disabled. In particular IPC_RMID and
+  // IPC_SET could delete or alter another macOS process's queue. No command
+  // may reach host msgctl until all message syscalls use guest-scoped IDs.
+  case 187: return -LX_ENOSYS;                                   // msgctl
 
   // SysV shared memory and semaphores are FORWARDED to the host. macOS implements both natively
   // (verified: semget -> 131083, shmget -> 131073, shmat -> 0x1008b4000), so stubbing these to
