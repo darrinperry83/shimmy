@@ -4810,7 +4810,24 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     }
 
   // ---------- 61 getdents64 ----------
-  case 61: return do_getdents64((int)a0, (unsigned char*)a1, (size_t)a2);
+  case 61: {
+    int fd = (int)a0;
+    if (fd < 0 || shim_fd_reserved(fd)) return -LX_EBADF;
+    if (!a1) return -LX_EFAULT;
+    // A guest ELF/JIT output may not be writable through the host mapping.
+    // Preflight before changing either the synthetic or host DIR cursor.
+    size_t cap = (size_t)a2;
+    if (cap > 1024 * 1024) cap = 1024 * 1024; // legal short result
+    if (cap && gmem_guest_range_writable(a1, cap) != 0)
+      return -LX_EFAULT;
+    unsigned char *staged = malloc(cap ? cap : 1);
+    if (!staged) return -LX_ENOMEM;
+    long n = do_getdents64(fd, staged, cap);
+    if (n > 0 && gmem_guest_copyout_checked(a1, staged, (size_t)n) != 0)
+      n = -LX_EFAULT; // Mapping may change after enumeration.
+    free(staged);
+    return n;
+  }
 
   // ---------- 62 lseek ----------
   case 62: {
