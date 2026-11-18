@@ -1868,8 +1868,16 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (r >= 0 && a3) *(long long*)a3 = ooff;
     return r;
   }
-  case 286: {                                                   // preadv2 (flags ignored)
-    ssize_t r = preadv((int)a0, (const struct iovec*)a1, (int)a2, (off_t)a3);
+  case 286: {                                                   // preadv2
+    // Linux's six-argument ABI puts rwf_t flags in x5; x4 is pos_h and is
+    // irrelevant on a 64-bit guest.  A nonzero flag must not silently become
+    // a blocking, ordinary read (notably RWF_NOWAIT and RWF_HIPRI).
+    if ((unsigned int)a5) return -LX_EOPNOTSUPP;
+    off_t pos = (off_t)a3;
+    if (pos < -1) return -LX_EINVAL;
+    // offset -1 uses and advances the open file description's current offset.
+    ssize_t r = pos == -1 ? readv((int)a0, (const struct iovec*)a1, (int)a2)
+                          : preadv((int)a0, (const struct iovec*)a1, (int)a2, pos);
     return r < 0 ? eret() : r;
   }
   case 287: {                                                   // pwritev2 (flags ignored)
