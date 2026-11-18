@@ -55,6 +55,37 @@ static RDGPUSession *create_session(pid_t actualPeer){
 RDGPUSession *rdgpu_local_session_create(void){
     return create_session(getpid());
 }
+bool rdgpu_local_import_surface(RDGPUSession *s, IOSurfaceRef surface,
+                                uint8_t lease_out[16], uint64_t *generation_out){
+    if(!s||getpid()!=s->actualPeer||!surface||!lease_out||!generation_out)
+        return false;
+    uint32_t w=(uint32_t)IOSurfaceGetWidth(surface);
+    uint32_t h=(uint32_t)IOSurfaceGetHeight(surface);
+    uint64_t bytes=(uint64_t)w*h*4;
+    if(!w||!h||w>RDGPU_MAX_IMAGE_EDGE||h>RDGPU_MAX_IMAGE_EDGE||
+       bytes>RDGPU_MAX_IMAGE_BYTES)return false;
+    RDMetalImage *image=rd_metal_image_import(s->core,surface);
+    if(!image)return false;
+    uint8_t token[16];
+    if(SecRandomCopyBytes(kSecRandomDefault,16,token)!=errSecSuccess||zero(token,16)){
+        rd_metal_image_destroy(image);return false;
+    }
+    pthread_mutex_lock(&s->lock);
+    ImageSlot *slot=NULL;
+    if(bytes<=RDGPU_MAX_BYTES_PER_PEER-s->bytes)
+        for(unsigned i=0;i<RDGPU_MAX_IMAGES_PER_PEER;i++)
+            if(!s->images[i].image){slot=&s->images[i];break;}
+    if(slot){
+        slot->image=image;slot->bytes=bytes;slot->fence=0;
+        slot->exportRefs=0;slot->exportReceipt=0;slot->completed=true;
+        if(++slot->generation==0)++slot->generation;
+        memcpy(slot->lease,token,16);s->bytes+=bytes;
+        memcpy(lease_out,token,16);*generation_out=slot->generation;
+    }
+    pthread_mutex_unlock(&s->lock);
+    if(!slot)rd_metal_image_destroy(image);
+    return slot!=NULL;
+}
 bool rdgpu_local_image_geometry(RDGPUSession *s,
                                 const uint8_t lease[16],uint64_t generation,
                                 uint32_t *width,uint32_t *height,uint32_t *stride){

@@ -1,4 +1,5 @@
 #import "../third_party/rdmetal_resource.h"
+#import "../third_party/rdgpu_broker.h"
 #include <assert.h>
 #include <stdio.h>
 
@@ -23,10 +24,24 @@ int main(void) {
            pixels[2] == 255 && pixels[3] == 255);
     assert(IOSurfaceUnlock(surface, kIOSurfaceLockReadOnly, NULL) == kIOReturnSuccess);
 
+    RDGPUSession *broker = rdgpu_local_session_create();
+    assert(broker);
+    uint8_t lease[16] = {0};
+    uint64_t generation = 0;
+    assert(rdgpu_local_import_surface(broker, surface, lease, &generation));
+    uint32_t width = 0, height = 0, stride = 0;
+    assert(rdgpu_local_image_geometry(broker, lease, generation,
+                                      &width, &height, &stride));
+    assert(width == 16 && height == 16 && stride >= 64);
+    IOSurfaceRef broker_surface = rdgpu_local_draw_surface(broker, lease, generation);
+    assert(broker_surface && IOSurfaceGetID(broker_surface) == surface_id);
+    CFRelease(broker_surface);
+    rdgpu_session_disconnect(broker);
+
     rd_metal_image_destroy(producer);
     assert(IOSurfaceGetID(rd_metal_image_surface(consumer)) == surface_id);
     rd_metal_image_destroy(consumer);
     rd_metal_core_destroy(core);
-    puts("imported Metal texture shares the producer IOSurface");
+    puts("imported broker lease shares the producer IOSurface");
     return 0;
 }
