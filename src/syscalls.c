@@ -4997,7 +4997,30 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   }
 
   // ---------- 67 pread64 / 68 pwrite64 ----------
-  case 67: return herr((long)pread((int)a0, (void*)a1, (size_t)a2, (off_t)a3));
+  case 67: { // pread64: stage regular-file output before checked guest copyout
+    int fd = (int)a0;
+    int64_t pos = (int64_t)a3; // ARM64 carries the full signed offset in x3
+    if (pos < 0) return -LX_EINVAL;
+    if (fd < 0 || shim_fd_reserved(fd)) return -LX_EBADF;
+    int fl = fcntl(fd, F_GETFL);
+    if (fl < 0 || (fl & O_ACCMODE) == O_WRONLY) return -LX_EBADF;
+    struct stat st;
+    if (fstat(fd, &st) < 0) return herrno();
+    if (!S_ISREG(st.st_mode)) return -LX_ESPIPE;
+    size_t count = (size_t)a2;
+    if (!count) return 0;
+    if (!a1) return -LX_EFAULT;
+    if (count > 1024 * 1024) return -LX_EOPNOTSUPP;
+    if (pos > INT64_MAX - (int64_t)count) return -LX_EINVAL;
+    if (gmem_guest_range_writable(a1, count) != 0) return -LX_EFAULT;
+    char* staged = malloc(count);
+    if (!staged) return -LX_ENOMEM;
+    long r = herr((long)pread(fd, staged, count, (off_t)pos));
+    if (r > 0 && gmem_guest_copyout_checked(a1, staged, (size_t)r) != 0)
+      r = -LX_EFAULT; // mapping could change after preflight
+    free(staged);
+    return r;
+  }
   case 68: { // pwrite64: export guest bytes before any host write
     int fd = (int)a0;
     int64_t pos = (int64_t)a3;
