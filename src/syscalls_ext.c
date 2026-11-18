@@ -2363,7 +2363,16 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return ok0(setpgid(0, 0));
   }
   case 155: {                                                  // getpgid
-    pid_t r = getpgid((pid_t)a0); return r < 0 ? eret() : r;
+    // Guest PID 1 is not host PID 1, and other positive guest PIDs are not
+    // safe host lookup keys.  There is no shared guest process-group table.
+    pid_t target = (pid_t)a0;
+    if (target < 0) return -LX_EINVAL;
+    if (target && target != syscalls_guest_pid()) return -LX_EOPNOTSUPP;
+    pid_t host_group = getpgid(0);
+    if (host_group < 0) return eret();
+    // A host parent/shell group must never be exposed as a guest PGID.
+    if (host_group != getpid()) return -LX_EOPNOTSUPP;
+    return syscalls_guest_pid();
   }
   case 156: {                                                  // getsid
     pid_t r = getsid((pid_t)a0); return r < 0 ? eret() : r;
