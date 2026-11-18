@@ -1058,7 +1058,7 @@
       "verified_compatible": false
     },
     {
-      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "classification_reason": "bounded: ordinary file mode change verified; shim-owned descriptors rejected",
       "dispatch_locations": [
         {
           "file": "src/syscalls_ext.c",
@@ -1068,12 +1068,12 @@
       ],
       "dispatch_state": "case",
       "name": "fchmod",
-      "notes": "",
+      "notes": "Reserved descriptor guard; broader guest ownership and Linux permission semantics unverified. See docs/syscalls/52-fchmod-reserved-fd.md.",
       "number": 52,
       "priority": "P2_other",
       "runtime_evidence": [],
-      "semantic_status": "unknown",
-      "test_evidence": [],
+      "semantic_status": "partial_or_unknown",
+      "test_evidence": ["tests/run-fchmod-reserved.py"],
       "trap_override": false,
       "verified_compatible": false
     },
