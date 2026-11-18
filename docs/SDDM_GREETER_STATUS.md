@@ -297,3 +297,24 @@ loaded `qrc:/theme/Main.qml`. The greeter still crashed at the same foreign
 carrier import (`RDMESA_MOCK_FD_IMPORT_DENY` in KWin, Wayland error 7). This
 confirms that the SDDM unit ordering and registration bypass are no longer
 needed for the observed handoff; it does not validate a usable login UI.
+
+### Export-only Mesa capability experiment did not fix the greeter
+
+An isolated rdmetal branch (`experiment/dmabuf-export-only`, commit `241db49`)
+changed `PIPE_CAP_DMABUF` to advertise export but not import. A native aarch64
+CI build succeeded in run `44315674838`. After fetching Shimmy `development`
+at `6945dca` and rebuilding `shim_gui`, only that experimental
+`rdmetal_dri.so` was installed into the disposable Arch root. Stock SDDM
+again created logind greeter session `c1` and started KWin and
+`sddm-greeter-qt6`, but KWin logged `kwin-dmabuf-feedback-table: mmap failed:
+Invalid argument` and `Applying output configuration failed: Preparing test
+buffer failed`. The on-screen Shimmy window remained black. This experiment
+did not reach the earlier foreign-buffer-import point and must not be promoted
+to rdmetal `development`. The prior driver was restored byte-for-byte in the
+disposable root; the live Arch root was not changed.
+
+The virtual DRM node still reports PRIME import because KWin's device check
+requires it. The Mesa screen's per-process broker lookup cannot resolve a
+greeter process's carrier in KWin. A real solution must validate the foreign
+producer and redeem the same IOSurface into the consuming broker, rather than
+claiming export-only support or inventing a second render target.
