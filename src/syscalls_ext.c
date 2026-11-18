@@ -1698,7 +1698,10 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return fds[0];
   }
   case 27: {                                                    // inotify_add_watch(fd, path, mask)
-    e = resolve_path_nf((const char*)a1, host, sizeof host,
+    char guest_path[PATH_MAX];
+    e = copy_guest_cstr(a1, guest_path, sizeof guest_path);
+    if (e < 0) return e;
+    e = resolve_path_nf(guest_path, host, sizeof host,
                         ((unsigned)a2 & 0x02000000u) != 0);     // IN_DONT_FOLLOW
     if (e < 0) return e;
     return inotify_watch_add((int)a0, host, (unsigned)a2);
