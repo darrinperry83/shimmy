@@ -57,3 +57,12 @@ verifies two distinct resources and pending clear/poll behavior. The next
 broker change must allocate and identify these separate depth resources, then
 Mesa must attach the exact one in each draw. The existing color-image depth
 primitive is not sufficient for the greeter and is not used by Mesa.
+
+Lease increment: the broker now creates an independent `RDGPU_CREATE_DEPTH`
+lease counted against the 512 MiB session quota, with a clear/poll/release path,
+and no export or color-image lookup. The guest syscall has a distinct create
+operation and records the depth resource type. The host GPU test covers a
+3600×2338 depth allocation (the observed greeter size), a clear, wait, denied
+export and release; the guest test covers creation and a checked clear through
+that lease. This still does not supply a depth attachment to a Metal draw or
+make Mesa create depth resources via the broker.

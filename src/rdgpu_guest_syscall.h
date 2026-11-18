@@ -18,6 +18,7 @@
 #define RDGPU_GUEST_IMAGE_UPLOAD 14u
 #define RDGPU_GUEST_IMAGE_UPLOAD_REGION 15u
 #define RDGPU_GUEST_CLEAR_DEPTH_STENCIL 16u
+#define RDGPU_GUEST_CREATE_DEPTH 17u
 typedef long (*RDGPUImageStrideQuery)(void *context,pid_t attestedGuestPid,
                                      const uint8_t lease[16],uint64_t generation,
                                      uint32_t width,uint32_t height);
@@ -98,6 +99,7 @@ typedef struct {
     uint64_t drawFence;
     uint64_t lastCompletedFence;
     int producerComplete,exported,carrierIssued;
+    int isDepth;
 } RDGPUGuestSlot;
 typedef struct {
     pthread_mutex_t lock;

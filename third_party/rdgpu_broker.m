@@ -14,6 +14,11 @@ typedef struct {
     unsigned exportRefs;
     bool completed;
 } ImageSlot;
+typedef struct {
+    RDMetalDepth *depth;
+    uint8_t lease[16];
+    uint64_t generation,fence,bytes;
+} DepthSlot;
 struct RDGPUSession {
     RDMetalCore *core;
     pthread_mutex_t lock;
@@ -23,6 +28,7 @@ struct RDGPUSession {
     RDGPURevokeTestExport revokeExport;
     void *exportContext;
     ImageSlot images[RDGPU_MAX_IMAGES_PER_PEER];
+    DepthSlot depths[RDGPU_MAX_IMAGES_PER_PEER];
 };
 static int zero(const void *data,size_t count) {
     const uint8_t *p=data;uint8_t any=0;
@@ -35,6 +41,16 @@ static ImageSlot *find(RDGPUSession *s,const uint8_t lease[16],uint64_t generati
         ImageSlot *slot=&s->images[i];uint8_t diff=0;
         for(unsigned j=0;j<16;j++)diff|=slot->lease[j]^lease[j];
         if(slot->image&&slot->generation==generation&&!diff)return slot;
+    }
+    return NULL;
+}
+static DepthSlot *find_depth(RDGPUSession *s,const uint8_t lease[16],
+                             uint64_t generation){
+    if(!generation||zero(lease,16))return NULL;
+    for(unsigned i=0;i<RDGPU_MAX_IMAGES_PER_PEER;i++){
+        DepthSlot *slot=&s->depths[i];uint8_t diff=0;
+        for(unsigned j=0;j<16;j++)diff|=slot->lease[j]^lease[j];
+        if(slot->depth&&slot->generation==generation&&!diff)return slot;
     }
     return NULL;
 }
@@ -275,7 +291,7 @@ RDGPUReply rdgpu_dispatch(RDGPUSession *s,const RDGPURequest *q){
     if(!s)return reply(q,RDGPU_DENIED);
     if(!q||q->magic!=RDGPU_WIRE_MAGIC||q->version!=RDGPU_WIRE_VERSION||
        q->bytes!=RDGPU_WIRE_BYTES||q->flags||q->reserved||
-       q->op<RDGPU_CREATE_BGRA8||q->op>RDGPU_CLEAR_DEPTH_STENCIL||!q->request_id)
+       q->op<RDGPU_CREATE_BGRA8||q->op>RDGPU_CREATE_DEPTH||!q->request_id)
         return reply(q,RDGPU_BAD_MESSAGE);
     pthread_mutex_lock(&s->lock);
     RDGPUReply r=reply(q,RDGPU_STALE);
@@ -310,6 +326,60 @@ RDGPUReply rdgpu_dispatch(RDGPUSession *s,const RDGPURequest *q){
         memcpy(slot->lease,token,16);s->bytes+=bytes;
         memcpy(r.lease,token,16);r.value1=slot->generation;
         r.status=RDGPU_OK;goto done;
+    }
+    if(q->op==RDGPU_CREATE_DEPTH){
+        if(!zero(q->lease,16)||q->arg1)goto done;
+        uint32_t w=(uint32_t)q->arg0,h=(uint32_t)(q->arg0>>32);
+        uint64_t bytes=(uint64_t)w*h*8;
+        if(!w||!h||w>RDGPU_MAX_IMAGE_EDGE||h>RDGPU_MAX_IMAGE_EDGE||
+           bytes>128u*1024u*1024u){r.status=RDGPU_LIMIT;goto done;}
+        if(bytes>RDGPU_MAX_BYTES_PER_PEER-s->bytes){r.status=RDGPU_LIMIT;goto done;}
+        DepthSlot *depth=NULL;
+        for(unsigned i=0;i<RDGPU_MAX_IMAGES_PER_PEER;i++)
+            if(!s->depths[i].depth){depth=&s->depths[i];break;}
+        if(!depth){r.status=RDGPU_LIMIT;goto done;}
+        RDMetalDepth *resource=rd_metal_depth_create(s->core,w,h);
+        if(!resource){r.status=RDGPU_GPU_FAILED;goto done;}
+        uint8_t token[16];
+        if(SecRandomCopyBytes(kSecRandomDefault,16,token)!=errSecSuccess||zero(token,16)){
+            rd_metal_depth_destroy(resource);r.status=RDGPU_GPU_FAILED;goto done;
+        }
+        depth->depth=resource;depth->bytes=bytes;depth->fence=0;
+        if(++depth->generation==0)++depth->generation;
+        memcpy(depth->lease,token,16);s->bytes+=bytes;
+        memcpy(r.lease,token,16);r.value1=depth->generation;
+        r.status=RDGPU_OK;goto done;
+    }
+    DepthSlot *depth=find_depth(s,q->lease,q->arg1);
+    if(depth){
+        if(q->op==RDGPU_CLEAR_DEPTH_STENCIL){
+            if(depth->fence){r.status=RDGPU_BAD_STATE;goto done;}
+            if(q->arg0>>42){r.status=RDGPU_BAD_MESSAGE;goto done;}
+            uint32_t bits=(uint32_t)q->arg0;float value;
+            memcpy(&value,&bits,sizeof value);
+            uint32_t stencil=(uint32_t)((q->arg0>>32)&255u);
+            uint32_t mask=(uint32_t)((q->arg0>>40)&3u);
+            if(!mask||!isfinite(value)||value<0||value>1){
+                r.status=RDGPU_BAD_MESSAGE;goto done;
+            }
+            depth->fence=rd_metal_depth_clear(depth->depth,value,stencil,mask);
+            if(!depth->fence){r.status=RDGPU_GPU_FAILED;goto done;}
+            r.value0=depth->fence;r.status=RDGPU_OK;goto done;
+        }
+        if(q->op==RDGPU_WAIT){
+            if(!q->arg0||q->arg0!=depth->fence){r.status=RDGPU_BAD_STATE;goto done;}
+            int state=rd_metal_depth_poll(depth->depth,q->arg0);
+            if(state==0)r.status=RDGPU_PENDING;
+            else{depth->fence=0;r.status=state>0?RDGPU_OK:RDGPU_GPU_FAILED;}
+            goto done;
+        }
+        if(q->op==RDGPU_RELEASE){
+            if(q->arg0||depth->fence){r.status=RDGPU_BAD_STATE;goto done;}
+            s->bytes-=depth->bytes;rd_metal_depth_destroy(depth->depth);
+            depth->depth=NULL;depth->bytes=0;memset(depth->lease,0,16);
+            r.status=RDGPU_OK;goto done;
+        }
+        r.status=RDGPU_DENIED;goto done;
     }
     ImageSlot *slot=find(s,q->lease,q->arg1);
     if(!slot){r.status=RDGPU_STALE;goto done;}
@@ -374,6 +444,9 @@ void rdgpu_session_disconnect(RDGPUSession *s){
         if(slot->image)rd_metal_image_destroy(slot->image);
         slot->image=NULL;memset(slot->lease,0,16);
         slot->exportReceipt=0;slot->exportRefs=0;
+        DepthSlot *depth=&s->depths[i];
+        if(depth->depth)rd_metal_depth_destroy(depth->depth);
+        depth->depth=NULL;memset(depth->lease,0,16);
     }
     s->bytes=0;
     pthread_mutex_unlock(&s->lock);

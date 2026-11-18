@@ -38,6 +38,9 @@ int main(void) {
     assert(rd_metal_depth_clear(other,1.0,0,1));
     rd_metal_depth_destroy(other);
     rd_metal_depth_destroy(shared);
+    RDMetalDepth *greeter_size=rd_metal_depth_create(core,3600,2338);
+    assert(greeter_size && rd_metal_depth_texture(greeter_size));
+    rd_metal_depth_destroy(greeter_size);
 
     RDGPUSession *session = rdgpu_local_session_create();
     assert(session);
@@ -77,6 +80,36 @@ int main(void) {
     request.request_id++;
     request.arg0 = bits;
     assert(rdgpu_dispatch(session, &request).status == RDGPU_BAD_MESSAGE);
+    request.request_id++;
+    request.op=RDGPU_CREATE_DEPTH;
+    request.arg0=16u | (16ull<<32);
+    request.arg1=0;
+    memset(request.lease,0,sizeof request.lease);
+    RDGPUReply depth_created=rdgpu_dispatch(session,&request);
+    assert(depth_created.status==RDGPU_OK && depth_created.value1);
+    request.request_id++;
+    request.op=RDGPU_CLEAR_DEPTH_STENCIL;
+    request.arg0=bits | (7ull<<32) | (3ull<<40);
+    request.arg1=depth_created.value1;
+    memcpy(request.lease,depth_created.lease,16);
+    RDGPUReply depth_cleared=rdgpu_dispatch(session,&request);
+    assert(depth_cleared.status==RDGPU_OK && depth_cleared.value0);
+    request.op=RDGPU_WAIT;
+    request.arg0=depth_cleared.value0;
+    do {
+        request.request_id++;
+        waited=rdgpu_dispatch(session,&request);
+        if(waited.status==RDGPU_PENDING)usleep(1000);
+    } while(waited.status==RDGPU_PENDING);
+    assert(waited.status==RDGPU_OK);
+    request.request_id++;
+    request.op=RDGPU_PREPARE_EXPORT;
+    request.arg0=1;
+    assert(rdgpu_dispatch(session,&request).status==RDGPU_DENIED);
+    request.request_id++;
+    request.op=RDGPU_RELEASE;
+    request.arg0=0;
+    assert(rdgpu_dispatch(session,&request).status==RDGPU_OK);
     rdgpu_session_disconnect(session);
     rd_metal_image_destroy(image);
     rd_metal_core_destroy(core);

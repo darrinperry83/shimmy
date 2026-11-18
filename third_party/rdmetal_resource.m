@@ -28,7 +28,7 @@ struct RDMetalDepth {
 
 RDMetalDepth *rd_metal_depth_create(RDMetalCore *core,uint32_t width,uint32_t height) {
     if(!core||!width||!height||width>4096||height>4096||
-       (uint64_t)width*height*8>64u*1024u*1024u)return NULL;
+       (uint64_t)width*height*8>128u*1024u*1024u)return NULL;
     MTLTextureDescriptor *desc=[MTLTextureDescriptor
         texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float_Stencil8
         width:width height:height mipmapped:NO];

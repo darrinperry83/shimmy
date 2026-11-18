@@ -11,6 +11,7 @@ static RDGPUReply transport(void *unused, const RDGPURequest *q) {
                     .bytes=RDGPU_WIRE_BYTES,.request_id=q->request_id,
                     .status=RDGPU_OK};
     if(q->op==RDGPU_CREATE_BGRA8){r.lease[0]=1;r.value1=1;}
+    else if(q->op==RDGPU_CREATE_DEPTH){r.lease[0]=2;r.value1=1;}
     else {
         memcpy(r.lease,q->lease,16);
         if(q->op==RDGPU_CLEAR_DEPTH_STENCIL){
@@ -37,6 +38,13 @@ int main(void) {
     assert(!state.slots[0].producerComplete);
     assert(rdgpu_guest_syscall(&state,RDGPU_WAIT,image,77,0,0,0)==0);
     assert(state.slots[0].producerComplete);
+    long separate=rdgpu_guest_syscall(&state,RDGPU_GUEST_CREATE_DEPTH,
+                                     16,16,0,0,0);
+    assert(separate>0 && separate!=image && state.slots[1].isDepth);
+    assert(rdgpu_guest_syscall(&state,RDGPU_GUEST_CLEAR_DEPTH_STENCIL,
+                              separate,0x3e800000u,7,3,0)==77);
+    assert(rdgpu_guest_syscall(&state,RDGPU_WAIT,separate,77,0,0,0)==0);
+    assert(rdgpu_guest_syscall(&state,RDGPU_RELEASE,separate,0,0,0,0)==0);
     puts("guest depth clear validates and carries broker lease");
     return 0;
 }

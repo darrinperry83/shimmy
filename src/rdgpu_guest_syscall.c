@@ -468,16 +468,19 @@ long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
         pthread_mutex_unlock(&s->lock);
         return rc;
     }
-    if(a4||a5||op<RDGPU_CREATE_BGRA8||op>RDGPU_PREPARE_EXPORT)return -EINVAL;
+    const int creating=op==RDGPU_CREATE_BGRA8||op==RDGPU_GUEST_CREATE_DEPTH;
+    if(a4||a5||op<RDGPU_CREATE_BGRA8||
+       (op>RDGPU_PREPARE_EXPORT&&op!=RDGPU_GUEST_CREATE_DEPTH))return -EINVAL;
     if(op==RDGPU_PREPARE_EXPORT){
         if(!a2||a3!=sizeof(RDGPUExportImage))return -EINVAL;
     }else if(a3)return -EINVAL;
     pthread_mutex_lock(&s->lock);
     RDGPURequest q={.magic=RDGPU_WIRE_MAGIC,.version=RDGPU_WIRE_VERSION,
-                    .op=(uint16_t)op,.bytes=RDGPU_WIRE_BYTES,
+                    .op=(uint16_t)(op==RDGPU_GUEST_CREATE_DEPTH?
+                         RDGPU_CREATE_DEPTH:op),.bytes=RDGPU_WIRE_BYTES,
                     .request_id=++s->nextRequest};
     RDGPUGuestSlot *entry=NULL;uint64_t newHandle=0;
-    if(op==RDGPU_CREATE_BGRA8){
+    if(creating){
         if(!a1||!a2||a1>RDGPU_MAX_IMAGE_EDGE||a2>RDGPU_MAX_IMAGE_EDGE||
            a1*a2*4>RDGPU_MAX_IMAGE_BYTES){pthread_mutex_unlock(&s->lock);return -EINVAL;}
         unsigned freeSlot=RDGPU_MAX_IMAGES_PER_PEER;
@@ -557,15 +560,16 @@ long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
     }
     RDGPUReply r=s->transport(s->context,&q);
     if(!valid_reply(&q,&r) ||
-       (op!=RDGPU_CREATE_BGRA8 && memcmp(r.lease,entry->lease,16))){
+       (!creating && memcmp(r.lease,entry->lease,16))){
         s->disabled=1;pthread_mutex_unlock(&s->lock);return -EIO;
     }
     long result=mapped(r.status);
-    if(result==0&&op==RDGPU_CREATE_BGRA8){
+    if(result==0&&creating){
         uint8_t any=0;for(unsigned i=0;i<16;i++)any|=r.lease[i];
         if(!any||!r.value1){s->disabled=1;result=-EIO;}
         else {entry->handle=newHandle;entry->generation=r.value1;
               entry->width=(uint32_t)a1;entry->height=(uint32_t)a2;
+              entry->isDepth=op==RDGPU_GUEST_CREATE_DEPTH;
               memcpy(entry->lease,r.lease,16);result=(long)newHandle;}
     }else if(result==0){
         if(op==RDGPU_CLEAR){
