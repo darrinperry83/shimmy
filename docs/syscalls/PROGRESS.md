@@ -55,6 +55,9 @@ This file records bounded behavior that has been implemented and tested. A dispa
 | 236 | `get_mempolicy` | `syscall/236-get-mempolicy` | Squash merged at `6c089d2`; bounded subset | Checked default-policy and one-node allowed-mask queries; VMA/address policies remain unsupported. ARM64 guest test passes. |
 | 237 | `set_mempolicy` | `syscall/237-set-mempolicy` | Squash merged at `60c1ba2`; bounded subset | Default-policy reset with a valid empty mask; nondefault placement requests are rejected. ARM64 guest test passes. |
 | 440 | `process_madvise` | `syscall/440-process-madvise` | Squash merged at `1a61f87`; bounded subset | Self-pidfd, one mapped iovec, `MADV_NORMAL` only; returns the advised byte count. Remote processes and other advice remain unsupported. ARM64 guest test passes. |
+| 118 | `sched_setparam` | `syscall/118-sched-setparam` | Squash merged at `405fa07`; bounded subset | Current guest thread/default priority zero only; checked pointer and target errors. Other thread scheduling remains unsupported. ARM64 guest test passes. |
+| 119 | `sched_setscheduler` | `syscall/119-sched-setscheduler` | Squash merged at `052e41a`; bounded subset | Current guest thread/default `SCHED_OTHER` and priority zero only; rejects unsupported policies instead of false success. ARM64 guest test passes. |
+| 120 | `sched_getscheduler` | `syscall/120-sched-getscheduler` | Squash merged at `888fcc0`; bounded subset | Reports current guest thread's `SCHED_OTHER`; rejects invalid, absent, or other known guest thread targets. ARM64 guest test passes. |
 
 ## Already merged before this batch
 
@@ -65,6 +68,8 @@ The development history already contains bounded implementations of `openat2`, `
 The CLI build and all eleven disposable ARM64 guest tests for native AIO (0–4, 292) and `SIGEV_NONE` POSIX timers (107–111) passed together on 2026-11-18 after squash merges. The installed Arch root was used only as read-only compiler input. Neither family has a live systemd or desktop regression result, and their bounded behavior must not be described as full Linux compatibility.
 
 The next six squash merges (`syslog`, `personality`, `mbind`, `get_mempolicy`, `set_mempolicy`, `process_madvise`) passed a combined CLI build and all six disposable ARM64 guest tests on 2026-11-18. Their individual docs identify the supported subset and unsupported Linux semantics. No live desktop or production rootfs was changed or tested by this batch.
+
+The scheduler trio (118–120) passed a combined CLI build and all three disposable ARM64 guest tests on 2026-11-18. This is only the current guest thread's default scheduler policy and priority; other-thread policy changes, real-time scheduling, and timing guarantees are not supported.
 
 ## Batch integration proof
 
