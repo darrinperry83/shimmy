@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")/.."
+tmpdir=$(mktemp -d)
+trap 'rm -rf "$tmpdir"' EXIT
+clang -std=c11 -Wall -Wextra -Werror -pthread -Isrc src/uffd_backend.c tests/test_uffd_backend.c -o "$tmpdir/test-uffd"
+"$tmpdir/test-uffd"
