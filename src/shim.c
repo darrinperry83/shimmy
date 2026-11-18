@@ -811,7 +811,7 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
     // /dev/dri/renderD128" and never brings up its EGL scene — which looks exactly like a client
     // that cannot reach the compositor. The top-level invocation worked only because RDDRM was in
     // the launch environment; the exec'd child got a fresh environment without it.
-    "RDDRM", "RDDRM_TRACE", "RDGPU_PRESENT_STATS", "RDNATIVE_SESSION",
+    "RDDRM", "RDDRM_TRACE", "RDGPU_PRESENT_STATS", "RDMETAL_TRACE_DRAW", "RDNATIVE_SESSION",
     // A systemd-started compositor is a re-exec'd host shim. The scanout and output
     // selection flags must survive that boundary or PID 1 can start in takeover while
     // the compositor silently falls back to an ordinary Mac window.

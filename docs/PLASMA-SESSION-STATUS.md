@@ -358,3 +358,32 @@ defect, not a demonstrated fix for this scene. A clone-only
 investigation is Plasmashell's first Wayland surface/commit and its futex
 waiter/waker, separately from greeter integration. Neither a full desktop nor
 lock/logout has been demonstrated.
+
+### Direct window inspection and Wayland import failure (2026-11-18)
+
+A later on-screen run captured the `shim_gui` window itself rather than an
+occluded full-screen screenshot. It shows the real tty1 login followed by a
+black graphical canvas. The host IOSurface self-check sampled only black
+pixels (`0/67080` across four frames); the fleeting Plasma elements seen on
+screen did not become a stable desktop.
+
+Plasmashell's captured Wayland trace identifies one concrete failure in the
+normal Metal client path. It created a 3600x2338 layer surface, exported an
+RGBA dma-buf carrier, attached it, and committed it. KWin then sent protocol
+error 7, `importing the supplied dmabufs failed`; Plasmashell lost its Wayland
+connection and restarted. The producer's local broker records the carrier,
+but `mock_fd_import` in `src/rdgpu_mock_gate.c` only resolves the producer's
+process-local image table. A real cross-process import needs an authenticated
+broker handoff. Do not treat a matching fd number, path, or unaudited sidecar
+as authority for an IOSurface.
+
+A disposable-root control set `QT_QUICK_BACKEND=software` for Plasmashell only.
+It then used `wl_shm`, created and attached desktop-sized buffers, and avoided
+that protocol error. KWin executed Metal draw calls and DRM flips, but the
+host still sampled black pixels. Thus the dma-buf rejection is a genuine
+blocker, but it is not the only missing piece. The next boundary to inspect
+is KWin's source texture contents versus its Metal target after a shared-memory
+client commit. The source-pixel trace knob was added to the shim's re-exec
+carry list because the KWin child previously lost it. The software control is
+diagnostic, not a GPU acceptance result. No greeter, complete Plasma scene,
+lock cycle, or logout-to-greeter was verified.
