@@ -3741,10 +3741,10 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     // append, atomic, or nonblocking flag: the host pwritev cannot honor it.
     if (a5) return -LX_EOPNOTSUPP;
     uint64_t pos = (uint64_t)a3;
-    ssize_t r = (pos == UINT64_MAX)
-      ? writev((int)a0, (const struct iovec*)a1, (int)a2)
-      : pwritev((int)a0, (const struct iovec*)a1, (int)a2, (off_t)pos);
-    return r < 0 ? eret() : r;
+    // Native #66/#70 already stage and validate guest vectors and payloads.
+    // Keep the ARM64 -1 current-position form and x3 full-width offset.
+    if (pos == UINT64_MAX) return linux_syscall(66, a0, a1, a2, 0, 0, 0);
+    return linux_syscall_ext(70, a0, a1, a2, pos, 0, 0);
   }
   case 288: {                                                   // pkey_mprotect
     // ARM64 has no protection-key allocation in this guest. Linux's no-pkeys
