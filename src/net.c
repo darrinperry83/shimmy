@@ -1897,7 +1897,17 @@ static long sys_epoll_wait_ts(int epfd, struct lin_epoll_event* uev, int maxeven
 }
 
 static long sys_epoll_pwait(int epfd, struct lin_epoll_event* uev,
-                            int maxevents, int timeout_ms) {
+                            int maxevents, int timeout_ms, const void* sigmask,
+                            size_t sigsetsize) {
+  // A non-NULL mask requires one atomic operation: install this guest thread's
+  // temporary mask, wait, and restore it. The shim currently has a process-wide
+  // virtual mask and a separate kqueue wait, so reporting success would leave
+  // signals unprotected. Match the bounded epoll_pwait2 policy until those
+  // primitives can be unified. Linux checks sigsetsize only for a supplied mask.
+  if (sigmask) {
+    if (sigsetsize != sizeof(uint64_t)) return -L_EINVAL;
+    return -L_EOPNOTSUPP;
+  }
   struct timespec ts;
   const struct timespec* tsp = NULL;
   if (timeout_ms >= 0) {
@@ -3024,7 +3034,8 @@ long net_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigned 
                            (struct lin_epoll_event*)a3);
     case LSYS_epoll_pwait:
       return sys_epoll_pwait((int)(long)a0, (struct lin_epoll_event*)a1,
-                             (int)(long)a2, (int)(long)a3);   // a4/a5: sigmask — ignored
+                             (int)(long)a2, (int)(long)a3,
+                             (const void*)a4, (size_t)a5);
     case LSYS_epoll_pwait2:
       return sys_epoll_pwait2((int)(long)a0, (struct lin_epoll_event*)a1,
                               (int)(long)a2, (const struct lin_timespec*)a3,
