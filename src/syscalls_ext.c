@@ -537,6 +537,7 @@ static long lx_io_pgetevents(uint64_t handle, long min_nr, long nr,
 
 #define LX_FALLOC_KEEP_SIZE   0x01
 #define LX_FALLOC_PUNCH_HOLE  0x02
+#define LX_FALLOC_ZERO_RANGE  0x10
 
 #define LX_RENAME_NOREPLACE 1
 #define LX_RENAME_EXCHANGE  2
@@ -1121,6 +1122,33 @@ static long do_dup3(int oldfd, int newfd, int flags) {
 
 static long do_fallocate(int fd, int mode, long long off, long long len) {
   if (len <= 0 || off < 0) return -LX_EINVAL;
+  if ((uint64_t)off + (uint64_t)len > INT64_MAX) return -LX_EOVERFLOW;
+  if (mode & LX_FALLOC_ZERO_RANGE) {
+    // Darwin has no unwritten-extent equivalent. For a small range wholly
+    // inside a regular file, positioned zero writes reproduce the observable
+    // bytes without changing the file size or current seek position.
+    if (mode & ~(LX_FALLOC_ZERO_RANGE | LX_FALLOC_KEEP_SIZE)) return -LX_EOPNOTSUPP;
+    if (fd < 0 || shim_fd_reserved(fd)) return -LX_EBADF;
+    int fl = fcntl(fd, F_GETFL);
+    if (fl < 0) return eret();
+    if ((fl & O_ACCMODE) == O_RDONLY) return -LX_EBADF;
+    if (fl & O_APPEND) return -LX_EOPNOTSUPP;
+    struct stat st;
+    if (fstat(fd, &st) < 0) return eret();
+    if (!S_ISREG(st.st_mode) || len > 1024 * 1024 || off + len > st.st_size)
+      return -LX_EOPNOTSUPP;
+    static const char zeros[4096] = {0};
+    long long done = 0;
+    while (done < len) {
+      size_t count = (size_t)((len - done) < (long long)sizeof zeros ?
+                              (len - done) : (long long)sizeof zeros);
+      ssize_t n = pwrite(fd, zeros, count, (off_t)(off + done));
+      if (n < 0) { if (errno == EINTR) continue; return eret(); }
+      if (!n) return -LX_EIO;
+      done += n;
+    }
+    return 0;
+  }
   if (mode & LX_FALLOC_PUNCH_HOLE) {
 #ifdef F_PUNCHHOLE
     fpunchhole_t ph = {0};
