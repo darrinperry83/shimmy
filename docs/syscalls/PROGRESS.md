@@ -4,6 +4,11 @@ This file records bounded behavior that has been implemented and tested. A dispa
 
 Current safety and refusal status is summarized in [`SAFEGUARDS.md`](SAFEGUARDS.md).
 
+The isolated #286 `preadv2` follow-up replaces raw guest iovec passthrough
+with checked bounded reads while preserving its ARM64 offset and flag ABI.
+Its focused probe, CLI build, and private Arch login/D-Bus boot gate pass.
+See [`PREADV2-GUEST-MEMORY.md`](PREADV2-GUEST-MEMORY.md).
+
 The isolated #281 `execveat` path correction snapshots the bounded guest
 pathname before resolution or execution. Its CLI build, eight-mode ARM64
 probe, and private Arch login/D-Bus boot gate pass; it does not change the

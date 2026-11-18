@@ -47,6 +47,26 @@ int main(void) {
     memset(buf, 0, sizeof buf);
     if (rd(fd, &iov, (unsigned long)large, 1, 0) != 1 || buf[0] != 'Z' ||
         lseek(fd, 0, SEEK_CUR) != 5) return 8;
+    errno = 0;
+    if (rd(fd, (struct iovec *)1, 0, 0, 0) != -1 || errno != EFAULT) return 9;
+    errno = 0;
+    if (rd(fd, (struct iovec *)1, (unsigned long)-1L, 0, 0) != -1 ||
+        errno != EFAULT || lseek(fd, 0, SEEK_CUR) != 5) return 10;
+    iov.iov_base = (void *)1;
+    errno = 0;
+    if (rd(fd, &iov, 0, 0, 0) != -1 || errno != EFAULT) return 11;
+    errno = 0;
+    if (rd(fd, &iov, (unsigned long)-1L, 0, 0) != -1 ||
+        errno != EFAULT || lseek(fd, 0, SEEK_CUR) != 5) return 12;
+    int pipefd[2];
+    if (pipe(pipefd) != 0 || write(pipefd[1], "pq", 2) != 2) return 13;
+    iov.iov_base = buf;
+    iov.iov_len = 2;
+    memset(buf, 0, sizeof buf);
+    if (rd(pipefd[0], &iov, (unsigned long)-1L, 0, 0) != 2 ||
+        memcmp(buf, "pq", 2) != 0) return 14;
+    close(pipefd[0]);
+    close(pipefd[1]);
     close(fd);
     puts("GUEST_PREADV2_OK");
     return 0;
