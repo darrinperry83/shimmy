@@ -24,6 +24,8 @@ _Static_assert(sizeof(struct shim_seccomp_data) == 64, "Linux seccomp_data ABI")
 
 static int return_supported(uint32_t action) {
   return action == SHIM_SECCOMP_RET_ALLOW ||
+         action == SHIM_SECCOMP_RET_KILL_THREAD ||
+         action == SHIM_SECCOMP_RET_KILL_PROCESS ||
          (action & 0xffff0000u) == SHIM_SECCOMP_RET_ERRNO;
 }
 

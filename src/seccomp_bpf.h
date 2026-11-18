@@ -21,9 +21,15 @@ struct shim_seccomp_data {
 #define SHIM_SECCOMP_ARCH_AARCH64 0xc00000b7u
 #define SHIM_SECCOMP_RET_ALLOW   0x7fff0000u
 #define SHIM_SECCOMP_RET_ERRNO   0x00050000u
+/* The standard libseccomp wrong-architecture fallback. Our evaluator always
+ * reports arch == AARCH64, so these branches are unreachable; they are accepted
+ * so real libseccomp-generated filters verify, and fail closed if ever taken. */
+#define SHIM_SECCOMP_RET_KILL_THREAD  0x00000000u
+#define SHIM_SECCOMP_RET_KILL_PROCESS 0x80000000u
 
-/* 0 success, -1 for an unsupported or unsafe program. Only ALLOW and ERRNO
- * returns are accepted. The caller must snapshot the instructions before use. */
+/* 0 success, -1 for an unsupported or unsafe program. ALLOW, ERRNO and the
+ * wrong-architecture KILL fallbacks are accepted. The caller must snapshot the
+ * instructions before use. */
 int shim_seccomp_bpf_verify(const struct shim_sock_filter *insns, size_t count);
 
 /* Only call after verify. Invalid input fails closed with ERRNO(EPERM). */

@@ -547,6 +547,20 @@ long guest_no_new_privs_set(void) {
   return 0;
 }
 
+long guest_seccomp_install(const struct shim_sock_filter *insns, unsigned count) {
+  // Linux requires no_new_privs (or CAP_SYS_ADMIN) before a filter is accepted;
+  // the shim's model exposes only the no_new_privs gate.
+  if (!guest_no_new_privs_get()) return -13; // EACCES
+  struct shim_seccomp_state* state = shim_seccomp_state_new(insns, count, 1);
+  if (!state) return -22; // EINVAL: program failed verification or count out of range
+  // Match guest_no_new_privs_set: assign to the calling thread when we have a
+  // record, else to the process-wide seed. States are immutable and
+  // process-lifetime, so the replaced state is deliberately not freed.
+  if (t_cur) t_cur->seccomp = state;
+  else g_seccomp_seed = state;
+  return 0;
+}
+
 int  guest_tid(void)        { return t_cur ? t_cur->tid : (int)syscalls_guest_pid(); }
 
 // Is `tid` one of OUR guest threads? The signal path needs this because guest tids and host pids

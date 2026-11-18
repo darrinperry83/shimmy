@@ -4,7 +4,12 @@
 #include "seccomp_bpf.h"
 #include <stdint.h>
 
-/* Immutable, process-private policy. Guest syscall 277 does not install it yet. */
+/* Upper bound on a program length, shared with the install path (seccomp(2) and
+ * prctl(PR_SET_SECCOMP)). */
+#define SHIM_SECCOMP_MAX_INSNS 256u
+
+/* Immutable, process-private policy. Installed via guest_seccomp_install() and
+ * enforced by shim_seccomp_state_check() before every guest syscall. */
 struct shim_seccomp_state;
 
 struct shim_seccomp_state *shim_seccomp_state_new(

@@ -64,6 +64,7 @@ void fx_note(const char* fmt, ...);
 
 #include "syscalls.h"       // linux_errno_from_host()
 #include "landlock.h"
+#include "seccomp_runtime.h"
 #include "net.h"
 #include "syscalls_ext.h"
 #include "signalfd_shim.h"
@@ -522,6 +523,13 @@ static long lx_io_pgetevents(uint64_t handle, long min_nr, long nr,
 #define LX_PR_GET_MEMORY_MERGE 68
 #define LX_PR_SET_VMA          0x53564d41
 #define LX_PR_SET_PTRACER      0x59616d61
+
+// Linux seccomp UAPI (aarch64 values). Only SET_MODE_FILTER is installed;
+// SET_MODE_STRICT and later modes are rejected with EINVAL.
+#define LX_SECCOMP_SET_MODE_STRICT 0
+#define LX_SECCOMP_SET_MODE_FILTER 1
+#define LX_SECCOMP_FILTER_FLAG_TSYNC (1u << 0)
+#define LX_SECCOMP_MODE_FILTER       2
 
 #define LX_MS_ASYNC       1
 #define LX_MS_INVALIDATE  2
@@ -1000,6 +1008,8 @@ static unsigned g_mdwe;
 static int  g_memory_merge;
 static unsigned long g_timerslack = 50000;
 
+static long do_seccomp_set_mode_filter(unsigned long prog_addr);
+
 static long do_prctl(int opt, unsigned long a1, unsigned long a2,
                      unsigned long a3, unsigned long a4) {
   switch (opt) {
@@ -1050,7 +1060,12 @@ static long do_prctl(int opt, unsigned long a1, unsigned long a2,
     case LX_PR_SET_VMA:        return 0;         // anon-vma naming: purely cosmetic
     case LX_PR_SET_PTRACER:    return 0;
     case LX_PR_GET_SECCOMP:    return 0;
-    case LX_PR_SET_SECCOMP:    return -LX_EINVAL;  // no filtering here; Linux also EINVALs
+    case LX_PR_SET_SECCOMP:
+      // prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &fprog, 0, 0). Only the
+      // filter mode is installed; STRICT and anything else are EINVAL.
+      if (a1 != LX_SECCOMP_MODE_FILTER) return -LX_EINVAL;
+      if (a3 || a4) return -LX_EINVAL;
+      return do_seccomp_set_mode_filter(a2);
     // PR_CAP_AMBIENT (47): raise/lower/clear ambient capabilities. The shim does not enforce
     // capabilities (uid is already virtualized), so accept RAISE/LOWER/CLEAR_ALL. systemd's
     // exec_context_apply_ambient() calls PR_CAP_AMBIENT_RAISE for every unit and aborted the
@@ -1069,6 +1084,34 @@ static long do_prctl(int opt, unsigned long a1, unsigned long a2,
     case LX_PR_GET_MEMORY_MERGE: return g_memory_merge;
     default:                   return -LX_EINVAL;
   }
+}
+
+// ---------------------------------------------------------------------------
+// seccomp(2) install — SET_MODE_FILTER. The guest passes a `struct sock_fprog`
+// (len + pointer to len `struct sock_filter` entries). We copy both in with the
+// standard checked guest-memory helper, bound the length, then hand the snapshot
+// to guest_seccomp_install() (which verifies and attaches it).
+// ---------------------------------------------------------------------------
+struct lx_sock_fprog {
+  unsigned short len;
+  unsigned short _pad0;
+  unsigned int   _pad1;
+  uint64_t       filter;   /* guest pointer to len sock_filter entries */
+};
+_Static_assert(sizeof(struct lx_sock_fprog) == 16, "Linux aarch64 sock_fprog size");
+
+static long do_seccomp_set_mode_filter(unsigned long prog_addr) {
+  if (!prog_addr) return -LX_EFAULT;
+  struct lx_sock_fprog fp;
+  if (gmem_guest_export_copyin(NULL, prog_addr, &fp, sizeof fp) != 0)
+    return -LX_EFAULT;
+  unsigned len = fp.len;
+  if (len == 0 || len > SHIM_SECCOMP_MAX_INSNS) return -LX_EINVAL;
+  struct shim_sock_filter insns[SHIM_SECCOMP_MAX_INSNS];
+  if (gmem_guest_export_copyin(NULL, fp.filter, insns,
+                               (size_t)len * sizeof insns[0]) != 0)
+    return -LX_EFAULT;
+  return guest_seccomp_install(insns, len);
 }
 
 // ---------------------------------------------------------------------------
@@ -3668,7 +3711,16 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return -LX_EINVAL;
 #endif
   }
-  case 277: return -LX_ENOSYS;                                  // seccomp
+  case 277: {  /* seccomp(operation, flags, args) */
+    unsigned operation = (unsigned)a0, flags = (unsigned)a1;
+    if (operation != LX_SECCOMP_SET_MODE_FILTER) return -LX_EINVAL;  // STRICT etc unsupported
+    if (flags & ~(unsigned)LX_SECCOMP_FILTER_FLAG_TSYNC) return -LX_EINVAL;
+    // TSYNC is accepted but not synchronized across already-live threads: the
+    // policy is attached to the calling thread and inherited by its children,
+    // which is correct for the single-threaded sandbox workers that reach here.
+    if (!a2) return -LX_EFAULT;
+    return do_seccomp_set_mode_filter(a2);
+  }
   case 279: {                                                 // memfd_create(name, flags)
     char guest_name[250];
     e = copy_guest_cstr(a0, guest_name, sizeof guest_name);

@@ -14,10 +14,15 @@ int  guest_tid(void);
 int  guest_tid_known(int tid);
 int  guest_thread_count(void);  // live guest threads in this host process
 
-// Linux no_new_privs is monotonic and inherited by clone/fork/exec. This does
-// not install a seccomp filter; syscall 277 remains unavailable.
+// Linux no_new_privs is monotonic and inherited by clone/fork/exec.
 int  guest_no_new_privs_get(void);
 long guest_no_new_privs_set(void);
+
+// Install an immutable seccomp policy for the calling guest thread. Requires
+// no_new_privs (EACCES otherwise); the policy is inherited by guest
+// descendants. `insns`/`count` describe a validated classic-BPF program.
+struct shim_sock_filter;
+long guest_seccomp_install(const struct shim_sock_filter *insns, unsigned count);
 
 // HOST child processes the shim created on the guest's behalf (fork, and the posix_spawn behind
 // vfork/execve). These are the only pids outside this process that a guest may legitimately name:

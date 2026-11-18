@@ -36,7 +36,7 @@ def main():
         if result.returncode or "GUEST_SECCOMP_UNAVAILABLE_OK" not in result.stdout:
             raise RuntimeError(f"guest failed: rc={result.returncode}\n"
                                f"{result.stdout}\n{result.stderr[-2000:]}")
-        print("GUEST_SECCOMP_UNAVAILABLE_OK: no false strict or BPF filter installation")
+        print("GUEST_SECCOMP_UNAVAILABLE_OK: STRICT rejected; filter refused without no_new_privs")
 
 
 if __name__ == "__main__":

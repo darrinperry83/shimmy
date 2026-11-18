@@ -6,7 +6,6 @@
 #include <unistd.h>
 
 #define SHIM_SECCOMP_WIRE_MAGIC 0x53434631u /* SCF1 */
-#define SHIM_SECCOMP_MAX_INSNS 256u
 
 struct shim_seccomp_state {
   unsigned count;
@@ -47,6 +46,13 @@ int shim_seccomp_state_check(const struct shim_seccomp_state *s,
   memcpy(data.args, args, sizeof data.args);
   uint32_t action = shim_seccomp_bpf_eval_verified(s->program, s->count, &data);
   if (action == SHIM_SECCOMP_RET_ALLOW) return 0;
+  if (action == SHIM_SECCOMP_RET_KILL_THREAD || action == SHIM_SECCOMP_RET_KILL_PROCESS) {
+    /* The shim cannot kill a guest thread from the predispatch path. These are
+     * the libseccomp wrong-architecture fallbacks, unreachable because arch is
+     * always reported as aarch64; fail closed with EPERM rather than allow. */
+    *result = -1; /* EPERM */
+    return 1;
+  }
   *result = -(long)(action & 0xffffu);
   return 1;
 }
