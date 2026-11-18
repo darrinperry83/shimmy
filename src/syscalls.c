@@ -4870,17 +4870,19 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   case 66: {
     long r = herr((long)writev((int)a0, (const struct iovec*)a1, (int)a2));
     if (getenv("RDWRDUMP") && (int)a0 < 32 && r > 0) {
-      FILE* df = fopen("/tmp/rd_wrdump.txt", "a");
+      const char* dump_path = getenv("RDWRDUMPFILE");
+      FILE* df = fopen(dump_path ? dump_path : "/tmp/rd_wrdump.txt", "a");
       if (df) {
         fprintf(df, "writev fd=%ld n=%ld: \"", a0, r);
         const struct iovec* iv = (const struct iovec*)a1;
-        for (long i = 0; i < (long)a2 && r > 0; i++) {
-          size_t n = iv[i].iov_len < (size_t)r ? iv[i].iov_len : (size_t)r;
+        long remaining = r;
+        for (long i = 0; i < (long)a2 && remaining > 0; i++) {
+          size_t n = iv[i].iov_len < (size_t)remaining ? iv[i].iov_len : (size_t)remaining;
           for (size_t j = 0; j < n; j++) {
             unsigned char c = ((const unsigned char*)iv[i].iov_base)[j];
             fputc(c >= 0x20 && c < 0x7f ? c : '.', df);
           }
-          r -= (long)n;
+          remaining -= (long)n;
         }
         fprintf(df, "\"\n");
         fclose(df);
