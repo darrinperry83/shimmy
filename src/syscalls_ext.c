@@ -1474,6 +1474,26 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return r < 0 ? eret() : r;
   }
   case 11: case 12: case 13: {                                 // listxattr / l / f
+    if (nr == 11) {
+      char guest_path[PATH_MAX];
+      e = copy_guest_cstr(a0, guest_path, sizeof guest_path);
+      if (e < 0) return e;
+      e = resolve_path_nf(guest_path, host, sizeof host, 0);
+      if (e < 0) return e;
+      size_t requested = (size_t)a2;
+      size_t cap = requested > 1024 * 1024 ? 1024 * 1024 : requested;
+      char *names = cap ? malloc(cap) : NULL;
+      if (cap && !names) return -LX_ENOMEM;
+      ssize_t r = listxattr(host, names, cap, 0);
+      if (requested && r > 0 && gmem_guest_copyout_checked(a1, names, (size_t)r) != 0) {
+        free(names);
+        return -LX_EFAULT;
+      }
+      int saved_errno = errno;
+      free(names);
+      errno = saved_errno;
+      return r < 0 ? eret() : r;
+    }
     if (nr == 13) {
       // The list is host-generated output, not a host-writable guest pointer.
       // Linux permits size=0 to query its length without an output buffer.
@@ -1494,7 +1514,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     ssize_t r;
     e = resolve_path_nf((const char*)a0, host, sizeof host, nr == 12);
     if (e < 0) return e;
-    r = listxattr(host, (char*)a1, (size_t)a2, nr == 12 ? XATTR_NOFOLLOW : 0);
+    r = listxattr(host, (char*)a1, (size_t)a2, XATTR_NOFOLLOW);
     return r < 0 ? eret() : r;
   }
   case 14: case 15: case 16: {                                 // removexattr / l / f
