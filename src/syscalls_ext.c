@@ -2124,7 +2124,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     }
     return 0;
   }
-  case 97: return -LX_EPERM;                                   // unshare
+  case 97: return a0 == 0 ? 0 : -LX_EPERM;                     // unshare(0) is a true no-op
   case 100: return guest_get_robust_list((long)a0, a1, a2);    // get_robust_list
   case 101: {                                                  // nanosleep
     struct lx_timespec requested;

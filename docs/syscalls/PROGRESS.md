@@ -226,6 +226,8 @@ An isolated #282 userfaultfd fault/copy/wake experiment passed ARM64 guest and p
 
 `clock_nanosleep` (#115) now checks the guest request and interruption remainder, validates flags and timespec fields, propagates host clock query errors, and refuses clock modes it cannot sleep against. Its ARM64 guest probe, CLI build, private Arch login/D-Bus boot, and combined #101/#115 probes passed. Absolute realtime adjustment and guest signal/restart semantics remain unproven.
 
+`unshare` (#97) now accepts only the truthful zero-flags no-op. Namespace-changing requests retain their existing refusal. Its ARM64 state-continuity probe, CLI build, private Arch login/D-Bus boot, and integration probe passed.
+
 `symlinkat` (#36) now snapshots both guest strings before host mutation, while preserving the link target verbatim as guest text. Its ARM64 probe covers invalid pointers, overlong input, existing destination, and exact target text; CLI build, private Arch login/D-Bus boot, and integration probe passed.
 
 `linkat` (#37) now validates flags before path mutation, refuses unsupported `AT_EMPTY_PATH`, and uses Darwin `linkat` so zero flags link a symlink inode while `AT_SYMLINK_FOLLOW` links its target. Its ARM64 probe, CLI build, private Arch login/D-Bus boot, and combined #36/#37 integration probes passed.
