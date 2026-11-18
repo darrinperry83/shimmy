@@ -4834,14 +4834,25 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
         }
       }
     }
-    long r = herr((long)read((int)a0, (void*)a1, (size_t)a2));
+    // A guest ELF/JIT destination may not be writable through the host VM
+    // mapping. Check it before consuming a pipe/socket, then stage the read
+    // and copy only bytes the host actually returned.
+    size_t read_count = (size_t)a2;
+    if (read_count > 1024 * 1024) return -LX_EOPNOTSUPP;
+    if (read_count && gmem_guest_range_writable(a1, read_count) != 0)
+      return -LX_EFAULT;
+    char *read_staged = read_count ? malloc(read_count) : NULL;
+    if (read_count && !read_staged) return -LX_ENOMEM;
+    long r = herr((long)read((int)a0, read_staged, read_count));
+    if (r > 0 && gmem_guest_copyout_checked(a1, read_staged, (size_t)r) != 0)
+      r = -LX_EFAULT; // A guest mapping may change after the preflight.
     if (getenv("RDREADDBG") && (int)a0 == 69) {
       FILE* f = fopen("/tmp/rd_read_dbg.txt", "a");
       if (f) { fprintf(f, "pid=%d READ69 ret=%ld\n", (int)getpid(), r); fclose(f); }
     }
     if (getenv("RDDESERDBG") && (int)a0 == 74 && r > 0) {
       FILE* f = fopen("/tmp/rd_fd74.bin", "a");
-      if (f) { fwrite((void*)a1, 1, (size_t)r, f); fclose(f); }
+      if (f) { fwrite(read_staged, 1, (size_t)r, f); fclose(f); }
     }
     if (getenv("RDEXECDBG") && (int)a0 >= 60) {
       static int nread;
@@ -4860,6 +4871,7 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
         if (S_ISFIFO(st.st_mode) && r == 0 && g_idle_saw_address) g_idle_after_address = 1;
       }
     }
+    free(read_staged);
     return r;
   }
   case 64: {
