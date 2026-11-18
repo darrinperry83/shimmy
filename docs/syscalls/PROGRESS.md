@@ -14,6 +14,7 @@ Current safety and refusal status is summarized in [`SAFEGUARDS.md`](SAFEGUARDS.
 
 | Number | Syscall | Branch | State | Evidence / remaining work |
 | ---: | --- | --- | --- | --- |
+| 79 | `newfstatat` | `syscall/79-newfstatat-checked` | Isolated correction candidate | Stages all ordinary and synthetic stat results before checked guest copyout; `AT_EMPTY_PATH` uses descriptor ownership instead of uninitialized path state. CLI build and ARM64 ordinary, virtual-tty, procfs and bad-output probe pass; private Arch boot pending. Input pathname and full Linux flag semantics remain unverified. |
 | 28 | `inotify_rm_watch` | `syscall/28-inotify-rm-watch` | Merged at `77f4b7e`; partial | Watch state and `IN_IGNORED` removal are tested in host and disposable ARM64 guest probes. Filesystem-change events are still absent; reserved fd lifecycle remains limited. |
 | 77 | `tee` | `syscall/77-tee` | Blocked: virtual pipe dependency | Existing code returns `ENOSYS`. Darwin pipe fds cannot be peeked (`MSG_PEEK` gives `ENOTSOCK`; `pread` gives `ESPIPE`); a correct implementation needs virtual pipe queue and readiness across read/write/dup/fork/exec. No code change or compatibility claim. |
 | 100 | `get_robust_list` | `syscall/100-get-robust-list` | Merged at `23317ab`; partial | Per-thread registration/query, fork reset, `ESRCH`/`EFAULT` pass disposable ARM64 ABI and thread tests. Owner-death futex cleanup and cross-process queries remain absent. |

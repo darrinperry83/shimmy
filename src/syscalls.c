@@ -5002,15 +5002,37 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   // ---------- 79 newfstatat / 80 fstat ----------
   case 79: {
     struct stat st;
-    struct linux_stat* out = (struct linux_stat*)a2;
-    if (!out) return -LX_EFAULT;
+    struct linux_stat staged = {0};
+    struct linux_stat* out = &staged;
+    if (!a2) return -LX_EFAULT;
     const char* p = (const char*)a1;
     if ((a3 & LX_AT_EMPTY_PATH) && (!p || !*p)) {
-      if (!net_opath_socket_stat((int)a0, &st) && fstat((int)a0, &st) < 0) return herrno();
+      int fd = (int)a0;
+      if (!net_opath_socket_stat(fd, &st) && fstat(fd, &st) < 0) return herrno();
       if (stat_m2l(&st, out)<0) return herrno();
-      if (drm_is_node(gabs)) drm_fake_stat(&out->st_mode, &out->st_rdev, gabs);
-      if (cam_is_node(gabs)) cam_fake_stat(&out->st_mode, &out->st_rdev);
-      return 0;
+      // No path was resolved here. The former gabs lookup read an uninitialized
+      // buffer; use the registered synthetic fd identity instead.
+      unsigned fake_mode = out->st_mode;
+      unsigned long fake_rdev = (unsigned long)out->st_rdev;
+      if (drm_owns_fd(fd))
+        drm_fake_stat(&fake_mode, &fake_rdev,
+                      drm_minor_of_fd(fd) == 0 ? "/dev/dri/card0" : "/dev/dri/renderD128");
+      if (cam_owns_fd(fd)) cam_fake_stat(&fake_mode, &fake_rdev);
+      if (snd_owns_fd(fd)) snd_fake_stat(&fake_mode, &fake_rdev, "controlC0");
+      if (evdev_owns_fd(fd)) {
+        int dev = evdev_device_of_fd(fd);
+        evdev_fake_stat(&fake_mode, &fake_rdev,
+                        dev == EVDEV_DEV_PTR ? "event1" : "event0");
+      }
+      if (vt_owns_fd(fd)) {
+        char tty[24];
+        snprintf(tty, sizeof tty, "/dev/tty%d", vt_number_for_fd(fd));
+        vt_fake_stat(&fake_mode, &fake_rdev, tty);
+        vt_stat_identity(tty, &out->st_dev, &out->st_ino);
+      }
+      out->st_mode = fake_mode;
+      out->st_rdev = fake_rdev;
+      goto stat79_copyout;
     }
     if ((r = resolve_f((int)a0, p, (a3 & LX_AT_SYMLINK_NOFOLLOW) ? RSV_NOFOLLOW : 0,
                        host, sizeof host, gabs, sizeof gabs)) < 0) return r;
@@ -5020,7 +5042,7 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
       out->st_mode = S_IFREG | 0444;
       out->st_nlink = 1; out->st_uid = 0; out->st_gid = 0;
       out->st_blksize = 4096; out->st_ino = 3;
-      return 0;
+      goto stat79_copyout;
     }
     // Synthetic sysfs nodes under /sys/dev/char/226:*/ — answer from drmasahi.c, not the host fs.
     if (drm_sysfs_kind(gabs)) {
@@ -5028,19 +5050,19 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
       drm_fake_stat(&out->st_mode, &out->st_rdev, gabs);
       if (drm_sysfs_kind(gabs) == 12 && !(a3 & LX_AT_SYMLINK_NOFOLLOW))
         out->st_mode = S_IFDIR | 0755;
-      return 0;
+      goto stat79_copyout;
     }
     // Synthetic /sys/class/sound/* and /run/udev/data/c116:0 — the ALSA card's sysfs/udev surface.
     if (snd_sysfs_kind(gabs)) {
       memset(out, 0, sizeof *out);
       snd_fake_stat(&out->st_mode, &out->st_rdev, gabs);
-      return 0;
+      goto stat79_copyout;
     }
     // Synthetic /sys/class/input/* and /run/udev/data/c13:* — the evdev input surface.
     if (evdev_sysfs_kind(gabs)) {
       memset(out, 0, sizeof *out);
       evdev_fake_stat(&out->st_mode, &out->st_rdev, gabs);
-      return 0;
+      goto stat79_copyout;
     }
     // /dev/dri/card0 and /dev/dri/renderD128 are synthetic char nodes; the host rootfs only has
     // empty placeholder files so libdrm's opendir("/dev/dri") has something to list. Fake their
@@ -5048,26 +5070,26 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     if (drm_is_node(gabs)) {
       memset(out, 0, sizeof *out);
       drm_fake_stat(&out->st_mode, &out->st_rdev, gabs);
-      return 0;
+      goto stat79_copyout;
     }
     // /dev/input/eventN — synthetic evdev char nodes (major 13).
     if (evdev_is_node(gabs)) {
       memset(out, 0, sizeof *out);
       evdev_fake_stat(&out->st_mode, &out->st_rdev, gabs);
-      return 0;
+      goto stat79_copyout;
     }
     // /dev/snd/* — synthetic ALSA char nodes (major 116).
     if (snd_is_node(gabs)) {
       memset(out, 0, sizeof *out);
       snd_fake_stat(&out->st_mode, &out->st_rdev, gabs);
-      return 0;
+      goto stat79_copyout;
     }
     // /dev/ttyN / /dev/console / /dev/tty0 — virtual consoles (major 4).
     if (vt_is_node(gabs)) {
       memset(out, 0, sizeof *out);
       vt_fake_stat(&out->st_mode, &out->st_rdev, gabs);
       vt_stat_identity(gabs, &out->st_dev, &out->st_ino);
-      return 0;
+      goto stat79_copyout;
     }
     // cgroup v2 files/dirs are synthesized; the host rootfs has none of them, so stat them from
     // the in-memory tree (dirs as S_IFDIR, control files as S_IFREG with the served size).
@@ -5079,13 +5101,13 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
         out->st_mode = S_IFREG | 0644;
         out->st_size = c ? (int64_t)strlen(c) : 0;
         out->st_nlink = 1; out->st_uid = 0; out->st_gid = 0; out->st_blksize = 4096; out->st_ino = 1;
-        return 0;
+        goto stat79_copyout;
       }
       if (cgroup_is_dir(gabs)) {
         memset(out, 0, sizeof *out);
         out->st_mode = S_IFDIR | 0755;
         out->st_nlink = 2; out->st_uid = 0; out->st_gid = 0; out->st_blksize = 4096; out->st_ino = 2;
-        return 0;
+        goto stat79_copyout;
       }
       return -LX_ENOENT;
     }
@@ -5107,7 +5129,9 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
       if (f) { fprintf(f, "pid=%d STAT-NONLNK path=%s mode=%#o\n", (int)getpid(), gabs, st.st_mode); fclose(f); }
     }
     if (stat_m2l(&st, out)<0) return herrno();
-    return 0;
+  stat79_copyout:
+    return gmem_guest_copyout_checked(a2, out, sizeof *out) == 0
+               ? 0 : -LX_EFAULT;
   }
   case 80: {
     struct stat st;
