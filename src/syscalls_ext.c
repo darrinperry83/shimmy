@@ -2285,8 +2285,15 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return ok0(setpriority(PRIO_PROCESS, 0, niceval));
   }
   case 141: {                                                  // getpriority
+    // Guest process/group/user IDs are not Darwin's namespaces. Preserve the
+    // useful self query without exposing arbitrary host scheduling state.
+    int which = (int)a0, who = (int)a1;
+    if (which < PRIO_PROCESS || which > PRIO_USER) return -LX_EINVAL;
+    if (which != PRIO_PROCESS) return -LX_EOPNOTSUPP;
+    if (who && who != (int)syscalls_guest_pid())
+      return guest_child_known(who) ? -LX_EOPNOTSUPP : -LX_ESRCH;
     errno = 0;
-    int r = getpriority((int)a0, (id_t)a1);
+    int r = getpriority(PRIO_PROCESS, 0);
     if (r == -1 && errno) return eret();
     return 20 - r;                                             // raw Linux ABI returns 20-nice
   }
