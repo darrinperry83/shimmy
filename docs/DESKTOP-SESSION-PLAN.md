@@ -29,6 +29,15 @@ macOS login session or every other Mac app.
 
 ## Current evidence and gaps
 
+18 November checkpoint: an isolated full systemd → tty1 login → Plasma boot
+delivered nonblack KWin Metal frames into the persistent `shim_gui` host
+window, with no renderer-selection flags. The generic Gallium driver now
+handles index offsets, index bias, and triangle fans used in that run. See
+`docs/PLASMA-SESSION-STATUS.md` for the measured pixel samples and limits.
+The dated 17 November notes below are retained as historical checkpoints.
+Full GPU coverage, zero softpipe fallback, performance, greeter/locker cycle,
+and takeover remain open acceptance gates.
+
 17 November broker checkpoint: syscall `0x2002` now selects a same-process
 Metal broker by default and reserves `RDMETAL_LEDGER_MOCK=1` for the older test
 gate. An isolated Linux aarch64 guest without fixture flags completed

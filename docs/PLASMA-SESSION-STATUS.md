@@ -276,3 +276,37 @@ session's startup and frame path. It does not establish a frame-rate gain:
 the probe observed only 17 frames and did not disable the hybrid softpipe
 fallback or prove Metal execution for those frames. The live installed driver
 was not replaced.
+
+## Native Metal frame progress in the systemd Plasma boot (2026-11-18)
+
+An isolated on-screen `shim_gui /sbin/init --system` boot authenticated a
+throwaway user on tty1 and started `startplasma-wayland`, KWin, Plasmashell,
+and foot. This was the full init/login path, not a standalone compositor run.
+The local Metal broker and host display window exchanged the same IOSurface
+through the authenticated DRM-device handoff after logind acquired DRM master.
+The associated Shimmy change is `a4858f9`; the RD Metal Gallium driver change
+is `5913b55`.
+
+The first Metal draw sampled an all-black 273x273 source, and both its target
+and the host window were black. A subsequent valid indexed triangle draw used
+Gallium `start=48` and `index_bias=1`; the driver had rejected both parameters
+and permanently failed its context. Supporting bounded index offsets and bias
+made the 3600x2338 target nonblack. The next rejected draw was a four-vertex
+`MESA_PRIM_TRIANGLE_FAN`; bounded generic fan conversion let rendering
+continue. These are Gallium draw semantics, with no KWin-specific dispatch.
+
+After a clean rebuild and no RD Metal or Mesa draw flags, the isolated boot
+again reached login and Plasma. Four host-window samples contained 0, 0,
+7,440, and 8,148 nonblack pixels out of 67,080 sampled, respectively. A later
+run with the bounded resource-hold cleanup yielded 0, 7,440, 8,148, and 8,888.
+The host presenter therefore receives real nonblack Metal content in this
+path. CLI and GUI builds and the native DRM-master authorization regression
+passed; the latter requires permission to register a temporary Mach bootstrap
+name. A native RD Metal resource-lifetime test also passed. The installed live
+Arch root and its driver were not modified.
+
+This is an initial visible GPU path, not full native-equivalent GPU support.
+The direct Gallium implementation still has limited primitive, format, and
+render-state coverage, retains a hybrid softpipe fallback, and compiles MSL
+and pipeline state per draw. Sustained frame rate, zero-fallback composition,
+greeter/lock/logout, takeover, and both-display operation remain unverified.
