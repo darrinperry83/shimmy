@@ -42,17 +42,6 @@ review = {
     156: "getsid has bounded guest target handling; wider session semantics need review",
     168: "getcpu has bounded virtual topology result; check cross-interface consistency",
     171: "adjtimex supports bounded read-only state; clock adjustment is unsupported",
-    186: "SysV msgget uses host-global IPC namespace and guest key",
-    187: "SysV msgctl uses host-global IPC identifier",
-    188: "SysV msgrcv uses host-global IPC identifier",
-    189: "SysV msgsnd uses host-global IPC identifier",
-    190: "SysV semget uses host-global IPC namespace and guest key",
-    191: "SysV semctl uses host-global IPC identifier",
-    193: "SysV semop uses host-global IPC identifier",
-    194: "SysV shmget uses host-global IPC namespace and guest key",
-    195: "SysV shmctl uses host-global IPC identifier",
-    196: "SysV shmat maps host-global IPC segment",
-    197: "SysV shmdt detaches host-global IPC segment",
     428: "open_tree returns /tmp directory fd, not detached mount",
     429: "move_mount returns unconditional success without move",
     430: "fsopen returns unconnected host datagram socket, not fs context",
@@ -61,6 +50,12 @@ review = {
     433: "fspick returns unconnected host datagram socket, not fs context",
     442: "mount_setattr returns unconditional success without attribute change",
 }
+
+# These previously forwarded guest keys, IDs, or addresses to Darwin's global
+# SysV IPC namespace. Each now returns ENOSYS before host IPC. The guard is
+# verified by focused ARM64 probes and private Arch boot, but is not a working
+# Linux IPC implementation; keep it distinct from full compatibility.
+safeguarded_host_ipc = set(range(186, 198))
 
 rows = []
 for entry in ledger["syscalls"]:
@@ -73,6 +68,7 @@ for entry in ledger["syscalls"]:
         "trap_override_requires_review": entry["trap_override"],
         "duplicate_cases": len(locations) > 1,
         "source_review_flag": review.get(n),
+        "safeguarded_host_ipc": n in safeguarded_host_ipc,
         "compatibility": "unverified",
     })
 
@@ -97,6 +93,7 @@ snapshot = {
         "no_case_label": sum(row["dispatch"] == "none" for row in rows),
         "duplicate_case_numbers": sum(row["duplicate_cases"] for row in rows),
         "source_review_flags": sum(row["source_review_flag"] is not None for row in rows),
+        "safeguarded_host_ipc": sum(row["safeguarded_host_ipc"] for row in rows),
         "verified_full_compatibility": 0,
     },
     "syscalls": rows,

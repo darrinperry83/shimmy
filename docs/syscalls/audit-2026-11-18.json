@@ -6,7 +6,8 @@
     "excluded_compat_entries": 20,
     "header_entries": 327,
     "no_case_label": 14,
-    "source_review_flags": 32,
+    "safeguarded_host_ipc": 12,
+    "source_review_flags": 21,
     "verified_full_compatibility": 0
   },
   "excluded_compat_entries": [
@@ -97,7 +98,7 @@
   "header_sha256": "a6277c8757890bd4fe8afaf76a8ea79274e7b0484ec147e717634c16fe54e1d9",
   "method": "installed native asm/unistd_64.h table, generic-header compat exclusion, inventory.py case-label scan, and manually reviewed source-risk flags; no guest ABI test",
   "schema_version": 1,
-  "source_commit": "789d38ad58871dcc5f5b4d77d9f6e75f9068954c",
+  "source_commit": "892facb2adc2d192cb8e1ec54fbff0bea1316b40",
   "source_dirty_at_scan": false,
   "syscalls": [
     {
@@ -113,6 +114,7 @@
       ],
       "name": "io_setup",
       "number": 0,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -129,6 +131,7 @@
       ],
       "name": "io_destroy",
       "number": 1,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -145,6 +148,7 @@
       ],
       "name": "io_submit",
       "number": 2,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -161,6 +165,7 @@
       ],
       "name": "io_cancel",
       "number": 3,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -177,6 +182,7 @@
       ],
       "name": "io_getevents",
       "number": 4,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -193,6 +199,7 @@
       ],
       "name": "setxattr",
       "number": 5,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -209,6 +216,7 @@
       ],
       "name": "lsetxattr",
       "number": 6,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -225,6 +233,7 @@
       ],
       "name": "fsetxattr",
       "number": 7,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -241,6 +250,7 @@
       ],
       "name": "getxattr",
       "number": 8,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -257,6 +267,7 @@
       ],
       "name": "lgetxattr",
       "number": 9,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -273,6 +284,7 @@
       ],
       "name": "fgetxattr",
       "number": 10,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -289,6 +301,7 @@
       ],
       "name": "listxattr",
       "number": 11,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -305,6 +318,7 @@
       ],
       "name": "llistxattr",
       "number": 12,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -321,6 +335,7 @@
       ],
       "name": "flistxattr",
       "number": 13,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -337,6 +352,7 @@
       ],
       "name": "removexattr",
       "number": 14,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -353,6 +369,7 @@
       ],
       "name": "lremovexattr",
       "number": 15,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -369,6 +386,7 @@
       ],
       "name": "fremovexattr",
       "number": 16,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -385,6 +403,7 @@
       ],
       "name": "getcwd",
       "number": 17,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -401,6 +420,7 @@
       ],
       "name": "lookup_dcookie",
       "number": 18,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -417,6 +437,7 @@
       ],
       "name": "eventfd2",
       "number": 19,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -433,6 +454,7 @@
       ],
       "name": "epoll_create1",
       "number": 20,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -449,6 +471,7 @@
       ],
       "name": "epoll_ctl",
       "number": 21,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -465,6 +488,7 @@
       ],
       "name": "epoll_pwait",
       "number": 22,
+      "safeguarded_host_ipc": false,
       "source_review_flag": "epoll_pwait rejects non-null guest sigmask; atomic temporary-mask behavior is absent",
       "trap_override_requires_review": false
     },
@@ -481,6 +505,7 @@
       ],
       "name": "dup",
       "number": 23,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -497,6 +522,7 @@
       ],
       "name": "dup3",
       "number": 24,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -513,6 +539,7 @@
       ],
       "name": "fcntl",
       "number": 25,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -529,6 +556,7 @@
       ],
       "name": "inotify_init1",
       "number": 26,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -545,6 +573,7 @@
       ],
       "name": "inotify_add_watch",
       "number": 27,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -561,6 +590,7 @@
       ],
       "name": "inotify_rm_watch",
       "number": 28,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -577,6 +607,7 @@
       ],
       "name": "ioctl",
       "number": 29,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -593,6 +624,7 @@
       ],
       "name": "ioprio_set",
       "number": 30,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -609,6 +641,7 @@
       ],
       "name": "ioprio_get",
       "number": 31,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -625,6 +658,7 @@
       ],
       "name": "flock",
       "number": 32,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -641,6 +675,7 @@
       ],
       "name": "mknodat",
       "number": 33,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -657,6 +692,7 @@
       ],
       "name": "mkdirat",
       "number": 34,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -673,6 +709,7 @@
       ],
       "name": "unlinkat",
       "number": 35,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -689,6 +726,7 @@
       ],
       "name": "symlinkat",
       "number": 36,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -705,6 +743,7 @@
       ],
       "name": "linkat",
       "number": 37,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -721,6 +760,7 @@
       ],
       "name": "renameat",
       "number": 38,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -737,6 +777,7 @@
       ],
       "name": "umount2",
       "number": 39,
+      "safeguarded_host_ipc": false,
       "source_review_flag": "umount2 returns unconditional success without unmounting",
       "trap_override_requires_review": false
     },
@@ -753,6 +794,7 @@
       ],
       "name": "mount",
       "number": 40,
+      "safeguarded_host_ipc": false,
       "source_review_flag": "mount accepts broad no-op success after a narrow /run/user exception",
       "trap_override_requires_review": false
     },
@@ -769,6 +811,7 @@
       ],
       "name": "pivot_root",
       "number": 41,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -785,6 +828,7 @@
       ],
       "name": "nfsservctl",
       "number": 42,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -801,6 +845,7 @@
       ],
       "name": "statfs",
       "number": 43,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -817,6 +862,7 @@
       ],
       "name": "fstatfs",
       "number": 44,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -833,6 +879,7 @@
       ],
       "name": "truncate",
       "number": 45,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -849,6 +896,7 @@
       ],
       "name": "ftruncate",
       "number": 46,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -865,6 +913,7 @@
       ],
       "name": "fallocate",
       "number": 47,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -881,6 +930,7 @@
       ],
       "name": "faccessat",
       "number": 48,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -897,6 +947,7 @@
       ],
       "name": "chdir",
       "number": 49,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -913,6 +964,7 @@
       ],
       "name": "fchdir",
       "number": 50,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -929,6 +981,7 @@
       ],
       "name": "chroot",
       "number": 51,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -945,6 +998,7 @@
       ],
       "name": "fchmod",
       "number": 52,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -961,6 +1015,7 @@
       ],
       "name": "fchmodat",
       "number": 53,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -977,6 +1032,7 @@
       ],
       "name": "fchownat",
       "number": 54,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -993,6 +1049,7 @@
       ],
       "name": "fchown",
       "number": 55,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1009,6 +1066,7 @@
       ],
       "name": "openat",
       "number": 56,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1025,6 +1083,7 @@
       ],
       "name": "close",
       "number": 57,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1041,6 +1100,7 @@
       ],
       "name": "vhangup",
       "number": 58,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1062,6 +1122,7 @@
       ],
       "name": "pipe2",
       "number": 59,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1078,6 +1139,7 @@
       ],
       "name": "quotactl",
       "number": 60,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1094,6 +1156,7 @@
       ],
       "name": "getdents64",
       "number": 61,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1110,6 +1173,7 @@
       ],
       "name": "lseek",
       "number": 62,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1126,6 +1190,7 @@
       ],
       "name": "read",
       "number": 63,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1142,6 +1207,7 @@
       ],
       "name": "write",
       "number": 64,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1158,6 +1224,7 @@
       ],
       "name": "readv",
       "number": 65,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1174,6 +1241,7 @@
       ],
       "name": "writev",
       "number": 66,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1190,6 +1258,7 @@
       ],
       "name": "pread64",
       "number": 67,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1206,6 +1275,7 @@
       ],
       "name": "pwrite64",
       "number": 68,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1222,6 +1292,7 @@
       ],
       "name": "preadv",
       "number": 69,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1238,6 +1309,7 @@
       ],
       "name": "pwritev",
       "number": 70,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1254,6 +1326,7 @@
       ],
       "name": "sendfile",
       "number": 71,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1270,6 +1343,7 @@
       ],
       "name": "pselect6",
       "number": 72,
+      "safeguarded_host_ipc": false,
       "source_review_flag": "pselect6 rejects non-null guest sigmask; atomic temporary-mask behavior is absent",
       "trap_override_requires_review": false
     },
@@ -1286,6 +1360,7 @@
       ],
       "name": "ppoll",
       "number": 73,
+      "safeguarded_host_ipc": false,
       "source_review_flag": "ppoll rejects non-null guest sigmask; atomic temporary-mask behavior is absent",
       "trap_override_requires_review": false
     },
@@ -1302,6 +1377,7 @@
       ],
       "name": "signalfd4",
       "number": 74,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1318,6 +1394,7 @@
       ],
       "name": "vmsplice",
       "number": 75,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1334,6 +1411,7 @@
       ],
       "name": "splice",
       "number": 76,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1350,6 +1428,7 @@
       ],
       "name": "tee",
       "number": 77,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1366,6 +1445,7 @@
       ],
       "name": "readlinkat",
       "number": 78,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1382,6 +1462,7 @@
       ],
       "name": "newfstatat",
       "number": 79,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1398,6 +1479,7 @@
       ],
       "name": "fstat",
       "number": 80,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1414,6 +1496,7 @@
       ],
       "name": "sync",
       "number": 81,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1430,6 +1513,7 @@
       ],
       "name": "fsync",
       "number": 82,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1446,6 +1530,7 @@
       ],
       "name": "fdatasync",
       "number": 83,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1462,6 +1547,7 @@
       ],
       "name": "sync_file_range",
       "number": 84,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1478,6 +1564,7 @@
       ],
       "name": "timerfd_create",
       "number": 85,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1494,6 +1581,7 @@
       ],
       "name": "timerfd_settime",
       "number": 86,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1510,6 +1598,7 @@
       ],
       "name": "timerfd_gettime",
       "number": 87,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1526,6 +1615,7 @@
       ],
       "name": "utimensat",
       "number": 88,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1542,6 +1632,7 @@
       ],
       "name": "acct",
       "number": 89,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1558,6 +1649,7 @@
       ],
       "name": "capget",
       "number": 90,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1574,6 +1666,7 @@
       ],
       "name": "capset",
       "number": 91,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1590,6 +1683,7 @@
       ],
       "name": "personality",
       "number": 92,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1606,6 +1700,7 @@
       ],
       "name": "exit",
       "number": 93,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1622,6 +1717,7 @@
       ],
       "name": "exit_group",
       "number": 94,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1638,6 +1734,7 @@
       ],
       "name": "waitid",
       "number": 95,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1654,6 +1751,7 @@
       ],
       "name": "set_tid_address",
       "number": 96,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1670,6 +1768,7 @@
       ],
       "name": "unshare",
       "number": 97,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1686,6 +1785,7 @@
       ],
       "name": "futex",
       "number": 98,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1702,6 +1802,7 @@
       ],
       "name": "set_robust_list",
       "number": 99,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1718,6 +1819,7 @@
       ],
       "name": "get_robust_list",
       "number": 100,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1734,6 +1836,7 @@
       ],
       "name": "nanosleep",
       "number": 101,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1750,6 +1853,7 @@
       ],
       "name": "getitimer",
       "number": 102,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1766,6 +1870,7 @@
       ],
       "name": "setitimer",
       "number": 103,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1782,6 +1887,7 @@
       ],
       "name": "kexec_load",
       "number": 104,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1798,6 +1904,7 @@
       ],
       "name": "init_module",
       "number": 105,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1814,6 +1921,7 @@
       ],
       "name": "delete_module",
       "number": 106,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1830,6 +1938,7 @@
       ],
       "name": "timer_create",
       "number": 107,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1846,6 +1955,7 @@
       ],
       "name": "timer_gettime",
       "number": 108,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1862,6 +1972,7 @@
       ],
       "name": "timer_getoverrun",
       "number": 109,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1878,6 +1989,7 @@
       ],
       "name": "timer_settime",
       "number": 110,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1894,6 +2006,7 @@
       ],
       "name": "timer_delete",
       "number": 111,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1910,6 +2023,7 @@
       ],
       "name": "clock_settime",
       "number": 112,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1926,6 +2040,7 @@
       ],
       "name": "clock_gettime",
       "number": 113,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1942,6 +2057,7 @@
       ],
       "name": "clock_getres",
       "number": 114,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1958,6 +2074,7 @@
       ],
       "name": "clock_nanosleep",
       "number": 115,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1974,6 +2091,7 @@
       ],
       "name": "syslog",
       "number": 116,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -1990,6 +2108,7 @@
       ],
       "name": "ptrace",
       "number": 117,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2006,6 +2125,7 @@
       ],
       "name": "sched_setparam",
       "number": 118,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2022,6 +2142,7 @@
       ],
       "name": "sched_setscheduler",
       "number": 119,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2038,6 +2159,7 @@
       ],
       "name": "sched_getscheduler",
       "number": 120,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2054,6 +2176,7 @@
       ],
       "name": "sched_getparam",
       "number": 121,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2070,6 +2193,7 @@
       ],
       "name": "sched_setaffinity",
       "number": 122,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2086,6 +2210,7 @@
       ],
       "name": "sched_getaffinity",
       "number": 123,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2102,6 +2227,7 @@
       ],
       "name": "sched_yield",
       "number": 124,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2118,6 +2244,7 @@
       ],
       "name": "sched_get_priority_max",
       "number": 125,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2134,6 +2261,7 @@
       ],
       "name": "sched_get_priority_min",
       "number": 126,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2150,6 +2278,7 @@
       ],
       "name": "sched_rr_get_interval",
       "number": 127,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2166,6 +2295,7 @@
       ],
       "name": "restart_syscall",
       "number": 128,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2182,6 +2312,7 @@
       ],
       "name": "kill",
       "number": 129,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2198,6 +2329,7 @@
       ],
       "name": "tkill",
       "number": 130,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2214,6 +2346,7 @@
       ],
       "name": "tgkill",
       "number": 131,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2230,6 +2363,7 @@
       ],
       "name": "sigaltstack",
       "number": 132,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2246,6 +2380,7 @@
       ],
       "name": "rt_sigsuspend",
       "number": 133,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2262,6 +2397,7 @@
       ],
       "name": "rt_sigaction",
       "number": 134,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2278,6 +2414,7 @@
       ],
       "name": "rt_sigprocmask",
       "number": 135,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2294,6 +2431,7 @@
       ],
       "name": "rt_sigpending",
       "number": 136,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2315,6 +2453,7 @@
       ],
       "name": "rt_sigtimedwait",
       "number": 137,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2331,6 +2470,7 @@
       ],
       "name": "rt_sigqueueinfo",
       "number": 138,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2347,6 +2487,7 @@
       ],
       "name": "rt_sigreturn",
       "number": 139,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2363,6 +2504,7 @@
       ],
       "name": "setpriority",
       "number": 140,
+      "safeguarded_host_ipc": false,
       "source_review_flag": "setpriority has bounded guest target handling; wider priority semantics need review",
       "trap_override_requires_review": false
     },
@@ -2379,6 +2521,7 @@
       ],
       "name": "getpriority",
       "number": 141,
+      "safeguarded_host_ipc": false,
       "source_review_flag": "getpriority has bounded guest target handling; wider priority semantics need review",
       "trap_override_requires_review": false
     },
@@ -2395,6 +2538,7 @@
       ],
       "name": "reboot",
       "number": 142,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2411,6 +2555,7 @@
       ],
       "name": "setregid",
       "number": 143,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2427,6 +2572,7 @@
       ],
       "name": "setgid",
       "number": 144,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2443,6 +2589,7 @@
       ],
       "name": "setreuid",
       "number": 145,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2459,6 +2606,7 @@
       ],
       "name": "setuid",
       "number": 146,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2475,6 +2623,7 @@
       ],
       "name": "setresuid",
       "number": 147,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2491,6 +2640,7 @@
       ],
       "name": "getresuid",
       "number": 148,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2507,6 +2657,7 @@
       ],
       "name": "setresgid",
       "number": 149,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2523,6 +2674,7 @@
       ],
       "name": "getresgid",
       "number": 150,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2539,6 +2691,7 @@
       ],
       "name": "setfsuid",
       "number": 151,
+      "safeguarded_host_ipc": false,
       "source_review_flag": "setfsuid returns current euid without changing fsuid",
       "trap_override_requires_review": false
     },
@@ -2555,6 +2708,7 @@
       ],
       "name": "setfsgid",
       "number": 152,
+      "safeguarded_host_ipc": false,
       "source_review_flag": "setfsgid returns current egid without changing fsgid",
       "trap_override_requires_review": false
     },
@@ -2576,6 +2730,7 @@
       ],
       "name": "times",
       "number": 153,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2592,6 +2747,7 @@
       ],
       "name": "setpgid",
       "number": 154,
+      "safeguarded_host_ipc": false,
       "source_review_flag": "setpgid has bounded guest target handling; wider process-group semantics need review",
       "trap_override_requires_review": false
     },
@@ -2608,6 +2764,7 @@
       ],
       "name": "getpgid",
       "number": 155,
+      "safeguarded_host_ipc": false,
       "source_review_flag": "getpgid has bounded guest target handling; wider process-group semantics need review",
       "trap_override_requires_review": false
     },
@@ -2624,6 +2781,7 @@
       ],
       "name": "getsid",
       "number": 156,
+      "safeguarded_host_ipc": false,
       "source_review_flag": "getsid has bounded guest target handling; wider session semantics need review",
       "trap_override_requires_review": false
     },
@@ -2640,6 +2798,7 @@
       ],
       "name": "setsid",
       "number": 157,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2656,6 +2815,7 @@
       ],
       "name": "getgroups",
       "number": 158,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2672,6 +2832,7 @@
       ],
       "name": "setgroups",
       "number": 159,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2688,6 +2849,7 @@
       ],
       "name": "uname",
       "number": 160,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2704,6 +2866,7 @@
       ],
       "name": "sethostname",
       "number": 161,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2720,6 +2883,7 @@
       ],
       "name": "setdomainname",
       "number": 162,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2736,6 +2900,7 @@
       ],
       "name": "getrlimit",
       "number": 163,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2752,6 +2917,7 @@
       ],
       "name": "setrlimit",
       "number": 164,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2768,6 +2934,7 @@
       ],
       "name": "getrusage",
       "number": 165,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2784,6 +2951,7 @@
       ],
       "name": "umask",
       "number": 166,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2800,6 +2968,7 @@
       ],
       "name": "prctl",
       "number": 167,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2816,6 +2985,7 @@
       ],
       "name": "getcpu",
       "number": 168,
+      "safeguarded_host_ipc": false,
       "source_review_flag": "getcpu has bounded virtual topology result; check cross-interface consistency",
       "trap_override_requires_review": false
     },
@@ -2832,6 +3002,7 @@
       ],
       "name": "gettimeofday",
       "number": 169,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2848,6 +3019,7 @@
       ],
       "name": "settimeofday",
       "number": 170,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2864,6 +3036,7 @@
       ],
       "name": "adjtimex",
       "number": 171,
+      "safeguarded_host_ipc": false,
       "source_review_flag": "adjtimex supports bounded read-only state; clock adjustment is unsupported",
       "trap_override_requires_review": false
     },
@@ -2880,6 +3053,7 @@
       ],
       "name": "getpid",
       "number": 172,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2896,6 +3070,7 @@
       ],
       "name": "getppid",
       "number": 173,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2912,6 +3087,7 @@
       ],
       "name": "getuid",
       "number": 174,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2928,6 +3104,7 @@
       ],
       "name": "geteuid",
       "number": 175,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2944,6 +3121,7 @@
       ],
       "name": "getgid",
       "number": 176,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2960,6 +3138,7 @@
       ],
       "name": "getegid",
       "number": 177,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2976,6 +3155,7 @@
       ],
       "name": "gettid",
       "number": 178,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -2992,6 +3172,7 @@
       ],
       "name": "sysinfo",
       "number": 179,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3008,6 +3189,7 @@
       ],
       "name": "mq_open",
       "number": 180,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3024,6 +3206,7 @@
       ],
       "name": "mq_unlink",
       "number": 181,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3040,6 +3223,7 @@
       ],
       "name": "mq_timedsend",
       "number": 182,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3056,6 +3240,7 @@
       ],
       "name": "mq_timedreceive",
       "number": 183,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3072,6 +3257,7 @@
       ],
       "name": "mq_notify",
       "number": 184,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3088,6 +3274,7 @@
       ],
       "name": "mq_getsetattr",
       "number": 185,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3104,7 +3291,8 @@
       ],
       "name": "msgget",
       "number": 186,
-      "source_review_flag": "SysV msgget uses host-global IPC namespace and guest key",
+      "safeguarded_host_ipc": true,
+      "source_review_flag": null,
       "trap_override_requires_review": false
     },
     {
@@ -3120,7 +3308,8 @@
       ],
       "name": "msgctl",
       "number": 187,
-      "source_review_flag": "SysV msgctl uses host-global IPC identifier",
+      "safeguarded_host_ipc": true,
+      "source_review_flag": null,
       "trap_override_requires_review": false
     },
     {
@@ -3136,7 +3325,8 @@
       ],
       "name": "msgrcv",
       "number": 188,
-      "source_review_flag": "SysV msgrcv uses host-global IPC identifier",
+      "safeguarded_host_ipc": true,
+      "source_review_flag": null,
       "trap_override_requires_review": false
     },
     {
@@ -3152,7 +3342,8 @@
       ],
       "name": "msgsnd",
       "number": 189,
-      "source_review_flag": "SysV msgsnd uses host-global IPC identifier",
+      "safeguarded_host_ipc": true,
+      "source_review_flag": null,
       "trap_override_requires_review": false
     },
     {
@@ -3168,7 +3359,8 @@
       ],
       "name": "semget",
       "number": 190,
-      "source_review_flag": "SysV semget uses host-global IPC namespace and guest key",
+      "safeguarded_host_ipc": true,
+      "source_review_flag": null,
       "trap_override_requires_review": false
     },
     {
@@ -3184,7 +3376,8 @@
       ],
       "name": "semctl",
       "number": 191,
-      "source_review_flag": "SysV semctl uses host-global IPC identifier",
+      "safeguarded_host_ipc": true,
+      "source_review_flag": null,
       "trap_override_requires_review": false
     },
     {
@@ -3200,6 +3393,7 @@
       ],
       "name": "semtimedop",
       "number": 192,
+      "safeguarded_host_ipc": true,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3216,7 +3410,8 @@
       ],
       "name": "semop",
       "number": 193,
-      "source_review_flag": "SysV semop uses host-global IPC identifier",
+      "safeguarded_host_ipc": true,
+      "source_review_flag": null,
       "trap_override_requires_review": false
     },
     {
@@ -3232,7 +3427,8 @@
       ],
       "name": "shmget",
       "number": 194,
-      "source_review_flag": "SysV shmget uses host-global IPC namespace and guest key",
+      "safeguarded_host_ipc": true,
+      "source_review_flag": null,
       "trap_override_requires_review": false
     },
     {
@@ -3248,7 +3444,8 @@
       ],
       "name": "shmctl",
       "number": 195,
-      "source_review_flag": "SysV shmctl uses host-global IPC identifier",
+      "safeguarded_host_ipc": true,
+      "source_review_flag": null,
       "trap_override_requires_review": false
     },
     {
@@ -3264,7 +3461,8 @@
       ],
       "name": "shmat",
       "number": 196,
-      "source_review_flag": "SysV shmat maps host-global IPC segment",
+      "safeguarded_host_ipc": true,
+      "source_review_flag": null,
       "trap_override_requires_review": false
     },
     {
@@ -3280,7 +3478,8 @@
       ],
       "name": "shmdt",
       "number": 197,
-      "source_review_flag": "SysV shmdt detaches host-global IPC segment",
+      "safeguarded_host_ipc": true,
+      "source_review_flag": null,
       "trap_override_requires_review": false
     },
     {
@@ -3296,6 +3495,7 @@
       ],
       "name": "socket",
       "number": 198,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3312,6 +3512,7 @@
       ],
       "name": "socketpair",
       "number": 199,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3328,6 +3529,7 @@
       ],
       "name": "bind",
       "number": 200,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3344,6 +3546,7 @@
       ],
       "name": "listen",
       "number": 201,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3360,6 +3563,7 @@
       ],
       "name": "accept",
       "number": 202,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3376,6 +3580,7 @@
       ],
       "name": "connect",
       "number": 203,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3392,6 +3597,7 @@
       ],
       "name": "getsockname",
       "number": 204,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3408,6 +3614,7 @@
       ],
       "name": "getpeername",
       "number": 205,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3424,6 +3631,7 @@
       ],
       "name": "sendto",
       "number": 206,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3440,6 +3648,7 @@
       ],
       "name": "recvfrom",
       "number": 207,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3456,6 +3665,7 @@
       ],
       "name": "setsockopt",
       "number": 208,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3472,6 +3682,7 @@
       ],
       "name": "getsockopt",
       "number": 209,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3488,6 +3699,7 @@
       ],
       "name": "shutdown",
       "number": 210,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3504,6 +3716,7 @@
       ],
       "name": "sendmsg",
       "number": 211,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3520,6 +3733,7 @@
       ],
       "name": "recvmsg",
       "number": 212,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3536,6 +3750,7 @@
       ],
       "name": "readahead",
       "number": 213,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3552,6 +3767,7 @@
       ],
       "name": "brk",
       "number": 214,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3568,6 +3784,7 @@
       ],
       "name": "munmap",
       "number": 215,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3584,6 +3801,7 @@
       ],
       "name": "mremap",
       "number": 216,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3600,6 +3818,7 @@
       ],
       "name": "add_key",
       "number": 217,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3616,6 +3835,7 @@
       ],
       "name": "request_key",
       "number": 218,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3632,6 +3852,7 @@
       ],
       "name": "keyctl",
       "number": 219,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3648,6 +3869,7 @@
       ],
       "name": "clone",
       "number": 220,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": true
     },
@@ -3664,6 +3886,7 @@
       ],
       "name": "execve",
       "number": 221,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3680,6 +3903,7 @@
       ],
       "name": "mmap",
       "number": 222,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3696,6 +3920,7 @@
       ],
       "name": "fadvise64",
       "number": 223,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3712,6 +3937,7 @@
       ],
       "name": "swapon",
       "number": 224,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3728,6 +3954,7 @@
       ],
       "name": "swapoff",
       "number": 225,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3744,6 +3971,7 @@
       ],
       "name": "mprotect",
       "number": 226,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3760,6 +3988,7 @@
       ],
       "name": "msync",
       "number": 227,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3776,6 +4005,7 @@
       ],
       "name": "mlock",
       "number": 228,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3792,6 +4022,7 @@
       ],
       "name": "munlock",
       "number": 229,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3808,6 +4039,7 @@
       ],
       "name": "mlockall",
       "number": 230,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3824,6 +4056,7 @@
       ],
       "name": "munlockall",
       "number": 231,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3840,6 +4073,7 @@
       ],
       "name": "mincore",
       "number": 232,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3856,6 +4090,7 @@
       ],
       "name": "madvise",
       "number": 233,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3872,6 +4107,7 @@
       ],
       "name": "remap_file_pages",
       "number": 234,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3888,6 +4124,7 @@
       ],
       "name": "mbind",
       "number": 235,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3904,6 +4141,7 @@
       ],
       "name": "get_mempolicy",
       "number": 236,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3920,6 +4158,7 @@
       ],
       "name": "set_mempolicy",
       "number": 237,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3936,6 +4175,7 @@
       ],
       "name": "migrate_pages",
       "number": 238,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3952,6 +4192,7 @@
       ],
       "name": "move_pages",
       "number": 239,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3968,6 +4209,7 @@
       ],
       "name": "rt_tgsigqueueinfo",
       "number": 240,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -3984,6 +4226,7 @@
       ],
       "name": "perf_event_open",
       "number": 241,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4000,6 +4243,7 @@
       ],
       "name": "accept4",
       "number": 242,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4016,6 +4260,7 @@
       ],
       "name": "recvmmsg",
       "number": 243,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4037,6 +4282,7 @@
       ],
       "name": "wait4",
       "number": 260,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4053,6 +4299,7 @@
       ],
       "name": "prlimit64",
       "number": 261,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4069,6 +4316,7 @@
       ],
       "name": "fanotify_init",
       "number": 262,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4085,6 +4333,7 @@
       ],
       "name": "fanotify_mark",
       "number": 263,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4101,6 +4350,7 @@
       ],
       "name": "name_to_handle_at",
       "number": 264,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4117,6 +4367,7 @@
       ],
       "name": "open_by_handle_at",
       "number": 265,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4133,6 +4384,7 @@
       ],
       "name": "clock_adjtime",
       "number": 266,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4149,6 +4401,7 @@
       ],
       "name": "syncfs",
       "number": 267,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4165,6 +4418,7 @@
       ],
       "name": "setns",
       "number": 268,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4181,6 +4435,7 @@
       ],
       "name": "sendmmsg",
       "number": 269,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4197,6 +4452,7 @@
       ],
       "name": "process_vm_readv",
       "number": 270,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4213,6 +4469,7 @@
       ],
       "name": "process_vm_writev",
       "number": 271,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4229,6 +4486,7 @@
       ],
       "name": "kcmp",
       "number": 272,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4245,6 +4503,7 @@
       ],
       "name": "finit_module",
       "number": 273,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4261,6 +4520,7 @@
       ],
       "name": "sched_setattr",
       "number": 274,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4277,6 +4537,7 @@
       ],
       "name": "sched_getattr",
       "number": 275,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4293,6 +4554,7 @@
       ],
       "name": "renameat2",
       "number": 276,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4309,6 +4571,7 @@
       ],
       "name": "seccomp",
       "number": 277,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4325,6 +4588,7 @@
       ],
       "name": "getrandom",
       "number": 278,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4341,6 +4605,7 @@
       ],
       "name": "memfd_create",
       "number": 279,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4357,6 +4622,7 @@
       ],
       "name": "bpf",
       "number": 280,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4373,6 +4639,7 @@
       ],
       "name": "execveat",
       "number": 281,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4389,6 +4656,7 @@
       ],
       "name": "userfaultfd",
       "number": 282,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4405,6 +4673,7 @@
       ],
       "name": "membarrier",
       "number": 283,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4421,6 +4690,7 @@
       ],
       "name": "mlock2",
       "number": 284,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4437,6 +4707,7 @@
       ],
       "name": "copy_file_range",
       "number": 285,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4453,6 +4724,7 @@
       ],
       "name": "preadv2",
       "number": 286,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4469,6 +4741,7 @@
       ],
       "name": "pwritev2",
       "number": 287,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4485,6 +4758,7 @@
       ],
       "name": "pkey_mprotect",
       "number": 288,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4501,6 +4775,7 @@
       ],
       "name": "pkey_alloc",
       "number": 289,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4517,6 +4792,7 @@
       ],
       "name": "pkey_free",
       "number": 290,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4533,6 +4809,7 @@
       ],
       "name": "statx",
       "number": 291,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4549,6 +4826,7 @@
       ],
       "name": "io_pgetevents",
       "number": 292,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4565,6 +4843,7 @@
       ],
       "name": "rseq",
       "number": 293,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4581,6 +4860,7 @@
       ],
       "name": "kexec_file_load",
       "number": 294,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4597,6 +4877,7 @@
       ],
       "name": "pidfd_send_signal",
       "number": 424,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4613,6 +4894,7 @@
       ],
       "name": "io_uring_setup",
       "number": 425,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4629,6 +4911,7 @@
       ],
       "name": "io_uring_enter",
       "number": 426,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4645,6 +4928,7 @@
       ],
       "name": "io_uring_register",
       "number": 427,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4661,6 +4945,7 @@
       ],
       "name": "open_tree",
       "number": 428,
+      "safeguarded_host_ipc": false,
       "source_review_flag": "open_tree returns /tmp directory fd, not detached mount",
       "trap_override_requires_review": false
     },
@@ -4677,6 +4962,7 @@
       ],
       "name": "move_mount",
       "number": 429,
+      "safeguarded_host_ipc": false,
       "source_review_flag": "move_mount returns unconditional success without move",
       "trap_override_requires_review": false
     },
@@ -4693,6 +4979,7 @@
       ],
       "name": "fsopen",
       "number": 430,
+      "safeguarded_host_ipc": false,
       "source_review_flag": "fsopen returns unconnected host datagram socket, not fs context",
       "trap_override_requires_review": false
     },
@@ -4709,6 +4996,7 @@
       ],
       "name": "fsconfig",
       "number": 431,
+      "safeguarded_host_ipc": false,
       "source_review_flag": "fsconfig returns unconditional success without configuration",
       "trap_override_requires_review": false
     },
@@ -4725,6 +5013,7 @@
       ],
       "name": "fsmount",
       "number": 432,
+      "safeguarded_host_ipc": false,
       "source_review_flag": "fsmount returns /tmp directory fd, not mount",
       "trap_override_requires_review": false
     },
@@ -4741,6 +5030,7 @@
       ],
       "name": "fspick",
       "number": 433,
+      "safeguarded_host_ipc": false,
       "source_review_flag": "fspick returns unconnected host datagram socket, not fs context",
       "trap_override_requires_review": false
     },
@@ -4757,6 +5047,7 @@
       ],
       "name": "pidfd_open",
       "number": 434,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4773,6 +5064,7 @@
       ],
       "name": "clone3",
       "number": 435,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": true
     },
@@ -4789,6 +5081,7 @@
       ],
       "name": "close_range",
       "number": 436,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4805,6 +5098,7 @@
       ],
       "name": "openat2",
       "number": 437,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4821,6 +5115,7 @@
       ],
       "name": "pidfd_getfd",
       "number": 438,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4837,6 +5132,7 @@
       ],
       "name": "faccessat2",
       "number": 439,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4853,6 +5149,7 @@
       ],
       "name": "process_madvise",
       "number": 440,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4874,6 +5171,7 @@
       ],
       "name": "epoll_pwait2",
       "number": 441,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4890,6 +5188,7 @@
       ],
       "name": "mount_setattr",
       "number": 442,
+      "safeguarded_host_ipc": false,
       "source_review_flag": "mount_setattr returns unconditional success without attribute change",
       "trap_override_requires_review": false
     },
@@ -4906,6 +5205,7 @@
       ],
       "name": "quotactl_fd",
       "number": 443,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4916,6 +5216,7 @@
       "locations": [],
       "name": "landlock_create_ruleset",
       "number": 444,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4926,6 +5227,7 @@
       "locations": [],
       "name": "landlock_add_rule",
       "number": 445,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4936,6 +5238,7 @@
       "locations": [],
       "name": "landlock_restrict_self",
       "number": 446,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4946,6 +5249,7 @@
       "locations": [],
       "name": "memfd_secret",
       "number": 447,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4956,6 +5260,7 @@
       "locations": [],
       "name": "process_mrelease",
       "number": 448,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4972,6 +5277,7 @@
       ],
       "name": "futex_waitv",
       "number": 449,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4988,6 +5294,7 @@
       ],
       "name": "set_mempolicy_home_node",
       "number": 450,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -4998,6 +5305,7 @@
       "locations": [],
       "name": "cachestat",
       "number": 451,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -5014,6 +5322,7 @@
       ],
       "name": "fchmodat2",
       "number": 452,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -5024,6 +5333,7 @@
       "locations": [],
       "name": "map_shadow_stack",
       "number": 453,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -5040,6 +5350,7 @@
       ],
       "name": "futex_wake",
       "number": 454,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -5056,6 +5367,7 @@
       ],
       "name": "futex_wait",
       "number": 455,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -5072,6 +5384,7 @@
       ],
       "name": "futex_requeue",
       "number": 456,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -5082,6 +5395,7 @@
       "locations": [],
       "name": "statmount",
       "number": 457,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -5092,6 +5406,7 @@
       "locations": [],
       "name": "listmount",
       "number": 458,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -5108,6 +5423,7 @@
       ],
       "name": "lsm_get_self_attr",
       "number": 459,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -5124,6 +5440,7 @@
       ],
       "name": "lsm_set_self_attr",
       "number": 460,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -5140,6 +5457,7 @@
       ],
       "name": "lsm_list_modules",
       "number": 461,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -5150,6 +5468,7 @@
       "locations": [],
       "name": "mseal",
       "number": 462,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -5166,6 +5485,7 @@
       ],
       "name": "setxattrat",
       "number": 463,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -5182,6 +5502,7 @@
       ],
       "name": "getxattrat",
       "number": 464,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -5198,6 +5519,7 @@
       ],
       "name": "listxattrat",
       "number": 465,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -5214,6 +5536,7 @@
       ],
       "name": "removexattrat",
       "number": 466,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -5224,6 +5547,7 @@
       "locations": [],
       "name": "open_tree_attr",
       "number": 467,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -5234,6 +5558,7 @@
       "locations": [],
       "name": "file_getattr",
       "number": 468,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -5244,6 +5569,7 @@
       "locations": [],
       "name": "file_setattr",
       "number": 469,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -5254,6 +5580,7 @@
       "locations": [],
       "name": "listns",
       "number": 470,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     },
@@ -5270,6 +5597,7 @@
       ],
       "name": "rseq_slice_yield",
       "number": 471,
+      "safeguarded_host_ipc": false,
       "source_review_flag": null,
       "trap_override_requires_review": false
     }
