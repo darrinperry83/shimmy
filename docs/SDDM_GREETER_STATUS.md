@@ -286,3 +286,14 @@ passed 219 checks. The greeter then hit the separate cross-process carrier
 import failure (`RDMESA_MOCK_FD_IMPORT_DENY` in KWin, Wayland error 7) and
 exited. This establishes a normal SDDM-to-compositor handoff, not a fully
 visible or usable login screen.
+
+The preceding run still had a disposable-root override that prestarted the
+runtime directory and two D-Bus probes. A follow-up removed the entire SDDM
+service override and repeated the on-screen boot with the same committed
+eventfd recovery. Stock `sddm.service` started, logind created greeter session
+`c1`, KWin and `sddm-greeter-qt6` launched, KWin logged two
+`DRM_PRESENT_METAL` frames, SDDM received the greeter's `Connect`, and Qt
+loaded `qrc:/theme/Main.qml`. The greeter still crashed at the same foreign
+carrier import (`RDMESA_MOCK_FD_IMPORT_DENY` in KWin, Wayland error 7). This
+confirms that the SDDM unit ordering and registration bypass are no longer
+needed for the observed handoff; it does not validate a usable login UI.
