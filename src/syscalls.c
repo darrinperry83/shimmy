@@ -4875,13 +4875,29 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     return r;
   }
   case 64: {
-    long r = herr((long)write((int)a0, (const void*)a1, (size_t)a2));
+    // Guest ELF/JIT bytes are not always readable by Darwin's write path.
+    // Snapshot the complete request before one host write, preserving record
+    // and pipe atomicity instead of emitting a partial prefix on bad input.
+    if (a2 > SSIZE_MAX) return -LX_EINVAL;
+    if (a2 > 1024 * 1024) return -LX_EOPNOTSUPP;
+    if (a2 && !a1) return -LX_EFAULT;
+    char* staged = NULL;
+    if (a2) {
+      staged = malloc((size_t)a2);
+      if (!staged) return -LX_ENOMEM;
+      if (gmem_guest_export_copyin(NULL, a1, staged, (size_t)a2) != 0) {
+        free(staged);
+        return -LX_EFAULT;
+      }
+    }
+    long r = herr((long)write((int)a0, staged, (size_t)a2));
     if (getenv("RDWRDUMP") && (int)a0 < 32 && r > 0) {
-      FILE* df = fopen("/tmp/rd_wrdump.txt", "a");
+      const char* dump_path = getenv("RDWRDUMPFILE");
+      FILE* df = fopen(dump_path ? dump_path : "/tmp/rd_wrdump.txt", "a");
       if (df) {
         fprintf(df, "write fd=%ld n=%ld: \"", a0, r);
         for (long j = 0; j < r; j++) {
-          unsigned char c = ((const unsigned char*)a1)[j];
+          unsigned char c = (unsigned char)staged[j];
           fputc(c >= 0x20 && c < 0x7f ? c : '.', df);
         }
         fprintf(df, "\"\n");
@@ -4906,6 +4922,7 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
                 ok == 0 ? (unsigned long long)st.st_ino : 0ULL);
       }
     }
+    free(staged);
     return r;
   }
 
