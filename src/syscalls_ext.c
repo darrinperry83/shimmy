@@ -2818,11 +2818,9 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   }
 
   case 190: return -LX_ENOSYS;                                 // semget: no private guest IPC namespace
-  case 193: {                                                  // semop(semid, sops, nsops)
-    // struct sembuf is {unsigned short sem_num; short sem_op; short sem_flg;} on BOTH, so the
-    // guest's array is passed through unchanged. Checked rather than assumed.
-    { int r = semop((int)a0, (struct sembuf*)a1, (size_t)a2); return r < 0 ? eret() : 0; }
-  }
+  // A guest semid is a raw Darwin host-global ID here. Refuse before touching the semaphore
+  // set or guest operation array until all SysV semaphore calls share an instance-scoped ID map.
+  case 193: return -LX_ENOSYS;                                 // semop
   // Darwin semaphore IDs are host-global. Disabling semget does not prevent
   // a guest from guessing a host ID and using IPC_RMID, SETVAL or SETALL.
   // Refuse every command until the four semaphore calls share guest-scoped

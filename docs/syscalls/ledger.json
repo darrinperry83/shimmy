@@ -3893,7 +3893,7 @@
       "verified_compatible": false
     },
     {
-      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "classification_reason": "safeguarded: raw Darwin SysV semaphore IDs refused with ENOSYS; Linux semantics unsupported",
       "dispatch_locations": [
         {
           "file": "src/syscalls_ext.c",
@@ -3903,12 +3903,12 @@
       ],
       "dispatch_state": "case",
       "name": "semop",
-      "notes": "",
+      "notes": "Safeguarded against raw host SysV semaphore IDs; ENOSYS until an instance-scoped semaphore registry exists. See docs/syscalls/193-semop-safeguard.md.",
       "number": 193,
       "priority": "P1_common",
       "runtime_evidence": [],
-      "semantic_status": "unknown",
-      "test_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": ["tests/run-semop-refuse.py"],
       "trap_override": false,
       "verified_compatible": false
     },
