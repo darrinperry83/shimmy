@@ -2233,6 +2233,25 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (r < 0 && errno == ERANGE && size >= 65536) return -LX_E2BIG;
     return r < 0 ? eret() : r;
   }
+  case 466: {                                                   // removexattrat(dfd, path, flags, name)
+    if (a2 & ~(unsigned long)(LX_AT_SYMLINK_NOFOLLOW | LX_AT_EMPTY_PATH))
+      return -LX_EINVAL;
+    // The fd/empty-path form needs proof that the descriptor belongs to the
+    // guest. Never hand a shim-private host descriptor to fremovexattr.
+    if (!a1) return (a2 & LX_AT_EMPTY_PATH) ? -LX_EOPNOTSUPP : -LX_EFAULT;
+    char guest_path[PATH_MAX], guest_name[256];
+    e = copy_guest_cstr(a1, guest_path, sizeof guest_path);
+    if (e < 0) return e;
+    if (!guest_path[0])
+      return (a2 & LX_AT_EMPTY_PATH) ? -LX_EOPNOTSUPP : -LX_ENOENT;
+    e = copy_guest_cstr(a3, guest_name, sizeof guest_name);
+    if (e < 0) return e;
+    e = resolve_at_nf((int)a0, guest_path, host, sizeof host, &hdirfd,
+                      (a2 & LX_AT_SYMLINK_NOFOLLOW) != 0);
+    if (e < 0) return e;
+    return ok0(removexattr(host, guest_name,
+                           (a2 & LX_AT_SYMLINK_NOFOLLOW) ? XATTR_NOFOLLOW : 0));
+  }
 
   default:
     return -LX_ENOSYS;                                          // genuinely not implemented
