@@ -1170,7 +1170,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return 0;
   }
   case 97: return -LX_EPERM;                                   // unshare
-  case 100: return -LX_ENOSYS;                                 // get_robust_list
+  case 100: return guest_get_robust_list((long)a0, a1, a2);    // get_robust_list
   case 101:                                                    // nanosleep (timespec matches)
     return ok0(nanosleep((const struct timespec*)a0, (struct timespec*)a1));
   case 102: {                                                  // getitimer

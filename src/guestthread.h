@@ -32,6 +32,12 @@ void guest_thread_exiting(void);
 // set_tid_address(): remember where to write 0 when this thread exits.
 void guest_set_tid_address(unsigned long addr);
 
+// The Linux robust-list registration is per guest thread. These helpers expose
+// that registration to set_robust_list(2) and get_robust_list(2); owner-death
+// futex cleanup on thread exit is a separate, still unsupported contract.
+long guest_set_robust_list(unsigned long head, unsigned long len);
+long guest_get_robust_list(long tid, unsigned long head_out, unsigned long len_out);
+
 // Is the calling thread a CLONE_VFORK child? Such a thread must NOT re-exec the shim on
 // execve() — that would replace the shared parent process too — and must not end the process on
 // exit(). It spawns a host process (or records a status) and releases the blocked parent instead.

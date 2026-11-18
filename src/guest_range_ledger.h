@@ -20,6 +20,9 @@ bool rdguest_range_move(RDGuestRangeLedger *,uintptr_t old,size_t oldLen,
                         uintptr_t replacement,size_t newLen);
 bool rdguest_range_copyout(RDGuestRangeLedger *,uintptr_t guestAddress,
                            const void *,size_t);
+// General syscall copyout, separate from the exact-size GPU export receipt.
+bool rdguest_range_copyout_bytes(RDGuestRangeLedger *,uintptr_t guestAddress,
+                                 const void *,size_t);
 bool rdguest_range_copyin(RDGuestRangeLedger *,uintptr_t guestAddress,
                           void *,size_t);
 #endif
