@@ -22,6 +22,7 @@
 #define GPU_FRAME_MSG_ID 0x53474631
 #define GPU_MASTER_MSG_ID 0x53474632
 #define GPU_MASTER_RELEASE_MSG_ID 0x53474633
+#define GPU_DEVICE_AUTH_MSG_ID 0x53474634
 #define GPU_FRAME_VERSION 1u
 #define GPU_FRAME_MAX_SIDE 16384u
 #define GPU_FRAME_BGRA 0x42475241u
@@ -51,6 +52,15 @@ typedef struct {
   mach_msg_header_t header;
   int32_t result;
 } gpu_master_reply;
+
+typedef struct {
+  mach_msg_header_t header;
+  mach_msg_body_t body;
+  mach_msg_port_descriptor_t drm_port;
+  uint32_t magic, version;
+  uint64_t epoch_high, epoch_low;
+  uint32_t claimed_pid;
+} gpu_device_auth_message;
 
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 /* Serializes presentation with producer replacement and VT-clear callbacks.
@@ -313,6 +323,29 @@ static int receive_master(mach_msg_header_t *hdr, size_t cap) {
   return authorized ? 0 : -EACCES;
 }
 
+static int receive_device_auth(mach_msg_header_t *hdr, size_t cap) {
+  if (hdr->msgh_size != sizeof(gpu_device_auth_message) ||
+      hdr->msgh_id != GPU_DEVICE_AUTH_MSG_ID ||
+      !(hdr->msgh_bits & MACH_MSGH_BITS_COMPLEX)) return -EBADMSG;
+  gpu_device_auth_message *m = (gpu_device_auth_message *)hdr;
+  if (m->body.msgh_descriptor_count != 1 ||
+      m->drm_port.type != MACH_MSG_PORT_DESCRIPTOR ||
+      m->drm_port.name == MACH_PORT_NULL ||
+      m->magic != GPU_FRAME_MAGIC || m->version != GPU_FRAME_VERSION)
+    return -EBADMSG;
+  pid_t sender;
+  uid_t sender_uid;
+  if (audit_sender(hdr, cap, &sender, &sender_uid)) return -EACCES;
+  pthread_mutex_lock(&g_lock);
+  int authorized = g_running && g_require_master_proof &&
+      sender > 1 && sender_uid == g_expected_uid &&
+      m->claimed_pid == (uint32_t)sender &&
+      m->epoch_high == g_epoch.high && m->epoch_low == g_epoch.low;
+  int rc = authorized ? verify_handed_drm_fileport(m->drm_port.name) : -EACCES;
+  pthread_mutex_unlock(&g_lock);
+  return rc;
+}
+
 static void reply_result(mach_msg_header_t *request, int32_t id, int result) {
   if (request->msgh_remote_port == MACH_PORT_NULL) return;
   gpu_master_reply reply = {0};
@@ -353,6 +386,9 @@ static void *receive_loop(void *arg) {
           hdr->msgh_id == GPU_MASTER_RELEASE_MSG_ID) {
         int rc = receive_master(hdr, sizeof buffer);
         reply_result(hdr, hdr->msgh_id, rc);
+      } else if (hdr->msgh_id == GPU_DEVICE_AUTH_MSG_ID) {
+        int rc = receive_device_auth(hdr, sizeof buffer);
+        reply_result(hdr, GPU_DEVICE_AUTH_MSG_ID, rc);
       } else if (hdr->msgh_id == GPU_FRAME_MSG_ID) {
         int rc = receive_one(hdr, sizeof buffer);
         reply_result(hdr, GPU_FRAME_MSG_ID, rc);
@@ -603,6 +639,62 @@ int session_gpu_child_unregister_master(pid_t owner_pid, session_gpu_epoch epoch
                                         int master_lock_fd, int drm_fd) {
   return child_master_action(owner_pid, epoch, master_lock_fd, drm_fd,
                              GPU_MASTER_RELEASE_MSG_ID);
+}
+
+int session_gpu_child_auth_device(pid_t owner_pid, session_gpu_epoch epoch, int drm_fd) {
+  if (drm_fd < 0) return -EBADF;
+  char name[BOOTSTRAP_MAX_NAME_LEN];
+  int rc = service_name(name, sizeof name, owner_pid, epoch);
+  if (rc) return rc;
+  mach_port_t bp = MACH_PORT_NULL, target = MACH_PORT_NULL;
+  if (task_get_bootstrap_port(mach_task_self(), &bp) != KERN_SUCCESS ||
+      bootstrap_look_up(bp, name, &target) != BOOTSTRAP_SUCCESS) return -ENODEV;
+  fileport_t drm_capability = FILEPORT_NULL;
+  if (fileport_makeport(drm_fd, &drm_capability) != 0) {
+    mach_port_deallocate(mach_task_self(), target);
+    return -EBADF;
+  }
+  mach_port_t reply_port = MACH_PORT_NULL;
+  if (mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE,
+                         &reply_port) != KERN_SUCCESS) {
+    mach_port_deallocate(mach_task_self(), drm_capability);
+    mach_port_deallocate(mach_task_self(), target);
+    return -EIO;
+  }
+  gpu_device_auth_message m = {0};
+  m.header.msgh_bits = MACH_MSGH_BITS(MACH_MSG_TYPE_COPY_SEND,
+                                      MACH_MSG_TYPE_MAKE_SEND_ONCE) |
+                       MACH_MSGH_BITS_COMPLEX;
+  m.header.msgh_size = sizeof m;
+  m.header.msgh_remote_port = target;
+  m.header.msgh_local_port = reply_port;
+  m.header.msgh_id = GPU_DEVICE_AUTH_MSG_ID;
+  m.body.msgh_descriptor_count = 1;
+  m.drm_port.name = drm_capability;
+  m.drm_port.disposition = MACH_MSG_TYPE_COPY_SEND;
+  m.drm_port.type = MACH_MSG_PORT_DESCRIPTOR;
+  m.magic = GPU_FRAME_MAGIC;
+  m.version = GPU_FRAME_VERSION;
+  m.epoch_high = epoch.high;
+  m.epoch_low = epoch.low;
+  m.claimed_pid = (uint32_t)getpid();
+  kern_return_t kr = mach_msg(&m.header, MACH_SEND_MSG | MACH_SEND_TIMEOUT,
+                              sizeof m, 0, MACH_PORT_NULL, 200, MACH_PORT_NULL);
+  mach_port_deallocate(mach_task_self(), drm_capability);
+  mach_port_deallocate(mach_task_self(), target);
+  if (kr != KERN_SUCCESS) {
+    mach_port_mod_refs(mach_task_self(), reply_port, MACH_PORT_RIGHT_RECEIVE, -1);
+    return kr == MACH_SEND_TIMED_OUT ? -ETIMEDOUT : -EIO;
+  }
+  _Alignas(8) uint8_t reply_buffer[sizeof(gpu_master_reply) + 64] = {0};
+  gpu_master_reply *reply = (gpu_master_reply *)reply_buffer;
+  kr = mach_msg(&reply->header, MACH_RCV_MSG | MACH_RCV_TIMEOUT,
+                0, sizeof reply_buffer, reply_port, 500, MACH_PORT_NULL);
+  mach_port_mod_refs(mach_task_self(), reply_port, MACH_PORT_RIGHT_RECEIVE, -1);
+  if (kr != KERN_SUCCESS) return kr == MACH_RCV_TIMED_OUT ? -ETIMEDOUT : -EIO;
+  if (reply->header.msgh_id != GPU_DEVICE_AUTH_MSG_ID ||
+      reply->header.msgh_size != sizeof(*reply)) return -EBADMSG;
+  return reply->result;
 }
 
 static int child_present_common(pid_t owner_pid, session_gpu_epoch epoch,

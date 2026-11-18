@@ -578,10 +578,31 @@ static long drm_magic_ioctl(int fd, unsigned nr, uint32_t *magic) {
       long claim = drm_master_ioctl(fd, DRM_NR_SET_MASTER);
       return claim == 0 ? -EINVAL : -EACCES;
     }
+    int handed_master = 0;
+    if (*magic && g_master_owner_fd < 0) {
+      // The card open description was handed from logind. Check the magic
+      // locally, then ask the host to verify that this exact fd matches the
+      // registered, still-live DRM master. No second lock claim is made.
+      int known = 0;
+      pthread_mutex_lock(&g_magic_lock);
+      for (int i = 0; i < MAX_DRM_MAGIC; i++)
+        if (g_magic[i].magic == *magic) { known = 1; break; }
+      pthread_mutex_unlock(&g_magic_lock);
+      if (!known) return -EINVAL;
+      pid_t owner = 0;
+      session_gpu_epoch epoch;
+      int child = gpu_session_child(&owner, &epoch);
+      if (child <= 0) return -EACCES;
+      int rc = session_gpu_child_auth_device(owner, epoch, fd);
+      if (tracing()) fprintf(stderr, "[drm] handed AUTH_MAGIC pid=%d fd=%d rc=%d\n",
+                             getpid(), fd, rc);
+      if (rc) return rc;
+      handed_master = 1;
+    }
     unsigned long long master_dev, master_ino;
-    if (g_master_owner_fd < 0 ||
+    if (!handed_master && (g_master_owner_fd < 0 ||
         drm_fd_identity(g_master_owner_fd, &master_dev, &master_ino) ||
-        master_dev != dev || master_ino != ino) {
+        master_dev != dev || master_ino != ino)) {
       if (tracing()) fprintf(stderr, "[drm] auth rejected: no matching local master fd\n");
       return -EACCES;
     }

@@ -190,3 +190,28 @@ and host frame-authentication design. The proper integration must preserve
 or broker the existing master capability across logind's `SCM_RIGHTS` fd
 handoff, and must still reject an unrelated card fd or producer. The last
 on-screen run did not display a usable greeter.
+
+## 18 November: bus wake recovery and handed DRM authorization
+
+An on-screen disposable-root A/B test found that logind sent synchronous
+`StartUnit` requests to PID 1 over the system bus, but did not receive their
+replies for 25 seconds even though the runtime-directory unit completed in
+under a second. A bounded epoll wait followed by the existing AF_UNIX receive
+queue inspection made those replies arrive. The production change bounds the
+wait only for epoll sets watching AF_UNIX reads; a native regression test
+deliberately removes the kqueue read watch with bytes queued and confirms
+that the guest still receives EPOLLIN. The test suite passed 210 checks.
+
+In a fresh on-screen boot without `RDEPOLL_RECOVER_MS`, logind created SDDM
+greeter session `c1` and `/run/user/962`, and the SDDM helper launched KWin.
+The clone still had a **test-only** service override that bypasses SDDM's
+second D-Bus registration call. Thus this is not proof of an unmodified SDDM
+boot. The host now verifies a logind-handed DRM card descriptor against the
+registered live master through an audit-checked Mach request. KWin's
+`AUTH_MAGIC` returned 0 for the handed descriptor. Native tests rejected an
+unrelated fd, a missing master and an unlocked master.
+
+KWin reached DRM mode and framebuffer probes, then SDDM logged `Wayland socket
+watcher timed out` and stopped it. No greeter UI appeared. The next issue is
+why KWin does not create its Wayland socket before SDDM's timeout; the earlier
+SDDM D-Bus registration hang also still needs a normal, override-free fix.

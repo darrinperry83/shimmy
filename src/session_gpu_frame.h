@@ -41,6 +41,9 @@ int session_gpu_child_register_master(pid_t owner_pid, session_gpu_epoch epoch,
                                       int master_lock_fd, int drm_fd);
 int session_gpu_child_unregister_master(pid_t owner_pid, session_gpu_epoch epoch,
                                         int master_lock_fd, int drm_fd);
+/* Confirm a logind-handed card fd against the registered live master before
+ * accepting DRM AUTH_MAGIC in the compositor process. No ownership changes. */
+int session_gpu_child_auth_device(pid_t owner_pid, session_gpu_epoch epoch, int drm_fd);
 /* Revoke the old producer and clear its frame; useful on logout/restart. */
 int session_gpu_host_set_producer(pid_t expected_pid, uid_t expected_uid);
 void session_gpu_host_stop(void);

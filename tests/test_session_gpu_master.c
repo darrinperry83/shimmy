@@ -90,6 +90,12 @@ static void run_child(int in, int out, const char *path, int device_fd, pid_t ow
       rc = session_gpu_child_present_master(owner, epoch, fd, s, 1, 1, 8, 8, BGRA);
     } else if (c == 'h') {
       rc = session_gpu_child_present_device(owner, epoch, device_fd, s, 1, 1, 8, 8, BGRA);
+    } else if (c == 'a') {
+      rc = session_gpu_child_auth_device(owner, epoch, device_fd);
+    } else if (c == 'x') {
+      int impostor = socket(AF_UNIX, SOCK_DGRAM, 0);
+      rc = session_gpu_child_auth_device(owner, epoch, impostor);
+      close(impostor);
     } else if (c == 'n') {
       rc = session_gpu_child_present(owner, epoch, s, 1, 1, 8, 8, BGRA);
     } else if (c == 'u') {
@@ -157,10 +163,13 @@ int main(void) {
   assert(session_gpu_host_start_from_master(geteuid(), epoch, path,
                                             present, lost, NULL) == 0);
   command(stranger_in[1], stranger_out[0], 'o', 'y');
+  command(stranger_in[1], stranger_out[0], 'a', 'n'); /* no registered master */
   command(stranger_in[1], stranger_out[0], 'r', 'n'); /* no lock */
   command(master_in[1], master_out[0], 'o', 'y');
   command(stranger_in[1], stranger_out[0], 'r', 'n'); /* same inode, other FD */
   command(master_in[1], master_out[0], 'r', 'y');
+  command(stranger_in[1], stranger_out[0], 'a', 'y'); /* exact handed DRM fd */
+  command(stranger_in[1], stranger_out[0], 'x', 'n'); /* unrelated socket */
   command(stranger_in[1], stranger_out[0], 'p', 'n'); /* audit+flock reject */
   command(stranger_in[1], stranger_out[0], 'h', 'y'); /* exact handed-off DRM fd */
   wait_for(&frames, 1);
@@ -172,6 +181,7 @@ int main(void) {
   command(master_in[1], master_out[0], 'd', 'y'); /* copied then explicitly unlocked */
   command(master_in[1], master_out[0], 'r', 'n');
   command(master_in[1], master_out[0], 'p', 'n');
+  command(stranger_in[1], stranger_out[0], 'a', 'n'); /* master unlocked */
   usleep(250000); assert(count() == 2);
   assert(write(master_in[1], "q", 1) == 1);
   int status;
