@@ -168,6 +168,8 @@ The `times`, `getrusage`, and `wait4` squash merges passed a combined CLI build 
 
 The `gettimeofday` squash merge passed the CLI build and ARM64 guest probe on 2026-11-18. A fresh private Arch clone reached login with D-Bus broker and launcher settled. The clone copy warned about protected fixture entries; this is a boot smoke gate, not full filesystem fidelity or GUI proof. `sysinfo` refusal passed a guest probe but aborted Arch init, so only its blocker note was merged. The `msgget`, `semget`, and `shmget` source audits produced blocker notes only; direct host-global IPC forwarding remains a documented risk, not a compatibility claim.
 
+The `mremap` validation squash merge passed `./build.sh cli` and its disposable ARM64 guest probe on 2026-11-18. It rejects unsupported flags, zero old size, unmapped/unaligned input, and overflow before changing a mapping; full move semantics and protection preservation remain unimplemented. The `add_key`, `request_key`, and `keyctl` branches contributed blocker notes only: they require a shared, private guest keyring service. `mlockall` also received a blocker note only because its current host-wide lock call cannot represent guest mapping scope, and simple refusal may break greetd. A fresh private Arch clone reached a login prompt with the D-Bus broker and launcher settled. The clone copy warned about protected fixture entries; this is a boot smoke test, not full filesystem fidelity or GUI proof.
+
 ## Batch integration proof
 
 At the isolated integration head, `./build.sh cli`, `tests/run-inotify-rm-watch.sh`, `python3 tests/run-get-robust-list.py`, and `python3 tests/run-fchmodat2.py --sysroot <installed-Arch-root>` all passed on 2026-11-18. These are focused tests, not a systemd/desktop regression run.
