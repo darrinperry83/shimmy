@@ -13,8 +13,9 @@
  *
  * An AF_UNIX SCM_RIGHTS fd cannot carry a mach port, so the send-right from
  * IOSurfaceCreateMachPort is delivered on a separate rendezvous channel
- * keyed by the carrier's fstat(st_dev, st_ino) identity. That channel does
- * not yet validate the sender's Mach audit identity. The importing side
+ * keyed by the carrier's fstat(st_dev, st_ino) identity. The receiver checks
+ * the sender's Mach audit identity against the same live Shimmy boot tree.
+ * The importing side
  * redeems it with IOSurfaceLookupFromMachPort and stores the CFRetained
  * IOSurfaceRef in the DRM gem slot (see drmasahi.c).
  *

@@ -121,6 +121,26 @@ static int do_inproc(const char *carrier) {
 
 int main(int argc, char **argv) {
     if (argc == 3 && !strcmp(argv[1], "inproc")) return do_inproc(argv[2]);
+    if (argc == 4 && !strcmp(argv[1], "siblings")) {
+        char root[32];
+        snprintf(root, sizeof root, "%ld", (long)getpid());
+        if (setenv("RDVT_ROOT_PID", root, 1)) return 2;
+        pid_t receiver = fork();
+        if (receiver < 0) return 2;
+        if (receiver == 0) {
+            rdgpu_handoff_import_init();
+            _exit(do_resolve(argv[2], argv[3]));
+        }
+        usleep(100000);
+        pid_t publisher = fork();
+        if (publisher < 0) return 2;
+        if (publisher == 0) _exit(do_publish(argv[2], argv[3]));
+        int a = 0, b = 0;
+        if (waitpid(receiver, &a, 0) != receiver ||
+            waitpid(publisher, &b, 0) != publisher) return 1;
+        return WIFEXITED(a) && WEXITSTATUS(a) == 0 &&
+               WIFEXITED(b) && WEXITSTATUS(b) == 0 ? 0 : 1;
+    }
     if (argc == 4 && !strcmp(argv[1], "roundtrip")) {
         /* The publisher is a real child of the registered receiver, matching
          * Shimmy's systemd boot process tree and the audited Mach boundary. */

@@ -270,12 +270,22 @@ static pthread_t g_import_thread;
 static volatile sig_atomic_t g_import_stop = 0;
 static pthread_once_t g_import_once = PTHREAD_ONCE_INIT;
 
-/* The bootstrap name is discoverable by other processes in this user's
- * session. Only accept a send-right published by this Shimmy instance or one
- * of its still-live descendants running the same host executable. The Mach
- * audit trailer supplies the PID/UID; message fields must never supply them. */
-static int handoff_sender_is_our_descendant(const mach_msg_header_t *hdr,
-                                            size_t buffer_size) {
+static int handoff_descends_from(pid_t child, pid_t ancestor) {
+    for (int hops = 0; hops < 64 && child > 1; hops++) {
+        if (child == ancestor) return 1;
+        struct proc_bsdinfo info;
+        if (proc_pidinfo(child, PROC_PIDTBSDINFO, 0, &info, sizeof info)
+            != sizeof info) return 0;
+        child = (pid_t)info.pbi_ppid;
+    }
+    return 0;
+}
+
+/* SDDM and its compositor are siblings under the boot owner. The bootstrap
+ * name is discoverable, so require a kernel-audited sender from this same
+ * live boot tree and executable. A guest-provided PID is never authority. */
+static int handoff_sender_is_our_boot(const mach_msg_header_t *hdr,
+                                      size_t buffer_size) {
     size_t off = round_msg(hdr->msgh_size);
     if (off > buffer_size || buffer_size - off < sizeof(mach_msg_audit_trailer_t))
         return 0;
@@ -292,14 +302,17 @@ static int handoff_sender_is_our_descendant(const mach_msg_header_t *hdr,
     if (proc_pidpath(getpid(), ours, sizeof ours) <= 0 ||
         proc_pidpath(sender, theirs, sizeof theirs) <= 0 ||
         strcmp(ours, theirs)) return 0;
-    for (int hops = 0; hops < 64 && sender > 1; hops++) {
-        struct proc_bsdinfo info;
-        if (proc_pidinfo(sender, PROC_PIDTBSDINFO, 0, &info, sizeof info)
-            != sizeof info) return 0;
-        sender = (pid_t)info.pbi_ppid;
-        if (sender == getpid()) return 1;
+    const char *root_text = getenv("RDVT_ROOT_PID");
+    if (root_text && *root_text) {
+        char *end = NULL;
+        errno = 0;
+        long value = strtol(root_text, &end, 10);
+        if (errno || !end || *end || value <= 1 || value > INT_MAX) return 0;
+        pid_t root = (pid_t)value;
+        return handoff_descends_from(getpid(), root) &&
+               handoff_descends_from(sender, root);
     }
-    return 0;
+    return handoff_descends_from(sender, getpid());
 }
 
 /* Per-run rendezvous name. Both shims inherit the same $RDSOCKETGROUP (a
@@ -334,7 +347,7 @@ static void *rdgpu_handoff_receive_thread(void *arg) {
                                     g_recv_port, 500, MACH_PORT_NULL);
         if (kr == MACH_RCV_TIMED_OUT) continue;
         if (kr != KERN_SUCCESS) { usleep(1000); continue; }
-        if (!handoff_sender_is_our_descendant(hdr, sizeof buffer)) {
+        if (!handoff_sender_is_our_boot(hdr, sizeof buffer)) {
             mach_msg_destroy(hdr);
             continue;
         }
