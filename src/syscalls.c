@@ -5408,12 +5408,17 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   // ---------- 165 getrusage ----------
   case 165: {
     int who = (int)(long)a0;                    // SELF 0, CHILDREN -1, THREAD 1
+    // Darwin has no RUSAGE_THREAD getrusage selector. Reporting process-wide
+    // usage for that Linux selector would mislead thread-aware applications.
+    if (who == 1) return -LX_EOPNOTSUPP;
+    if (who != 0 && who != -1) return -LX_EINVAL;
+    if (!a1) return -LX_EFAULT;
     int mwho = who == -1 ? RUSAGE_CHILDREN : RUSAGE_SELF;
     struct rusage ru;
     if (getrusage(mwho, &ru) < 0) return herrno();
-    if (!a1) return -LX_EFAULT;
-    rusage_m2l(&ru, (struct linux_rusage*)a1);
-    return 0;
+    struct linux_rusage out;
+    rusage_m2l(&ru, &out);
+    return gmem_guest_copyout_checked(a1, &out, sizeof out) == 0 ? 0 : -LX_EFAULT;
   }
 
   // ---------- 172..178 creds ----------
