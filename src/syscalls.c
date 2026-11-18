@@ -2452,6 +2452,26 @@ static long do_futex_wait2(unsigned long uaddr, unsigned long val,
   return do_futex(uaddr, op, (uint32_t)val, to, 0, (uint32_t)mask);
 }
 
+// futex_waitv(2), aarch64 #449. A one-element vector is equivalent to the
+// private U32 futex2 wait above, with an all-bits wake mask and result index 0.
+// The current waiter/bucket model cannot atomically park on several addresses;
+// reject larger vectors rather than risk a lost wake.
+static long do_futex_waitv(unsigned long waiters_addr, unsigned int count,
+                           unsigned int flags, unsigned long timeout_addr,
+                           int clockid) {
+  struct fu2_waiter_arg {
+    uint64_t val, uaddr;
+    uint32_t flags, reserved;
+  } waiter;
+  if (flags || !waiters_addr || !count || count > 128) return -LX_EINVAL;
+  if (count != 1) return -95; // EOPNOTSUPP: multi-address atomic wait needs new queue state.
+  if (gmem_guest_export_copyin(NULL, waiters_addr, &waiter, sizeof waiter) != 0)
+    return -LX_EFAULT;
+  if (waiter.reserved) return -LX_EINVAL;
+  return do_futex_wait2((unsigned long)waiter.uaddr, (unsigned long)waiter.val,
+                        FU_BITS_ANY, waiter.flags, timeout_addr, clockid);
+}
+
 // futex_requeue(2), aarch64 #456. The current queue keeps a sleeping thread on
 // one bucket/condition variable, so moving it to another address would need a
 // queue redesign. nr_requeue == 0 has exact wake-only semantics and can be
@@ -5022,6 +5042,9 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   // ---------- 98 futex ----------
   case 98: return do_futex(a0, (int)a1, (unsigned int)a2,
                            (const struct linux_timespec*)a3, a4, (unsigned int)a5);
+
+  // ---------- 449 futex_waitv (one private U32 waiter) ----------
+  case 449: return do_futex_waitv(a0, (unsigned int)a1, (unsigned int)a2, a3, (int)a4);
 
   // ---------- 454 futex_wake (futex2) ----------
   case 454: return do_futex_wake2(a0, a1, (int)a2, (unsigned int)a3);
