@@ -157,6 +157,34 @@ static long lx_io_setup(unsigned nr_events, uint64_t ctxp) {
   return 0;
 }
 
+// io_destroy(2) removes the context from this process before unmapping its
+// guest ring. The registry lock also prevents a second destroy from claiming
+// the same handle. A later io_submit backend must keep in-flight requests
+// accounted for and drain them before this returns; none can exist yet.
+static long lx_io_destroy(uint64_t handle) {
+  if (!handle) return -LX_EINVAL;
+  pthread_mutex_lock(&g_lx_aio_mu);
+  unsigned slot = 32;
+  for (unsigned i = 0; i < 32; ++i) {
+    if (g_lx_aio_contexts[i].handle == handle &&
+        g_lx_aio_contexts[i].host_pid == getpid()) {
+      slot = i;
+      break;
+    }
+  }
+  if (slot == 32) {
+    pthread_mutex_unlock(&g_lx_aio_mu);
+    return -LX_EINVAL;
+  }
+  size_t length = g_lx_aio_contexts[slot].mapping_length;
+  g_lx_aio_contexts[slot] = (struct lx_aio_context){0};
+  // Linux tears down the context even when userspace has unmapped the ring.
+  // The mapping operation's result is not the syscall's completion status.
+  (void)gmem_munmap((unsigned long)handle, length);
+  pthread_mutex_unlock(&g_lx_aio_mu);
+  return 0;
+}
+
 #define LX_AT_FDCWD              (-100)
 #define LX_AT_SYMLINK_NOFOLLOW   0x100
 #define LX_AT_EACCESS            0x200
@@ -932,7 +960,8 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
 
   // ===== 0..16: aio + extended attributes ==================================
   case 0: return lx_io_setup((unsigned)a0, a1);                 // io_setup; family gate pending
-  case 1: case 2: case 3: case 4: return -LX_ENOSYS;           // aio family pending
+  case 1: return lx_io_destroy(a0);                            // io_destroy; family gate pending
+  case 2: case 3: case 4: return -LX_ENOSYS;                   // aio family pending
   case 5: case 6: case 7: {                                    // setxattr / lsetxattr / fsetxattr
     int hopt = 0;                                              // Linux XATTR_CREATE=1 REPLACE=2
     if ((int)a4 & 1) hopt |= XATTR_CREATE;
