@@ -228,6 +228,8 @@ An isolated #282 userfaultfd fault/copy/wake experiment passed ARM64 guest and p
 
 `rt_sigtimedwait` (#137) now stages its guest signal mask and timeout and uses checked 128-byte siginfo copyout. A failed output write requeues the coalesced standard signal. Its ARM64 guest probe, CLI build, private Arch login/D-Bus boot, and combined #134/#135/#137 probes passed. Its queue is process-wide and does not provide complete Linux signal semantics.
 
+The combined integration head through #137 passed a fresh private Arch login prompt with the D-Bus broker and launcher settled. The exact guest was stopped by the harness and the disposable rootfs clone was removed. This remains a boot smoke test, not a full desktop or ABI claim.
+
 The combined integration head through #103 passed a fresh private Arch login prompt with the D-Bus broker and launcher settled. The exact guest was stopped by the harness and its disposable rootfs clone was removed. This is a systemd boot smoke test, not a desktop or full syscall compatibility claim.
 
 The combined integration head also passed a fresh private Arch login/D-Bus boot after the #424 merge; the exact clone and guest were cleaned. The `prlimit64` v2 branch remains withheld because its separate controlled Arch boot reached login without D-Bus settling, while a fresh baseline settled normally. The #425 io_uring and #77 tee opt-in branches remain isolated pending private descriptor and performance reviews.
