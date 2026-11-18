@@ -197,6 +197,8 @@ An isolated, inactive virtual-pipe buffer core now tests non-consuming `tee` beh
 A harmless ARM64 negative security probe confirms a guest can invoke native Darwin `getpid` with `svc #0x80` outside `route_syscall()`. A dispatcher-only seccomp filter could therefore be bypassed; #277 filter installation remains disabled. The probe passed against the isolated CLI build. This finding also requires a broader guest isolation review before making security claims about the in-process runtime.
 
 The #293 `rseq` review confirms Shimmy cannot guarantee Linux's abort on every guest preemption or CPU migration. Registration remains `ENOSYS`; a four-thread ARM64 guest test confirms the storage stays untouched and a fallback path works. This is a documented boundary, not an enabled syscall.
+
+An isolated #282 userfaultfd fault/copy/wake experiment passed ARM64 guest and private Arch boot tests, but its runtime merge was withheld while private host-descriptor access remains unresolved. Default syscall 282 remains `ENOSYS`; the experiment stays on its per-syscall branch for later architecture work.
 ## Batch integration proof
 
 At the isolated integration head, `./build.sh cli`, `tests/run-inotify-rm-watch.sh`, `python3 tests/run-get-robust-list.py`, and `python3 tests/run-fchmodat2.py --sysroot <installed-Arch-root>` all passed on 2026-11-18. These are focused tests, not a systemd/desktop regression run.
