@@ -2125,12 +2125,12 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   case 102: {                                                  // getitimer
     struct itimerval hv;
     if (getitimer((int)a0, &hv) != 0) return eret();
-    if (a1) {
-      struct lx_itimerval* o = (struct lx_itimerval*)a1;
-      lx_tv_put(&o->it_interval, &hv.it_interval);
-      lx_tv_put(&o->it_value, &hv.it_value);
-    }
-    return 0;
+    // Linux copies the result after validating which; a missing or invalid
+    // guest destination must not be treated as success or written directly.
+    struct lx_itimerval guest;
+    lx_tv_put(&guest.it_interval, &hv.it_interval);
+    lx_tv_put(&guest.it_value, &hv.it_value);
+    return gmem_guest_copyout_checked(a1, &guest, sizeof guest) == 0 ? 0 : -LX_EFAULT;
   }
   case 103: {                                                  // setitimer
     struct itimerval hv, old;
