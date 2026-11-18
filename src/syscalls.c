@@ -5298,7 +5298,16 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     struct linux_stat staged = {0};
     struct linux_stat* out = &staged;
     if (!a2) return -LX_EFAULT;
-    const char* p = (const char*)a1;
+    // NULL is valid only for the existing AT_EMPTY_PATH fd form. For every
+    // pathname form, snapshot guest bytes before either the empty-path test
+    // or the resolver dereferences them.
+    char guest_path[PATH_MAX];
+    const char* p = NULL;
+    if (a1) {
+      if ((r = readlink_guest_path(a1, guest_path, sizeof guest_path)) < 0) return r;
+      p = guest_path;
+    }
+    if (!p && !(a3 & LX_AT_EMPTY_PATH)) return -LX_EFAULT;
     if ((a3 & LX_AT_EMPTY_PATH) && (!p || !*p)) {
       int fd = (int)a0;
       if (!net_opath_socket_stat(fd, &st) && fstat(fd, &st) < 0) return herrno();

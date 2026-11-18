@@ -17,6 +17,15 @@ int main(void) {
       out.canary != UINT64_C(0x7a05d18ec3b42f69)) return 1;
   int fd = open("/tmp/stat79-fixture", O_RDONLY);
   if (fd < 0) return 2;
+  errno = 0;
+  if (syscall(SYS_newfstatat, AT_FDCWD, NULL, &out.value, 0) != -1 ||
+      errno != EFAULT) return 13;
+  errno = 0;
+  if (syscall(SYS_newfstatat, AT_FDCWD, (void *)1, &out.value, 0) != -1 ||
+      errno != EFAULT) return 14;
+  errno = 0;
+  if (syscall(SYS_newfstatat, fd, (void *)1, &out.value, AT_EMPTY_PATH) != -1 ||
+      errno != EFAULT) return 15;
   if (syscall(SYS_newfstatat, fd, "", &out.value, AT_EMPTY_PATH) != 0 ||
       !S_ISREG(out.value.st_mode) || out.value.st_size != 7) return 3;
   if (syscall(SYS_newfstatat, fd, NULL, &out.value, AT_EMPTY_PATH) != 0 ||
