@@ -4,6 +4,12 @@ This file records bounded behavior that has been implemented and tested. A dispa
 
 Current safety and refusal status is summarized in [`SAFEGUARDS.md`](SAFEGUARDS.md).
 
+The isolated #22 `epoll_pwait` follow-up validates and stages bounded event
+output in the shared wait helper, also covering no-mask #441 waits. Invalid
+guest output fails before consuming readiness. Both disposable ARM64 probes,
+the CLI build, and private Arch login/D-Bus boot gate pass. See
+[`EPOLL-WAIT-OUTPUT.md`](EPOLL-WAIT-OUTPUT.md).
+
 The isolated #21 `epoll_ctl` follow-up snapshots ADD/MOD event input before
 changing watch state; DEL continues to ignore the event pointer. Its
 focused no-libc ARM64 probe, existing epoll wait regression, CLI build, and

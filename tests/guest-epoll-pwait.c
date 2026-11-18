@@ -24,6 +24,7 @@ void _start(void){
   if(sc(22,ep,(long)&out,1,0,(long)&mask,4)!=-22)finish(5);
   if(sc(22,ep,(long)&out,1,0,(long)&mask,8)!=-95)finish(6);
   if(out.data!=UINT64_C(0x5555555555555555))finish(7);
+  if(sc(22,ep,1,1,0,0,0)!=-14)finish(11); /* bad output keeps readiness */
   if(sc(22,ep,(long)&out,1,0,0,4)!=1)finish(8); /* NULL mask ignores size */
   if(!(out.events&1) || out.pad || out.data!=interest.data)finish(9);
   if(sc(22,ep,(long)&out,0,0,0,0)!=-22)finish(10);

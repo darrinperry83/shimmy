@@ -1828,10 +1828,17 @@ static long sys_epoll_wait_ts(int epfd, struct lin_epoll_event* uev, int maxeven
   if (maxevents <= 0) return -L_EINVAL;
   if (!uev) return -L_EFAULT;
   if (maxevents > 4096) maxevents = 4096;
+  // Preflight the bounded declared capacity before waiting: a bad guest
+  // destination must not consume a ready event. Keep host writes private.
+  size_t event_bytes = (size_t)maxevents * sizeof *uev;
+  if (gmem_guest_range_writable((uint64_t)(uintptr_t)uev, event_bytes) != 0)
+    return -L_EFAULT;
+  struct lin_epoll_event* staged = calloc((size_t)maxevents, sizeof *staged);
+  if (!staged) return -L_ENOMEM;
   struct kevent* kv = (struct kevent*)calloc((size_t)maxevents, sizeof *kv);
-  if (!kv) return -L_ENOMEM;
+  if (!kv) { free(staged); return -L_ENOMEM; }
   int* idents = (int*)calloc((size_t)maxevents, sizeof *idents);   // for coalescing by fd
-  if (!idents) { free(kv); return -L_ENOMEM; }
+  if (!idents) { free(kv); free(staged); return -L_ENOMEM; }
 
   double t0 = polllog_on() ? now_ms() : 0;
   if (notifydbg_on()) {
@@ -1894,7 +1901,7 @@ epoll_retry:
     fprintf(stderr, "[polllog] t=%.2f %s req=%.3fms act=%.2fms ret=%d fds=[%s]\n",
             now_ms(), wait_name, requested_ms, now_ms() - t0, n, fds);
   }
-  if (n < 0) { long e = lerr(); free(kv); free(idents); return e; }
+  if (n < 0) { long e = lerr(); free(kv); free(idents); free(staged); return e; }
 
   // macOS kqueue sometimes fails to report a datagram on a bound AF_UNIX socket that received from a
   // DIFFERENT process — systemd's /run/systemd/notify is exactly that: journald's "READY=1" sat in the
@@ -1993,13 +2000,13 @@ epoll_retry:
       if (out >= maxevents) continue;
       slot = out++;
       idents[slot] = fd;
-      uev[slot].events = 0;
-      uev[slot].__pad = 0;                      // the aarch64 pad word must be zero
-      uev[slot].data = 0;
+      staged[slot].events = 0;
+      staged[slot].__pad = 0;                   // the aarch64 pad word must be zero
+      staged[slot].data = 0;
       pthread_mutex_lock(&g_lock);
       struct epinst* e = ep_find(epfd);
       struct epent* p = e ? ep_lookup(e, fd) : NULL;
-      if (p) uev[slot].data = p->data;
+      if (p) staged[slot].data = p->data;
       pthread_mutex_unlock(&g_lock);
     }
     // Linux only reports events the caller REGISTERED (the interest mask), plus EPOLLERR/EPOLLHUP
@@ -2015,11 +2022,16 @@ epoll_retry:
       pthread_mutex_unlock(&g_lock);
       bits = (bits & reg) | (bits & (L_EPOLLERR | L_EPOLLHUP));
     }
-    uev[slot].events |= bits;
+    staged[slot].events |= bits;
   }
+  long result = out;
+  if (out && gmem_guest_copyout_checked((uint64_t)(uintptr_t)uev, staged,
+                                        (size_t)out * sizeof *staged) != 0)
+    result = -L_EFAULT;
   free(kv);
   free(idents);
-  return out;
+  free(staged);
+  return result;
 }
 
 static long sys_epoll_pwait(int epfd, struct lin_epoll_event* uev,

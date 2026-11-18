@@ -28,6 +28,7 @@ void _start(void){
   timeout.sec=0; timeout.nsec=1000000000;
   if(sc(441,ep,(long)&out,1,(long)&timeout,0,0)!=-22)finish(8);
   timeout.nsec=0;
+  if(sc(441,ep,1,1,(long)&timeout,0,0)!=-14)finish(11);
   if(sc(441,ep,(long)&out,1,(long)&timeout,0,0)!=1)finish(9);
   if(!(out.events&1) || out.pad || out.data!=interest.data)finish(10);
   finish(0);
