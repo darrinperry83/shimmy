@@ -6,4 +6,10 @@ Shimmy currently returns `ENOSYS` for syscall 277 in `src/syscalls_ext.c`. The `
 
 Keep syscall 277 at `ENOSYS` until Shimmy has per-thread/process filter state, classic-BPF verification and evaluation over `struct seccomp_data`, action precedence, thread synchronization, fork/exec inheritance, trap/signal and user-notification plumbing, and enforcement before every guest syscall path. Validate with disposable ARM64 guest programs that install a filter then attempt both allowed and blocked calls, including threads, fork/exec, signal actions, and the `prctl` route. The separate `PR_SET_NO_NEW_PRIVS` no-op deserves its own security review.
 
+## Bounded evaluator foundation
+
+`src/seccomp_bpf.c` now has an isolated, tested verifier and evaluator for a conservative classic-BPF subset over the Linux ARM64 `seccomp_data` layout. It accepts only 32-bit absolute loads, immediate loads, a few arithmetic/bitwise operations, forward jumps, and constant `ALLOW`/`ERRNO` returns. It rejects unknown instructions, out-of-range or unaligned loads, escaping jumps, unsupported actions, and programs without a final return. Invalid evaluation fails closed to `ERRNO(EPERM)`. The sanitizer test in `tests/test_seccomp_bpf.c` covers architecture, syscall number, argument inspection, and malformed programs.
+
+This evaluator is **not installed by syscall 277** and is not yet wired into guest syscall dispatch. `route_syscall()` in `src/shim.c` is the common guest trap/fastcall point for a future predispatch gate. A guest filter would also need immutable per-thread/process state, thread synchronization, action precedence for stacked filters, and state transfer across Shimmy's host `execve()` re-exec without accepting guest-forged environment variables. Host fork alone copies memory, but re-exec does not. Until those are implemented and tested, #277 remains `ENOSYS`; no guest has been told a filter is active.
+
 Primary sources: [Linux `kernel/seccomp.c`](https://github.com/torvalds/linux/blob/master/kernel/seccomp.c) and [Linux UAPI `include/uapi/linux/seccomp.h`](https://github.com/torvalds/linux/blob/master/include/uapi/linux/seccomp.h).
