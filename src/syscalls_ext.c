@@ -1665,7 +1665,20 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return -LX_EPERM;
   }
   case 117: return -LX_EPERM;                                  // ptrace
-  case 118: return 0;                                          // sched_setparam
+  case 118: {                                                  // sched_setparam: SCHED_OTHER/priority 0
+    long target = (long)(int)a0;
+    if (target < 0 || !a1) return -LX_EINVAL;
+    int priority;
+    if (gmem_guest_export_copyin(NULL, a1, &priority, sizeof priority) != 0)
+      return -LX_EFAULT;
+    if (target && target != guest_tid() &&
+        !(target == (long)syscalls_guest_pid() && guest_tid() == 1))
+      return guest_tid_known((int)target) ? -LX_EOPNOTSUPP : -LX_ESRCH;
+    // Shimmy reports SCHED_OTHER for this thread. Linux requires priority 0
+    // for that policy; accepting another value would claim a change we did
+    // not make. RT scheduling and other guest threads need separate support.
+    return priority == 0 ? 0 : -LX_EINVAL;
+  }
   case 119: {                                                  // sched_setscheduler
     /* The guest exposes SCHED_OTHER.  Do not claim an RT policy or change
      * another guest thread's scheduler through a process-wide host API. */
