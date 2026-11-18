@@ -56,6 +56,7 @@
 #include "netlink_route_transport.h"
 #include "guest_cred_registry.h"
 #include "guest_ownership.h"
+#include "gmem.h"
 // Standalone net tests do not link the optional virtual DRM backend.
 __attribute__((weak_import)) extern void drm_register_received_fd(int fd);
 
@@ -2011,10 +2012,13 @@ static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_
   if (nfds > 4096) return -L_EINVAL;
   int timeout = -1;                                    // NULL timespec == block forever
   if (uts) {
-    int64_t ms = uts->tv_sec * 1000 + (uts->tv_nsec + 999999) / 1000000;
-    if (ms < 0) ms = 0;
-    if (ms > INT_MAX) ms = INT_MAX;
-    timeout = (int)ms;
+    // The wrapper has already checked the Linux timespec. Clamp before
+    // multiplication so a large valid tv_sec cannot wrap to a short wait.
+    if (uts->tv_sec >= INT_MAX / 1000)
+      timeout = INT_MAX;
+    else
+      timeout = (int)(uts->tv_sec * 1000 +
+                      (uts->tv_nsec + 999999) / 1000000);
   }
   if (getenv("RDEXECDBG")) {
     FILE* pf = fopen("/tmp/rd_exec_dbg.txt", "a");
@@ -2137,6 +2141,46 @@ static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_
   }
   free(hf);
   return r;
+}
+
+// ppoll's fifth argument is the Linux kernel sigset size (8 on arm64), not
+// a sixth argument as with pselect6. The shim's virtual signal mask is
+// process-wide, so we cannot atomically install a per-thread mask while
+// sleeping in the host poll. Refuse that form before consuming fd events.
+static long sys_ppoll_guest(uint64_t fds_addr, unsigned long nfds,
+                            uint64_t timeout_addr, uint64_t mask_addr,
+                            size_t sigsetsize) {
+  if (nfds > 4096) return -L_EINVAL;
+  struct lin_timespec timeout, *timeout_p = NULL;
+  if (timeout_addr) {
+    if (gmem_guest_export_copyin(NULL, timeout_addr, &timeout, sizeof timeout) != 0)
+      return -L_EFAULT;
+    if (timeout.tv_sec < 0 || timeout.tv_nsec < 0 || timeout.tv_nsec >= 1000000000LL)
+      return -L_EINVAL;
+    timeout_p = &timeout;
+  }
+  if (mask_addr) {
+    if (sigsetsize != sizeof(uint64_t)) return -L_EINVAL;
+    uint64_t mask;
+    if (gmem_guest_export_copyin(NULL, mask_addr, &mask, sizeof mask) != 0)
+      return -L_EFAULT;
+    (void)mask;
+    return -L_EOPNOTSUPP;
+  }
+  if (!nfds) return sys_ppoll(NULL, 0, timeout_p);
+  if (!fds_addr) return -L_EFAULT;
+  size_t bytes = nfds * sizeof(struct pollfd);
+  struct pollfd* local = malloc(bytes);
+  if (!local) return -L_ENOMEM;
+  if (gmem_guest_export_copyin(NULL, fds_addr, local, bytes) != 0) {
+    free(local);
+    return -L_EFAULT;
+  }
+  long result = sys_ppoll(local, nfds, timeout_p);
+  if (result >= 0 && gmem_guest_copyout_checked(fds_addr, local, bytes) != 0)
+    result = -L_EFAULT;
+  free(local);
+  return result;
 }
 
 static long sys_pselect6(int nfds, fd_set* r, fd_set* w, fd_set* e, const struct lin_timespec* uts) {
@@ -3048,7 +3092,7 @@ long net_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigned 
       return sys_pselect6((int)(long)a0, (fd_set*)a1, (fd_set*)a2, (fd_set*)a3,
                           (const struct lin_timespec*)a4);    // a5: sigmask — ignored
     case LSYS_ppoll:
-      return sys_ppoll((struct pollfd*)a0, a1, (const struct lin_timespec*)a2);
+      return sys_ppoll_guest(a0, a1, a2, a3, (size_t)a4);
 
     case LSYS_socket:
       return sys_socket((int)(long)a0, (int)(long)a1, (int)(long)a2);
