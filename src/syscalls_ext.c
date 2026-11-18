@@ -2466,10 +2466,27 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   }
   case 166: return (long)umask((mode_t)(a0 & 0777));           // umask: Linux masks to S_IRWXUGO
   case 167: return do_prctl((int)a0, a1, a2, a3, a4);          // prctl
-  case 168:                                                    // getcpu
-    if (a0) *(unsigned*)a0 = 0;
-    if (a1) *(unsigned*)a1 = 0;
+  case 168: {                                                  // getcpu
+    // The guest's online CPU set uses the host's contiguous CPU indices,
+    // capped at 32 by /sys and sched_getaffinity. Do not always report CPU 0:
+    // callers use this number to choose per-CPU data for their actual thread.
+    if (!a0 && !a1) return 0;
+    size_t host_cpu = 0;
+    int rc = pthread_cpu_number_np(&host_cpu);
+    if (rc) return -linux_errno_from_host(rc);
+    long online = sysconf(_SC_NPROCESSORS_ONLN);
+    if (online < 1) online = 1;
+    if (online > 32) online = 32;
+    // A host with more than 32 CPUs can run us outside the guest's advertised
+    // set. Refuse that observation instead of fabricating another CPU ID.
+    if (host_cpu >= (size_t)online) return -LX_EOPNOTSUPP;
+    unsigned cpu = (unsigned)host_cpu, node = 0; // one guest NUMA node
+    if (a0 && gmem_guest_copyout_checked(a0, &cpu, sizeof cpu) != 0)
+      return -LX_EFAULT;
+    if (a1 && gmem_guest_copyout_checked(a1, &node, sizeof node) != 0)
+      return -LX_EFAULT;
     return 0;
+  }
   case 169: {                                                  // gettimeofday (Linux timeval!)
     struct timeval tv;
     if (gettimeofday(&tv, 0) != 0) return eret();

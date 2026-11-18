@@ -1115,7 +1115,7 @@ static void proc_cpuinfo(char* b, size_t cap) {
       "paca pacg dcpodp flagm2 frint";
   long n = sysconf(_SC_NPROCESSORS_ONLN);
   if (n < 1) n = 1;
-  if (n > 64) n = 64;
+  if (n > 32) n = 32; // match /sys, /proc/self/status and sched_getaffinity
   size_t o = 0;
   for (long i = 0; i < n && o + 512 < cap; i++)
     o += (size_t)snprintf(b + o, cap - o,
