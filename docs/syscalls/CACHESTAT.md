@@ -1,0 +1,9 @@
+# `cachestat` (ARM64 syscall 451): blocked by cache-state model
+
+Linux's ABI is `cachestat(fd, struct cachestat_range *range, struct cachestat *out, unsigned int flags)`. The range has two 64-bit fields (`off`, `len`); the output has five 64-bit counters: cached, dirty, writeback, evicted, and recently evicted pages. The kernel requires a valid file descriptor, copies the range, enforces permission, rejects nonzero flags, and then samples the file's page-cache mapping.
+
+Shimmy's guest file descriptors currently wrap Darwin descriptors. That supplies file data and metadata, but not Linux filemap page-cache tags, workingset eviction history, or an equivalent per-file dirty/writeback state. `mincore` on a temporary mapping would only reveal virtual-memory residency for that mapping, and mapping/reading can itself change cache state. It cannot honestly populate all five counters or reproduce Linux permission and range semantics.
+
+The current syscall remains `ENOSYS` through the extended tier. Do not replace it with success and zero counters: that would claim a cold, clean file without measurement. A correct implementation needs a guest-visible cache model for shim-managed file reads/writes/mappings (with dirty/writeback/eviction tracking), or a host API demonstrated to return equivalent per-file data. Then add disposable ARM64 tests for ABI layout, errors, zero-length-to-EOF and partial-page ranges, cached versus uncached data, dirty/writeback transitions, and descriptor lifetime. Compare these with an ARM64 Linux oracle before enabling the call.
+
+Primary source: [Linux `mm/filemap.c` `SYSCALL_DEFINE4(cachestat)`](https://github.com/torvalds/linux/blob/master/mm/filemap.c#L4459-L4528) and [Linux UAPI `struct cachestat`](https://github.com/torvalds/linux/blob/master/include/uapi/linux/mman.h#L41-L52).
