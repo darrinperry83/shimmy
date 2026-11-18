@@ -246,6 +246,8 @@ The combined integration head through #37 passed a fresh private Arch login prom
 
 `rt_tgsigqueueinfo` (#240) now checks its 128-byte guest payload and positive process/thread IDs, supports a current-guest/current-thread signal-zero query, and refuses nonzero or unsupported targeting rather than host signaling. Its ARM64 guest probe, CLI build, private Arch login/D-Bus boot, and combined #131/#138/#240 probes passed. Complete queued guest signal delivery remains unimplemented.
 
+The combined integration head through #240 passed a fresh private Arch login prompt with D-Bus broker and launcher settled. The harness stopped its exact guest and the disposable rootfs clone was removed. This remains a boot smoke test, not full desktop or syscall compatibility.
+
 `move_pages` (#239) keeps a bounded query-only subset: at most 256 page addresses are copied from guest memory, queried pages must belong to the guest mapping, and statuses are copied back through checked guest memory. The new and existing ARM64 probes, CLI build, private Arch login/D-Bus boot, and integration probes passed. Page migration is unsupported.
 
 `rt_sigtimedwait` (#137) now stages its guest signal mask and timeout and uses checked 128-byte siginfo copyout. A failed output write requeues the coalesced standard signal. Its ARM64 guest probe, CLI build, private Arch login/D-Bus boot, and combined #134/#135/#137 probes passed. Its queue is process-wide and does not provide complete Linux signal semantics.
