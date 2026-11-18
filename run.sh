@@ -63,19 +63,12 @@ if [ "$BOOT_INIT" = 1 ]; then
   [ "$SHIM_CHOSEN" = 0 ] && SHIM="${SHIM_GUI_OVERRIDE:-$HERE/shim_gui}"   # app bundle may supply its signed GUI binary
   [ -x "$SHIM" ] || { echo "error: $SHIM missing — run ./build.sh gui first" >&2; exit 1; }
 
-  # The rootfs's /tmp is already a host-backed sticky directory. Shimmy does
-  # not implement a separate tmpfs mount namespace yet; accepting mount(2)
-  # without making a mount makes systemd retry tmp.mount indefinitely. Mask
-  # only the vendor unit, leaving any existing administrator override alone.
+  # The rootfs's /tmp is a host-backed sticky directory. systemd's tmp.mount
+  # fails honestly (mount(2) returns EPERM for a /tmp tmpfs), so it needs no
+  # mask; /tmp simply stays on the host-backed directory.
   [ "$(stat -f %Sp "$ROOT/tmp")" = drwxrwxrwt ] || {
     echo "error: $ROOT/tmp must be a mode-1777 directory" >&2; exit 1;
   }
-  TMP_UNIT="$ROOT/etc/systemd/system/tmp.mount"
-  if [ ! -e "$TMP_UNIT" ] && [ ! -L "$TMP_UNIT" ]; then
-    mkdir -p "$(dirname "$TMP_UNIT")"
-    ln -s /dev/null "$TMP_UNIT"
-    echo "[run] masked tmp.mount; guest /tmp uses the rootfs's host-backed sticky directory" >&2
-  fi
 
   # Older installed roots have only tty1 enabled. Install the remaining gettys
   # idempotently before PID 1 starts, preserving any administrator overrides.

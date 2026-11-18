@@ -113,16 +113,12 @@ if [ ! -x "$ROOTFS/usr/bin/pacman" ]; then
   tar -xzf "/tmp/$ARCH_TARBALL" -C "$ROOTFS" 2>/dev/null || true
 fi
 
-# The guest /tmp is host-backed until Shimmy has a real mount namespace.
-# Do not let systemd start the vendor tmpfs unit and report a false mount.
+# The guest /tmp is a host-backed sticky directory. systemd's tmp.mount will
+# fail honestly (the shim returns EPERM for a /tmp tmpfs), so it needs no mask.
 install -d -m 0777 "$ROOTFS/tmp"
 # macOS install(1) does not preserve the sticky bit for an existing directory.
 chmod 1777 "$ROOTFS/tmp"
 install -d "$ROOTFS/etc/systemd/system"
-if [ ! -e "$ROOTFS/etc/systemd/system/tmp.mount" ] &&
-   [ ! -L "$ROOTFS/etc/systemd/system/tmp.mount" ]; then
-  ln -s /dev/null "$ROOTFS/etc/systemd/system/tmp.mount"
-fi
 
 # Each Shimmy VT needs its own getty. A stock Arch root only enables tty1 and
 # relies on kernel/logind auto-VT activation for the others, which our virtual

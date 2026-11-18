@@ -1961,6 +1961,11 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
         const char *uid = target + 10;
         if (*uid && strspn(uid, "0123456789") == strlen(uid)) return -LX_EPERM;
       }
+      // /tmp is a real host-backed directory, not a synthesized tmpfs. Claiming
+      // success here makes systemd's tmp.mount believe the mount took effect,
+      // then retry forever when it cannot observe it. Refuse honestly so the
+      // unit fails once and /tmp stays a plain sticky directory.
+      if (strcmp(target, "/tmp") == 0) return -LX_EPERM;
     }
     return 0;                                   // no-op: the synthetic tree already serves the mount
   }
