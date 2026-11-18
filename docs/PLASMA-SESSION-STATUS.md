@@ -310,3 +310,19 @@ The direct Gallium implementation still has limited primitive, format, and
 render-state coverage, retains a hybrid softpipe fallback, and compiles MSL
 and pipeline state per draw. Sustained frame rate, zero-fallback composition,
 greeter/lock/logout, takeover, and both-display operation remain unverified.
+
+### Gallium viewport orientation (2026-11-18)
+
+The first visible Metal-rendered foot terminal was vertically inverted. The
+RD Metal draw path saved Gallium's viewport but passed clip-space Y directly
+to Metal. Driver commit `825a63d` applies Gallium's scale and translation to
+framebuffer pixels, then maps those pixels to Metal's top-left target. This is
+the general viewport contract, not a KWin-specific correction.
+
+After rebuilding the driver and copying it into a fresh disposable Arch root,
+the same on-screen init/login/Plasma/foot test showed the terminal title and
+text upright. Host-window samples were 0, 0, 7,360, and 8,232 nonblack pixels
+out of 67,080 across the first four frames. The direct-resource bind test and
+driver build passed. This proves the observed orientation correction for that
+path; broader viewport, scissor, multisample, and performance coverage remains
+to be tested. The installed live Arch root was not modified.
