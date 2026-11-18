@@ -2245,7 +2245,32 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     uint64_t relevant = count == 64 ? UINT64_MAX : ((1ULL << count) - 1);
     return (bits & relevant) ? -LX_EINVAL : 0;
   }
-  case 238: return -LX_ENOSYS;                                  // migrate_pages
+  case 238: {                                                   // migrate_pages: one-node no-op
+    // The guest exposes only node 0. With no other source or destination
+    // node, validated self-migration has no pages to move. Do not claim a
+    // cross-process migration or accept a node the guest cannot represent.
+    long pid = (long)(int)a0;
+    unsigned long maxnode = a1;
+    if (maxnode > 32769UL) return -LX_EINVAL; // Linux get_nodes page limit
+    if (!maxnode && (a2 || a3)) return -LX_EINVAL;
+    if (maxnode > 65) return -LX_EOPNOTSUPP; // bounded one-word masks
+    uint64_t old = 0, next = 0;
+    if (maxnode > 1 && a2 &&
+        gmem_guest_export_copyin(NULL, a2, &old, sizeof old) != 0)
+      return -LX_EFAULT;
+    if (maxnode > 1 && a3 &&
+        gmem_guest_export_copyin(NULL, a3, &next, sizeof next) != 0)
+      return -LX_EFAULT;
+    if (maxnode > 1) {
+      unsigned bits = (unsigned)(maxnode - 1);
+      uint64_t relevant = bits == 64 ? UINT64_MAX : (UINT64_C(1) << bits) - 1;
+      if (((old | next) & relevant & ~UINT64_C(1)) != 0)
+        return -LX_EOPNOTSUPP;
+    }
+    if (pid && pid != syscalls_guest_pid())
+      return guest_child_known((int)pid) ? -LX_EOPNOTSUPP : -LX_ESRCH;
+    return 0;
+  }
   case 239: {                                                   // move_pages: query current process
     /* Shimmy presents one NUMA node. Darwin has no equivalent to migrating
      * Linux pages, but a query can report an actual resident guest page on
