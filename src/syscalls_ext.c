@@ -78,6 +78,7 @@ extern void rd_rtnl_dup(int oldfd, int newfd);
 #define LX_ENOENT          2
 #define LX_ESRCH           3
 #define LX_EINTR           4
+#define LX_EIO             5
 #define LX_E2BIG           7
 #define LX_EBADF           9
 #define LX_ECHILD         10
@@ -392,6 +393,18 @@ static long resolve_at_nf(int lx_dirfd, const char* gp, char* out, size_t outsz,
   if (r < 0) return r;
   *hdirfd = AT_FDCWD;
   return 0;
+}
+
+// Snapshot a bounded guest string before handing it to a host pathname/xattr API.
+// A bad guest address must return EFAULT instead of crashing the shim process.
+static long copy_guest_cstr(uint64_t addr, char* out, size_t cap) {
+  if (!addr) return -LX_EFAULT;
+  for (size_t i = 0; i < cap; ++i) {
+    if (gmem_guest_export_copyin(NULL, addr + i, out + i, 1) != 0)
+      return -LX_EFAULT;
+    if (!out[i]) return 0;
+  }
+  return -LX_ENAMETOOLONG;
 }
 
 static int host_at_flags(int lxf) {
@@ -2131,6 +2144,56 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
                       ((int)a3 & LX_AT_SYMLINK_NOFOLLOW) != 0);
     if (e < 0) return e;
     return ok0(fchmodat(hdirfd, host, (mode_t)a2, host_at_flags((int)a3)));
+  }
+  case 464: {                                                   // getxattrat: pathname subset
+    // Linux uapi struct xattr_args is { u64 value; u32 size; u32 flags }.
+    // Only the pathname route is implemented.  In particular, AT_EMPTY_PATH
+    // must not turn a shim-private host descriptor into an xattr capability.
+    struct { uint64_t value; uint32_t size, flags; } args;
+    if (a5 < sizeof args) return -LX_EINVAL;
+    if (a5 > 16384) return -LX_E2BIG;  // copy_struct_from_user page-size ceiling
+    if (!a4 || gmem_guest_export_copyin(NULL, a4, &args, sizeof args) != 0)
+      return -LX_EFAULT;
+    // A larger zero-extended argument structure is permitted by Linux.
+    for (size_t off = sizeof args; off < a5;) {
+      unsigned char extra[256];
+      size_t n = a5 - off < sizeof extra ? a5 - off : sizeof extra;
+      if (gmem_guest_export_copyin(NULL, a4 + off, extra, n) != 0)
+        return -LX_EFAULT;
+      for (size_t i = 0; i < n; ++i) if (extra[i]) return -LX_E2BIG;
+      off += n;
+    }
+    if (args.flags) return -LX_EINVAL;
+    if (a2 & ~(unsigned long)(LX_AT_SYMLINK_NOFOLLOW | LX_AT_EMPTY_PATH))
+      return -LX_EINVAL;
+    if (!a1) return (a2 & LX_AT_EMPTY_PATH) ? -LX_EOPNOTSUPP : -LX_EFAULT;
+    char guest_path[PATH_MAX], guest_name[256];
+    e = copy_guest_cstr(a1, guest_path, sizeof guest_path);
+    if (e < 0) return e;
+    if (!guest_path[0])
+      return (a2 & LX_AT_EMPTY_PATH) ? -LX_EOPNOTSUPP : -LX_ENOENT;
+    // fd/AT_EMPTY_PATH needs guest-fd ownership proof; do not use a host fd.
+    e = copy_guest_cstr(a3, guest_name, sizeof guest_name);
+    if (e < 0) return e;
+    e = resolve_at_nf((int)a0, guest_path, host, sizeof host, &hdirfd,
+                      (a2 & LX_AT_SYMLINK_NOFOLLOW) != 0);
+    if (e < 0) return e;
+    size_t cap = args.size > 65536u ? 65536u : args.size;
+    void* value = cap ? malloc(cap) : NULL;
+    if (cap && !value) return -LX_ENOMEM;
+    ssize_t got = getxattr(host, guest_name, value, cap, 0,
+                           (a2 & LX_AT_SYMLINK_NOFOLLOW) ? XATTR_NOFOLLOW : 0);
+    if (got < 0) {
+      long error = (errno == ERANGE && cap == 65536u) ? -LX_E2BIG : eret();
+      free(value);
+      return error;
+    }
+    if (cap && (size_t)got > cap) { free(value); return -LX_EIO; }
+    if (got && cap && gmem_guest_copyout_checked(args.value, value, (size_t)got) != 0) {
+      free(value); return -LX_EFAULT;
+    }
+    free(value);
+    return got;
   }
 
   default:
