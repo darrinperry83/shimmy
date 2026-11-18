@@ -124,10 +124,29 @@ struct lx_aio_context {
   pid_t host_pid;
   struct lx_aio_event* completions;
   unsigned completion_head, completion_tail, completion_count;
-  unsigned ring_tail;
+  unsigned ring_head, ring_tail;
 };
 static pthread_mutex_t g_lx_aio_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_lx_aio_cv = PTHREAD_COND_INITIALIZER;
 static struct lx_aio_context g_lx_aio_contexts[32];
+
+// A guest may consume the mmap ring without calling io_getevents. Reconcile
+// that head before using the host queue, so a later syscall cannot redeliver
+// those events. This also returns capacity to io_submit direct-ring readers.
+// A missing/unmapped or malformed ring head leaves the host queue authoritative.
+static void lx_aio_sync_ring_head_locked(struct lx_aio_context* ctx) {
+  uint32_t head;
+  unsigned ring_nr = ctx->requested_events + 1;
+  if (gmem_guest_export_copyin(NULL,
+          ctx->handle + offsetof(struct lx_aio_ring_header, head),
+          &head, sizeof head) != 0 || head >= ring_nr)
+    return;
+  unsigned delta = (head + ring_nr - ctx->ring_head) % ring_nr;
+  if (delta > ctx->completion_count) return;
+  ctx->completion_head = (ctx->completion_head + delta) % ctx->requested_events;
+  ctx->completion_count -= delta;
+  ctx->ring_head = head;
+}
 
 static long lx_io_setup(unsigned nr_events, uint64_t ctxp) {
   uint64_t existing;
@@ -209,6 +228,7 @@ static long lx_io_destroy(uint64_t handle) {
   // Linux tears down the context even when userspace has unmapped the ring.
   // The mapping operation's result is not the syscall's completion status.
   (void)gmem_munmap((unsigned long)handle, length);
+  pthread_cond_broadcast(&g_lx_aio_cv);
   pthread_mutex_unlock(&g_lx_aio_mu);
   return 0;
 }
@@ -233,6 +253,7 @@ static long lx_io_submit(uint64_t handle, long nr, uint64_t iocbpp) {
   if (nr > ctx->requested_events) nr = ctx->requested_events;
   long submitted = 0, error = 0;
   for (; submitted < nr; ++submitted) {
+    lx_aio_sync_ring_head_locked(ctx);
     if (ctx->completion_count >= ctx->requested_events) { error = -LX_EAGAIN; break; }
     uint64_t iocb_addr = 0;
     if (!iocbpp ||
@@ -304,8 +325,98 @@ static long lx_io_submit(uint64_t handle, long nr, uint64_t iocbpp) {
         ctx->ring_tail = tail;
     }
   }
+  if (submitted) pthread_cond_broadcast(&g_lx_aio_cv);
   pthread_mutex_unlock(&g_lx_aio_mu);
   return submitted ? submitted : error;
+}
+
+// io_getevents(2), bounded to this process's synchronous regular-file AIO
+// completions. The timeout is relative, as in Linux. We wait only for an
+// already accepted request (or another guest thread's submission); no host
+// operation runs in the background in this stage.
+static long lx_io_getevents(uint64_t handle, long min_nr, long nr,
+                            uint64_t events_addr, uint64_t timeout_addr) {
+  struct { int64_t tv_sec, tv_nsec; } timeout;
+  int have_timeout = timeout_addr != 0;
+  if (have_timeout) {
+    if (gmem_guest_export_copyin(NULL, timeout_addr, &timeout, sizeof timeout) != 0)
+      return -LX_EFAULT;
+    if (timeout.tv_sec < 0 || timeout.tv_nsec < 0 || timeout.tv_nsec >= 1000000000)
+      return -LX_EINVAL;
+  }
+  if (min_nr < 0 || nr < 0 || min_nr > nr) return -LX_EINVAL;
+
+  pthread_mutex_lock(&g_lx_aio_mu);
+  struct lx_aio_context* ctx = NULL;
+  for (unsigned i = 0; i < 32; ++i)
+    if (g_lx_aio_contexts[i].handle == handle &&
+        g_lx_aio_contexts[i].host_pid == getpid()) {
+      ctx = &g_lx_aio_contexts[i];
+      break;
+    }
+  if (!ctx) { pthread_mutex_unlock(&g_lx_aio_mu); return -LX_EINVAL; }
+  if (!nr) { pthread_mutex_unlock(&g_lx_aio_mu); return 0; }
+  if (min_nr > ctx->requested_events) {
+    pthread_mutex_unlock(&g_lx_aio_mu);
+    return -LX_EOPNOTSUPP; // needs incremental draining across submissions
+  }
+  if (nr > ctx->requested_events) nr = ctx->requested_events;
+  lx_aio_sync_ring_head_locked(ctx);
+  struct timespec deadline = {0};
+  if (have_timeout) {
+    if (clock_gettime(CLOCK_REALTIME, &deadline) != 0) {
+      pthread_mutex_unlock(&g_lx_aio_mu);
+      return -LX_EIO;
+    }
+    if (timeout.tv_sec > INT64_MAX - deadline.tv_sec) {
+      deadline.tv_sec = INT64_MAX;
+      deadline.tv_nsec = 999999999;
+    } else {
+      deadline.tv_sec += (time_t)timeout.tv_sec;
+      deadline.tv_nsec += (long)timeout.tv_nsec;
+      if (deadline.tv_nsec >= 1000000000) {
+        if (deadline.tv_sec < INT64_MAX) ++deadline.tv_sec;
+        deadline.tv_nsec -= 1000000000;
+      }
+    }
+  }
+  while (ctx->completion_count < (unsigned)min_nr) {
+    int wait_err = have_timeout
+        ? pthread_cond_timedwait(&g_lx_aio_cv, &g_lx_aio_mu, &deadline)
+        : pthread_cond_wait(&g_lx_aio_cv, &g_lx_aio_mu);
+    if (ctx->handle != handle || ctx->host_pid != getpid()) {
+      pthread_mutex_unlock(&g_lx_aio_mu);
+      return -LX_EINVAL;
+    }
+    lx_aio_sync_ring_head_locked(ctx);
+    if (wait_err == ETIMEDOUT) break;
+    if (wait_err) {
+      pthread_mutex_unlock(&g_lx_aio_mu);
+      return -LX_EINTR;
+    }
+  }
+  unsigned count = ctx->completion_count < (unsigned)nr
+      ? ctx->completion_count : (unsigned)nr;
+  if (!count) { pthread_mutex_unlock(&g_lx_aio_mu); return 0; }
+  struct lx_aio_event* out = malloc((size_t)count * sizeof *out);
+  if (!out) { pthread_mutex_unlock(&g_lx_aio_mu); return -LX_ENOMEM; }
+  for (unsigned i = 0; i < count; ++i)
+    out[i] = ctx->completions[(ctx->completion_head + i) % ctx->requested_events];
+  if (!events_addr || gmem_guest_copyout_checked(events_addr, out,
+                                                (size_t)count * sizeof *out) != 0) {
+    free(out);
+    pthread_mutex_unlock(&g_lx_aio_mu);
+    return -LX_EFAULT;
+  }
+  free(out);
+  ctx->completion_head = (ctx->completion_head + count) % ctx->requested_events;
+  ctx->completion_count -= count;
+  ctx->ring_head = (ctx->ring_head + count) % (ctx->requested_events + 1);
+  uint32_t head = ctx->ring_head;
+  (void)gmem_guest_copyout_checked(
+      handle + offsetof(struct lx_aio_ring_header, head), &head, sizeof head);
+  pthread_mutex_unlock(&g_lx_aio_mu);
+  return count;
 }
 
 #define LX_AT_FDCWD              (-100)
@@ -1085,7 +1196,8 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   case 0: return lx_io_setup((unsigned)a0, a1);                 // io_setup; family gate pending
   case 1: return lx_io_destroy(a0);                            // io_destroy; family gate pending
   case 2: return lx_io_submit(a0, (long)a1, a2);               // io_submit; family gate pending
-  case 3: case 4: return -LX_ENOSYS;                           // aio family pending
+  case 3: return -LX_ENOSYS;                                   // io_cancel pending
+  case 4: return lx_io_getevents(a0, (long)a1, (long)a2, a3, a4);
   case 5: case 6: case 7: {                                    // setxattr / lsetxattr / fsetxattr
     int hopt = 0;                                              // Linux XATTR_CREATE=1 REPLACE=2
     if ((int)a4 & 1) hopt |= XATTR_CREATE;
