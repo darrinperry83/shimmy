@@ -1442,6 +1442,30 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     int hopt = 0;                                              // Linux XATTR_CREATE=1 REPLACE=2
     if ((int)a4 & 1) hopt |= XATTR_CREATE;
     if ((int)a4 & 2) hopt |= XATTR_REPLACE;
+    if (nr == 5) {
+      // The path, name and value all belong to guest memory. Snapshot them
+      // before resolving the path or changing any host xattr.
+      char guest_path[PATH_MAX], name[256]; // Linux XATTR_NAME_MAX + NUL
+      e = copy_guest_cstr(a0, guest_path, sizeof guest_path);
+      if (e < 0) return e;
+      e = copy_guest_cstr(a1, name, sizeof name);
+      if (e < 0) return e;
+      if (a3 > 65536) return -LX_E2BIG; // Linux XATTR_SIZE_MAX
+      size_t size = (size_t)a3;
+      char *value = size ? malloc(size) : NULL;
+      if (size && !value) return -LX_ENOMEM;
+      if (size && gmem_guest_export_copyin(NULL, a2, value, size) != 0) {
+        free(value);
+        return -LX_EFAULT;
+      }
+      e = resolve_path_nf(guest_path, host, sizeof host, 0);
+      if (e < 0) { free(value); return e; }
+      int rc = setxattr(host, name, value, size, 0, hopt);
+      int saved_errno = errno;
+      free(value);
+      errno = saved_errno;
+      return ok0(rc);
+    }
     if (nr == 6) hopt |= XATTR_NOFOLLOW;
     if (nr == 7) return ok0(fsetxattr((int)a0, (const char*)a1, (const void*)a2,
                                       (size_t)a3, 0, hopt));
