@@ -3210,6 +3210,20 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (rounded > ULONG_MAX - a0) return -LX_EINVAL;
     return rounded ? -LX_ENOENT : 0;
   }
+  case 461: {                                                   // lsm_list_modules
+    // No Linux Security Module is modeled in this guest. Linux permits an
+    // empty active-module list: write its byte length (zero), return count
+    // zero, and never touch ids. A null or invalid size pointer still faults.
+    if ((uint32_t)a2) return -LX_EINVAL;
+    uint32_t supplied;
+    if (!a1 || gmem_guest_export_copyin(NULL, a1, &supplied, sizeof supplied) != 0)
+      return -LX_EFAULT;
+    (void)supplied;
+    const uint32_t required = 0;
+    if (gmem_guest_copyout_checked(a1, &required, sizeof required) != 0)
+      return -LX_EFAULT;
+    return 0;
+  }
   case 452: {                                                   // fchmodat2(dfd, path, mode, flags)
     // Linux fchmodat2 accepts only these two AT_* bits. Passing other Linux bits through
     // host_at_flags silently ignores them, turning an invalid request into a chmod.

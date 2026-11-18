@@ -87,6 +87,7 @@ This file records bounded behavior that has been implemented and tested. A dispa
 | 450 | `set_mempolicy_home_node` | `syscall/450-set-mempolicy-home-node` | Squash merged at `827551a`; default-policy ABI subset | Validates alignment, flags, node and length; zero length succeeds and nonempty ranges return `ENOENT` because no per-VMA BIND/PREFERRED_MANY policy exists. No home-node change is claimed. ARM64 probe and private Arch boot gate pass. |
 | 69 | `preadv` | `syscall/69-preadv` | Squash merged at `2f49696`; bounded subset | Checked guest vectors and copyout for regular files up to 1 MiB, including full 64-bit ARM64 offset and short read behavior. Nonregular fds and broader Linux semantics remain unsupported. ARM64 guest probe and private Arch boot gate pass. |
 | 70 | `pwritev` | `syscall/70-pwritev` | Squash merged; bounded subset | Checked guest vectors and staged up to 1 MiB before a positioned write to a regular file; the 64-bit ARM64 offset and unchanged file position pass a focused guest probe and private Arch boot gate. Append, nonregular fds, larger calls and concurrent mutation remain unsupported. |
+| 461 | `lsm_list_modules` | `syscall/461-lsm-list-modules` | Squash merged; empty-list ABI | Reports zero guest LSMs with checked size input/output and leaves the ID buffer untouched. Focused ARM64 probe passes; no LSM enforcement, `lsm_get_self_attr`, or `lsm_set_self_attr` is implemented. |
 
 ## Already merged before this batch
 
