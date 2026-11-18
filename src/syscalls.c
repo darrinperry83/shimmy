@@ -4418,8 +4418,9 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     if ((r = resolve(LX_AT_FDCWD, (const char*)a0, host, sizeof host, gabs, sizeof gabs)) < 0) return r;
     if (statfs(host, &s) < 0) return herrno();
     if (!a1) return -LX_EFAULT;
-    statfs_m2l(&s, (struct linux_statfs*)a1, gabs);
-    return 0;
+    struct linux_statfs out;
+    statfs_m2l(&s, &out, gabs);
+    return gmem_guest_copyout_checked(a1, &out, sizeof out) == 0 ? 0 : -LX_EFAULT;
   }
   case 44: {
     // Virtual pidfds are kqueues on Darwin, where fstatfs(kqueue) fails with EINVAL.
