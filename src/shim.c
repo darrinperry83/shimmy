@@ -1469,17 +1469,32 @@ static long do_clone3(const arm_thread_state64_t* ts) {
   unsigned long args_ptr = (unsigned long)ts->__x[0];
   unsigned long size     = (unsigned long)ts->__x[1];
   if (!args_ptr || size < 64) return -22;             // -EINVAL (CLONE_ARGS_SIZE_VER0)
-  unsigned long flags      = *(unsigned long*)(uintptr_t)(args_ptr + 0);
-  unsigned long pidfd      = *(unsigned long*)(uintptr_t)(args_ptr + 8);
-  unsigned long child_tid  = *(unsigned long*)(uintptr_t)(args_ptr + 16);
-  unsigned long parent_tid = *(unsigned long*)(uintptr_t)(args_ptr + 24);
-  unsigned long stack      = *(unsigned long*)(uintptr_t)(args_ptr + 40);
-  unsigned long stack_size = *(unsigned long*)(uintptr_t)(args_ptr + 48);
-  unsigned long tls        = *(unsigned long*)(uintptr_t)(args_ptr + 56);
+  // The mandatory clone_args version is 64 bytes. Snapshot its guest input
+  // before inspecting fields or creating a child; a bad address must not
+  // fault the host exception thread.
+  uint64_t args[8];
+  if (gmem_guest_export_copyin(NULL, args_ptr, args, sizeof args) != 0)
+    return -14; // -EFAULT
+  unsigned long flags      = args[0];
+  unsigned long pidfd      = args[1];
+  unsigned long child_tid  = args[2];
+  unsigned long parent_tid = args[3];
+  unsigned long stack      = args[5];
+  unsigned long stack_size = args[6];
+  unsigned long tls        = args[7];
   // clone3 names the *lowest* byte and a length. Raw aarch64 clone takes the
   // initial SP at the top of a downward-growing stack instead.
   if (stack && (!stack_size || stack_size > ULONG_MAX - stack)) return -22;
   if (!stack && stack_size) return -22;
+  // do_clone writes these through native pointers. Check clone3's flagged
+  // guest outputs before creating a child so an invalid address cannot leave
+  // a running child behind or fault the host exception thread.
+  if ((flags & LX_CLONE_PIDFD) &&
+      gmem_guest_range_writable(pidfd, sizeof(int)) != 0) return -14;
+  if ((flags & LX_CLONE_PARENT_SETTID) &&
+      gmem_guest_range_writable(parent_tid, sizeof(int)) != 0) return -14;
+  if ((flags & (LX_CLONE_CHILD_SETTID | LX_CLONE_CHILD_CLEARTID)) &&
+      gmem_guest_range_writable(child_tid, sizeof(int)) != 0) return -14;
   arm_thread_state64_t synth = *ts;
   synth.__x[0] = flags;
   synth.__x[1] = stack ? stack + stack_size : 0;
@@ -1489,8 +1504,16 @@ static long do_clone3(const arm_thread_state64_t* ts) {
   long r = do_clone(&synth);
   if (getenv("RDCLONEDBG") && (flags & LX_CLONE_PIDFD) && pidfd) {
     FILE* cf = fopen("/tmp/rd_clone_dbg.txt", "a");
-    if (cf) { fprintf(cf, "clone3_done flags=%#lx pidfd_ptr=%#lx *pidfd=%d r=%ld\n",
-                       flags, pidfd, *(int*)(uintptr_t)pidfd, r); fclose(cf); }
+    if (cf) {
+      int pidfd_value = 0;
+      if (gmem_guest_export_copyin(NULL, pidfd, &pidfd_value, sizeof pidfd_value) == 0)
+        fprintf(cf, "clone3_done flags=%#lx pidfd_ptr=%#lx *pidfd=%d r=%ld\n",
+                flags, pidfd, pidfd_value, r);
+      else
+        fprintf(cf, "clone3_done flags=%#lx pidfd_ptr=%#lx pidfd=unreadable r=%ld\n",
+                flags, pidfd, r);
+      fclose(cf);
+    }
   }
   return r;
 }

@@ -4,6 +4,12 @@ This file records bounded behavior that has been implemented and tested. A dispa
 
 Current safety and refusal status is summarized in [`SAFEGUARDS.md`](SAFEGUARDS.md).
 
+The isolated #435 `clone3` follow-up checks the mandatory guest argument
+snapshot and flagged output ranges before creating a child, and removes a
+debug-only raw pidfd read. Its disposable ARM64 probe, CLI build, and private
+Arch login/D-Bus boot gate pass. See
+[`CLONE3-GUEST-POINTERS.md`](CLONE3-GUEST-POINTERS.md).
+
 The isolated #22 `epoll_pwait` follow-up validates and stages bounded event
 output in the shared wait helper, also covering no-mask #441 waits. Invalid
 guest output fails before consuming readiness. Both disposable ARM64 probes,
