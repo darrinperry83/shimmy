@@ -3139,8 +3139,11 @@ static long do_ioctl(int fd, unsigned long req, unsigned long arg) {
                            if (*(int*)arg) return -95; // EOPNOTSUPP: Darwin has no relock ioctl
                            if (ioctl(fd,TIOCPTYUNLK)<0)return herrno();
                            g_guest_pty[p].unlocked=1; return 0; }
-    case L_FIONREAD:  { int n = 0; if (ioctl(fd, FIONREAD, &n) < 0) return herrno();
-                        *(int*)arg = n; return 0; }
+    case L_FIONREAD:  { int n = 0; if (!arg) return -LX_EFAULT;
+                        if (gmem_guest_range_writable(arg, sizeof n) != 0) return -LX_EFAULT;
+                        if (ioctl(fd, FIONREAD, &n) < 0) return herrno();
+                        return gmem_guest_copyout_checked(arg, &n, sizeof n) == 0
+                                   ? 0 : -LX_EFAULT; }
     case L_FIONBIO:   { int on = *(const int*)arg; return herr(ioctl(fd, FIONBIO, &on)); }
     case L_FIOCLEX:   return herr(fcntl(fd, F_SETFD, FD_CLOEXEC));
     case L_FIONCLEX:  return herr(fcntl(fd, F_SETFD, 0));
