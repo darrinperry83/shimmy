@@ -2527,7 +2527,27 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if ((int)a0 == 0) return 0x1F;                              // CMD_QUERY: GLOBAL..REG_PRIVATE_EXP
     return 0;
   }
-  case 284: return ok0(mlock((void*)a0, (size_t)a1));           // mlock2 (MLOCK_ONFAULT ignored)
+  case 284: {                                                   // mlock2: eager-lock subset
+    // Darwin mlock is eager. It cannot honor Linux MLOCK_ONFAULT's deferred
+    // VMA state, so never report that request as applied. Also keep a guest
+    // pointer from pinning unrelated memory in the macOS host process.
+    const unsigned long page = 16384;                           // guest AT_PAGESZ
+    int flags = (int)a2;
+    if (flags & ~1) return -LX_EINVAL;                           // MLOCK_ONFAULT = 1
+    if (!a1) return 0;
+    if (flags) return -LX_EOPNOTSUPP;
+    unsigned long base = a0 & ~(page - 1);
+    unsigned long offset = a0 - base;
+    if (a1 > ULONG_MAX - offset) return -LX_EINVAL;
+    unsigned long span = a1 + offset;
+    if (span > ULONG_MAX - (page - 1)) return -LX_EINVAL;
+    unsigned long rounded = (span + page - 1) & ~(page - 1);
+    if (base > ULONG_MAX - rounded) return -LX_EINVAL;
+    if (rounded > 1024ul * 1024) return -LX_EOPNOTSUPP;
+    if (base < FOUR_GB || gmem_guest_range_mapped(base, (size_t)rounded) != 0 ||
+        !host_range_mapped(base, (size_t)rounded)) return -LX_ENOMEM;
+    return ok0(mlock((void*)base, (size_t)rounded));
+  }
   case 285: {                                                   // copy_file_range
     long long ioff, ooff, *ip = 0, *op = 0;
     if (a1) { ioff = *(long long*)a1; ip = &ioff; }
