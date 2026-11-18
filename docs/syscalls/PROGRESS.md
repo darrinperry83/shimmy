@@ -192,6 +192,8 @@ The mqueue backend now serializes inherited backing-file operations across fork 
 
 A negative fd test proves why the backend cannot be exposed directly: its ordinary file descriptor reports `POLLIN` while the queue is empty, `POLLOUT` while full, and allows reads of the private header. The ARM64 guest probe confirms syscalls 180–185 still return `ENOSYS`. A kind-aware guest descriptor adapter is required before enabling this family.
 
+An isolated opt-in in-process mqueue adapter passed functional guest tests but was withheld after review: guest-visible descriptor routing did not isolate the backend's private host descriptors from every guest fd operation. The next runtime attempt needs a broker-owned backing store or a comprehensively tested guest fd boundary. The current default mqueue syscalls remain `ENOSYS`.
+
 An isolated, inactive virtual-pipe buffer core now tests non-consuming `tee` behavior across duplicate opens, fork/re-exec, ring wrap and capacity limits. Actual guest pipes still use Darwin descriptors, and this file-backed prototype is not connected to pipe I/O, fd transfer or readiness. Syscall 77 remains `ENOSYS` pending a coherent guest virtual-pipe path and ARM64 guest ABI proof.
 
 A harmless ARM64 negative security probe confirms a guest can invoke native Darwin `getpid` with `svc #0x80` outside `route_syscall()`. A dispatcher-only seccomp filter could therefore be bypassed; #277 filter installation remains disabled. The probe passed against the isolated CLI build. This finding also requires a broader guest isolation review before making security claims about the in-process runtime.
