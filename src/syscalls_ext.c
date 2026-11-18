@@ -2523,9 +2523,13 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   }
   case 282: return -LX_ENOSYS;                                  // userfaultfd
   case 283: {                                                   // membarrier
-    __sync_synchronize();
-    if ((int)a0 == 0) return 0x1F;                              // CMD_QUERY: GLOBAL..REG_PRIVATE_EXP
-    return 0;
+    // A fence on the calling thread does not make the other guest threads
+    // cross a Linux membarrier rendezvous. Advertise no barrier commands
+    // until that cross-thread mechanism exists. QUERY itself is always
+    // supported; callers can choose their normal fallback path.
+    if (a1 != 0) return -LX_EINVAL;                             // flags
+    if ((int)a0 == 0) return 0;                                  // CMD_QUERY
+    return -LX_EINVAL;                                           // unsupported command
   }
   case 284: {                                                   // mlock2: eager-lock subset
     // Darwin mlock is eager. It cannot honor Linux MLOCK_ONFAULT's deferred
