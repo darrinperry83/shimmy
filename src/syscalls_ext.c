@@ -2375,7 +2375,22 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return syscalls_guest_pid();
   }
   case 156: {                                                  // getsid
-    pid_t r = getsid((pid_t)a0); return r < 0 ? eret() : r;
+    long target = (long)(int)a0;
+    long self = syscalls_guest_pid();
+    if (target && target != self)
+      return target > 0 && guest_child_known((int)target) ? -LX_EOPNOTSUPP : -LX_ESRCH;
+    // Query only this shim process. Passing an arbitrary guest PID to Darwin
+    // could inspect an unrelated host process with the same numeric PID.
+    pid_t sid = getsid(0);
+    if (sid < 0) return eret();
+    if (sid == getpid()) return self;
+    // A direct guest child inherits its parent's session. The host parent PID
+    // may be hidden by the virtual PID-1 mapping, so return the guest parent.
+    if (sid == getppid() && syscalls_get_guest_ppid() > 0)
+      return syscalls_get_guest_ppid();
+    // A host session outside the known guest parent/self pair has no proven
+    // guest PID identity. Never leak its host session leader into the guest.
+    return -LX_EOPNOTSUPP;
   }
   case 157: {                                                  // setsid
     pid_t r = setsid(); return r < 0 ? eret() : r;

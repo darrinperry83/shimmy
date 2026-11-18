@@ -17,6 +17,7 @@ void syscalls_set_exe(const char* guest_path);
 // explicitly or every exec'd program silently restarts at "/" — see the note in syscalls.c.
 const char* syscalls_get_cwd(void);
 long syscalls_guest_pid(void);
+long syscalls_get_guest_ppid(void);
 // Private guest UTS nodename.  Shared by shims in one RDSOCKETGROUP; never
 // changes the host hostname.  Unsupported when no private group is configured.
 long syscalls_guest_sethostname(const char *name, size_t length);
