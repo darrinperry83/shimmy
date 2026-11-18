@@ -3933,6 +3933,30 @@ int gmem_guest_range_writable(uint64_t guestAddress,size_t length){
   pthread_once(&g_export_ranges_once,g_export_ranges_init);
   return rdguest_range_writable(&g_export_ranges,(uintptr_t)guestAddress,length)?0:-1;
 }
+size_t gmem_guest_range_snapshot(struct gmem_guest_span* out, size_t cap){
+  pthread_once(&g_export_ranges_once,g_export_ranges_init);
+  pthread_mutex_lock(&g_export_ranges.lock);
+  size_t n = g_export_ranges.count;
+  if(out && cap){
+    size_t take = n < cap ? n : cap;
+    for(size_t i=0;i<take;i++){
+      out[i].lo = g_export_ranges.spans[i].lo;
+      out[i].hi = g_export_ranges.spans[i].hi;
+    }
+  }
+  pthread_mutex_unlock(&g_export_ranges.lock);
+  return n;
+}
+
+// mlockall(MCL_FUTURE): apply mlock to every mapping gmem_mmap creates from now
+// on. A plain atomic int keeps the hot mmap path off a second mutex.
+static int g_mlock_future;
+void gmem_mlock_future_set(int on){
+  __atomic_store_n(&g_mlock_future, on ? 1 : 0, __ATOMIC_RELEASE);
+}
+int gmem_mlock_future(void){
+  return __atomic_load_n(&g_mlock_future, __ATOMIC_ACQUIRE);
+}
 long gmem_mmap(unsigned long addr, size_t len, int prot, int flags, int fd, long off) {
   pthread_once(&g_export_ranges_once,g_export_ranges_init);
   gm_lock();
@@ -3944,6 +3968,12 @@ long gmem_mmap(unsigned long addr, size_t len, int prot, int flags, int fd, long
     rdguest_range_map(&g_export_ranges,(uintptr_t)r,(size_t)PAGE_UP(len),
                       (prot & PROT_WRITE)!=0 && !(prot & PROT_EXEC));
   gm_unlock();
+  // mlockall(MCL_FUTURE): pin the new guest mapping after releasing gm_lock, so
+  // a slow host mlock never serialises unrelated mmap work. Failure is best
+  // effort here (the guest already owns the mapping); Linux would fail the mmap
+  // itself on ENOMEM, which this bounded path does not reproduce.
+  if (r > 0 && len && gmem_mlock_future())
+    mlock((void*)r, (size_t)PAGE_UP(len));
   return r;
 }
 

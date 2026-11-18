@@ -23,7 +23,7 @@ with tempfile.TemporaryDirectory(prefix="munlockall231-", dir=repo / "build") as
     result = subprocess.run([str(repo / "shim_cli"), str(root), "/bin/probe"],
                             capture_output=True, text=True, timeout=20,
                             preexec_fn=no_core, env=os.environ.copy())
-    if result.returncode or "GUEST_MUNLOCKALL_UNSUPPORTED_OK" not in result.stdout:
+    if result.returncode or "GUEST_MUNLOCKALL_OK" not in result.stdout:
         raise SystemExit(f"munlockall guest failed ({result.returncode}):\n"
                          f"{result.stdout}{result.stderr}")
     print(result.stdout.strip())

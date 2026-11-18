@@ -13,7 +13,7 @@ static long sc6(long nr, long a, long b, long c, long d, long e, long f) {
   return x0;
 }
 static __attribute__((noreturn)) void finish(int code) {
-  static const char ok[] = "GUEST_MUNLOCKALL_UNSUPPORTED_OK\n";
+  static const char ok[] = "GUEST_MUNLOCKALL_OK\n";
   if (!code) sc6(64, 1, (long)ok, sizeof ok - 1, 0, 0, 0);
   sc6(93, code, 0, 0, 0, 0, 0);
   for (;;) {}
@@ -23,9 +23,9 @@ void _start(void) {
   long addr = sc6(222, 0, page, 3, 0x22, -1, 0); // private anonymous mmap
   if (addr < 0) finish(1);
   if (sc6(228, addr, page, 0, 0, 0, 0) != 0) finish(2); // mlock
-  if (sc6(231, 0, 0, 0, 0, 0, 0) != -38) finish(3); // ENOSYS, no false unlock
-  if (sc6(231, 0, 0, 0, 0, 0, 0) != -38) finish(4);
-  if (sc6(229, addr, page, 0, 0, 0, 0) != 0) finish(5);
-  if (sc6(215, addr, page, 0, 0, 0, 0) != 0) finish(6);
+  if (sc6(231, 0, 0, 0, 0, 0, 0) != 0) finish(3); // munlockall now succeeds
+  if (sc6(231, 0, 0, 0, 0, 0, 0) != 0) finish(4); // idempotent
+  if (sc6(229, addr, page, 0, 0, 0, 0) != 0) finish(5); // munlock still a no-op
+  if (sc6(215, addr, page, 0, 0, 0, 0) != 0) finish(6); // munmap
   finish(0);
 }

@@ -1,9 +1,33 @@
-# `munlockall` (ARM64 syscall 231): blocked
+# `munlockall` (ARM64 syscall 231): guest-ledger unlock subset
 
-Linux `munlockall` clears locks on every mapping and clears future-lock state. Shimmy previously called Darwin `munlockall()` and ignored its result, reporting success. An isolated host probe on this Mac returned `ENOSYS` from both Darwin `mlockall(MCL_FUTURE)` and `munlockall()`, while individual `mlock` and `munlock` worked. Therefore a guest can lock a page with syscall 228 and the old #231 would falsely report that it had unlocked it.
+`munlockall` previously returned `ENOSYS` because walking only the guest range
+ledger was judged insufficient: `mlock` (#228) could lock a guest-visible mapping
+the ledger did not include, and unconditionally unlocking the whole host process
+would release Shimmy-private mappings.
 
-The handler now returns `ENOSYS` rather than success. This is **not working `munlockall` compatibility**. A guest must use `munlock` on its known ranges or handle the unsupported call. A functional implementation needs a complete guest mapping/lock registry across `gmem_mmap`, SysV `shmat`, DRM and ALSA mappings, and their unmap/detach paths. Walking only the current gmem ledger is insufficient: #228 `mlock` can lock a guest-visible mapping that the ledger does not include. Unconditionally calling `munlock` on the whole host process would also affect shim-private mappings.
+With the guest-ledger enumeration added for `mlockall`, `munlockall` now:
 
-Run `./build.sh cli` and `python3 tests/run-munlockall.py`. The static ARM64 guest maps and locks a page, verifies #231 reports `ENOSYS`, then explicitly unlocks and unmaps that page. The test proves the false-success correction, not a functional unlock-all operation. A private systemd boot gate is needed before integration because a caller may handle this error differently from the former false success.
+- clears the `MCL_FUTURE` policy,
+- snapshots the guest range ledger, and
+- `munlock`s every current guest span.
+
+`munlock` of a never-locked page is a no-op on both Linux and macOS, so walking
+the whole ledger releases exactly what `mlock`/`mlock2`/`mlockall` pinned without
+touching non-ledger (Shimmy-private, DRM, or ALSA) memory. DRM/ALSA mappings are
+outside the ledger and were never lockable through #228, so there is nothing of
+theirs to release.
+
+## Known deviations
+
+- A span unmapped between snapshot and unlock is skipped (Darwin `munlock`
+  returns `ENOMEM` there and the kernel already released the lock).
+- The ledger is the same bounded view as `mlockall`; it does not include SysV
+  SHM (which is refused) or device-backed mappings.
+
+## Validation
+
+`./build.sh cli` and `python3 tests/run-munlockall.py` pass. The probe locks a
+guest mapping, verifies `munlockall` now succeeds (and is idempotent), then
+unmaps. A live systemd/greeter boot gate is not run here.
 
 Primary source: [Linux `mm/mlock.c`, `SYSCALL_DEFINE0(munlockall)`](https://github.com/torvalds/linux/blob/master/mm/mlock.c).

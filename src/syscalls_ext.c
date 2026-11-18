@@ -580,6 +580,29 @@ static int host_range_mapped(unsigned long addr, size_t len) {
   return 1;
 }
 
+// Is any page of [addr, addr+len) executable? Apple Silicon serves every
+// executable mapping as MAP_JIT, and Darwin mlock() refuses MAP_JIT with EPERM,
+// so mlockall(MCL_CURRENT) must skip executable guest spans (text/JIT) rather
+// than fail the whole call. Data, stack and heap are plain and remain lockable.
+static int host_range_executable(unsigned long addr, size_t len) {
+  unsigned long end = addr + len;
+  if (end < addr) return 0;
+  mach_vm_address_t a = (mach_vm_address_t)addr;
+  while (a < (mach_vm_address_t)end) {
+    mach_vm_address_t ra = a;
+    mach_vm_size_t rs = 0;
+    vm_region_basic_info_data_64_t info;
+    mach_msg_type_number_t cnt = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t obj = MACH_PORT_NULL;
+    kern_return_t kr = mach_vm_region(mach_task_self(), &ra, &rs, VM_REGION_BASIC_INFO_64,
+                                      (vm_region_info_t)&info, &cnt, &obj);
+    if (kr != KERN_SUCCESS || ra > a || rs == 0) return 0;
+    if (info.protection & VM_PROT_EXECUTE) return 1;
+    a = ra + rs;
+  }
+  return 0;
+}
+
 // Lock and unlock requests must name whole guest-owned pages. Linux rounds
 // unaligned ranges; the bounded host operation must never touch Shimmy pages.
 static long guest_lock_range(unsigned long addr, unsigned long len,
@@ -3148,12 +3171,69 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (status < 0) return status;
     return ok0(munlock((void*)base, (size_t)rounded));
   }
-  case 230: return ok0(mlockall((int)a0));                      // mlockall (MCL_* match)
-  case 231:                                                    // munlockall
-    // Darwin's munlockall() is ENOSYS, while guest mlock()/mlock2() can
-    // succeed. We cannot safely claim all guest locks were released: the
-    // guest range ledger omits SysV SHM and some device-backed mappings.
-    return -LX_ENOSYS;
+  case 230: {                                                  // mlockall
+    // Linux MCL_CURRENT=1, MCL_FUTURE=2, MCL_ONFAULT=4. Never forward guest
+    // flags to Darwin mlockall(): on this Mac it is ENOSYS, and a host success
+    // would lock Shimmy-private pages that are not part of the guest address
+    // space. Lock only the guest ledger's ranges (MCL_CURRENT) and record the
+    // future-mapping policy (MCL_FUTURE) for gmem_mmap to apply.
+    const unsigned long mcl_known = 1ul | 2ul | 4ul;
+    if (a0 & ~mcl_known) return -LX_EINVAL;
+    if (a0 & 4ul) return -LX_EOPNOTSUPP;          // MCL_ONFAULT: deferred fault-time lock
+    if (a0 & 1ul) {                               // MCL_CURRENT: lock every current mapping
+      size_t n = gmem_guest_range_snapshot(NULL, 0);
+      struct gmem_guest_span* spans = n ? calloc(n, sizeof *spans) : NULL;
+      if (n && !spans) return -LX_ENOMEM;
+      size_t got = gmem_guest_range_snapshot(spans, n);
+      long status = 0;
+      size_t i = 0;
+      for (; i < got; i++) {
+        unsigned long lo = (unsigned long)spans[i].lo;
+        unsigned long len = (unsigned long)(spans[i].hi - spans[i].lo);
+        // Re-validate the snapshot before host mutation: it must still be guest
+        // owned and host mapped, or the range may have been unmapped concurrently.
+        if (lo < FOUR_GB || !host_range_mapped(lo, len)) { status = -LX_ENOMEM; break; }
+        // Executable (MAP_JIT) text cannot be wired on Apple Silicon; skip it
+        // and lock the data/stack/heap that actually carry the guest's secrets.
+        if (host_range_executable(lo, len)) continue;
+        if (mlock((void*)lo, len) != 0) { status = eret(); break; }
+      }
+      if (status < 0) {                           // atomic rollback of MCL_CURRENT
+        for (size_t j = 0; j < i; j++) {          // unlock what was actually pinned
+          if (host_range_executable((unsigned long)spans[j].lo,
+                                    (unsigned long)(spans[j].hi - spans[j].lo))) continue;
+          munlock((void*)spans[j].lo, (size_t)(spans[j].hi - spans[j].lo));
+        }
+        free(spans);
+        return status;
+      }
+      free(spans);
+    }
+    if (a0 & 2ul) gmem_mlock_future_set(1);        // MCL_FUTURE
+    return 0;
+  }
+  case 231: {                                                  // munlockall
+    // Clear the future-lock policy and unlock every current guest mapping.
+    // munlock of a never-locked page is a Linux/macOS no-op, so walking the
+    // whole ledger releases exactly what mlock/mlock2/mlockall pinned without
+    // touching Shimmy-private (non-ledger) memory. DRM/ALSA mappings are not in
+    // the ledger and were never lockable through #228, so they need no unlock.
+    gmem_mlock_future_set(0);
+    size_t n = gmem_guest_range_snapshot(NULL, 0);
+    struct gmem_guest_span* spans = n ? calloc(n, sizeof *spans) : NULL;
+    if (n && !spans) return -LX_ENOMEM;
+    size_t got = gmem_guest_range_snapshot(spans, n);
+    long status = 0;
+    for (size_t i = 0; i < got; i++) {
+      unsigned long lo = (unsigned long)spans[i].lo;
+      unsigned long len = (unsigned long)(spans[i].hi - spans[i].lo);
+      // ENOMEM here means the span was unmapped between snapshot and unlock;
+      // the kernel already released that lock, so treat it as done.
+      if (munlock((void*)lo, len) != 0 && errno != ENOMEM && !status) status = eret();
+    }
+    free(spans);
+    return status;
+  }
   case 232: {
     // mincore() is a POINTER-VALIDITY ORACLE, not just a residency query, and the difference
     // between Linux and macOS here is load-bearing.

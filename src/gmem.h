@@ -43,6 +43,22 @@ int gmem_guest_range_mapped(uint64_t guestAddress,size_t length);
 int gmem_guest_range_writable(uint64_t guestAddress,size_t length);
 void gmem_guest_ranges_fork_child(void);
 
+// One guest address-space span. Used by mlockall/munlockall to enumerate the
+// mappings they must lock or unlock; the ledger is the only complete guest-mm
+// view and lives here.
+struct gmem_guest_span { uintptr_t lo, hi; };
+// Snapshot up to `cap` ascending, non-overlapping spans into `out`. Returns the
+// total number of spans currently recorded; with `out == NULL` or `cap == 0` it
+// just counts. The copy is taken under the ledger lock so it is internally
+// consistent, but mappings may change after it returns (callers re-validate).
+size_t gmem_guest_range_snapshot(struct gmem_guest_span* out, size_t cap);
+
+// mlockall(MCL_FUTURE) policy. When set, every successful gmem_mmap result is
+// mlock'd so future guest mappings stay resident. Inherited across fork like
+// Linux mm->def_flags; see syscalls_ext.c mlockall for the current/munlock side.
+void gmem_mlock_future_set(int on);
+int  gmem_mlock_future(void);
+
 // Bulk-load bracket: batches the per-thread write-protect toggles and coalesces icache
 // invalidation across many gmem_map_code() calls (big win when a DSO has many segments).
 // Reentrant/refcounted. gmem_map_code() outside a bracket behaves exactly as before.
