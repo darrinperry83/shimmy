@@ -218,6 +218,8 @@ An isolated #282 userfaultfd fault/copy/wake experiment passed ARM64 guest and p
 
 `nanosleep` (#101) now checks the guest request, validates Linux timespec fields, and copies a remainder to guest memory only after an interrupted host sleep. Its ARM64 guest probe, CLI build, private Arch login/D-Bus boot, and integration build/probe passed. Guest signal interruption and handler delivery remain unproven.
 
+`rt_sigaction` (#134) now requires the native 8-byte sigset size, stages its 32-byte guest input, and checks old-action output before changing the recorded disposition. Its ARM64 guest probe, CLI build, private Arch login/D-Bus boot, and combined #134/#135 integration probes passed. This does not establish complete guest handler delivery.
+
 The combined integration head also passed a fresh private Arch login/D-Bus boot after the #424 merge; the exact clone and guest were cleaned. The `prlimit64` v2 branch remains withheld because its separate controlled Arch boot reached login without D-Bus settling, while a fresh baseline settled normally. The #425 io_uring and #77 tee opt-in branches remain isolated pending private descriptor and performance reviews.
 ## Batch integration proof
 

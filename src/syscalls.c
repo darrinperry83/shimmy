@@ -5309,16 +5309,21 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   case 134: {
     int sig = (int)a0;
     if (sig < 1 || sig > 64) return -LX_EINVAL;
-    if (a3 && a3 != 8) return -LX_EINVAL;       // sigsetsize must be 8 on aarch64
-    if (a1 && sig == g_pdeathsig &&
-        ((const struct linux_sigaction*)a1)->handler > 1) return -LX_ENOSYS;
+    if (a3 != 8) return -LX_EINVAL; // native aarch64 sigsetsize
+    struct linux_sigaction next;
+    if (a1 && gmem_guest_export_copyin(NULL, a1, &next, sizeof next) != 0)
+      return -LX_EFAULT;
+    if (a1 && sig == g_pdeathsig && next.handler > 1) return -LX_ENOSYS;
     struct linux_sigaction prev = g_sigacts[sig];
+    // Copy out before updating the disposition. Bad oldact memory must not
+    // leave the new disposition installed; stage act first if they alias.
+    if (a2 && gmem_guest_copyout_checked(a2, &prev, sizeof prev) != 0)
+      return -LX_EFAULT;
     if (a1) {
-      g_sigacts[sig] = *(const struct linux_sigaction*)a1;
-      if (g_sigacts[sig].handler == 1)
+      g_sigacts[sig] = next;
+      if (next.handler == 1)
         __atomic_fetch_and(&g_sigpending, ~(1ULL << (sig - 1)), __ATOMIC_ACQ_REL);
     }
-    if (a2) *(struct linux_sigaction*)a2 = prev;
     return 0;
   }
 
