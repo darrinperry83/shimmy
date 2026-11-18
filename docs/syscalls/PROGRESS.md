@@ -44,6 +44,11 @@ This file records bounded behavior that has been implemented and tested. A dispa
 
 The development history already contains bounded implementations of `openat2`, `vmsplice`, `sched_getattr`, `sched_setattr`, `execveat`, and `move_pages`. Their exact scope is in their individual commits and tests; none implies whole-table compatibility.
 
+## Isolated family work, not merged
+
+- Linux native AIO: `io_setup` #0 at `21eb835` and `io_destroy` #1 at `3fea193` pass disposable guest tests in dependent per-syscall worktrees. The chain is intentionally unmerged while `io_submit`, completion retrieval, cancellation, and teardown with in-flight requests remain incomplete.
+- POSIX timers: `timer_create` #107 at `03ff6fe` and `timer_delete` #111 at `450597a` pass disposable guest tests in dependent per-syscall worktrees. The chain is intentionally unmerged while `timer_settime`, `timer_gettime`, and `timer_getoverrun` remain incomplete. Its initial supported notification mode is explicit `SIGEV_NONE` only.
+
 ## Batch integration proof
 
 At the isolated integration head, `./build.sh cli`, `tests/run-inotify-rm-watch.sh`, `python3 tests/run-get-robust-list.py`, and `python3 tests/run-fchmodat2.py --sysroot <installed-Arch-root>` all passed on 2026-11-18. These are focused tests, not a systemd/desktop regression run.
