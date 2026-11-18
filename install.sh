@@ -88,6 +88,8 @@ if [ "$DRY_RUN" = "1" ]; then
   fi
   echo "==> would run: (cd \"$HERE\" && ./build.sh gui && ./build.sh cli)"
   echo "==> would run: curl -sL \"$ARCH_URL\" -o /tmp/$ARCH_TARBALL ; tar -xzf /tmp/$ARCH_TARBALL -C \"$ROOTFS\""
+  echo "==> would run: shim_cli \"$ROOTFS\" /usr/bin/pacman-key --init"
+  echo "==> would run: shim_cli \"$ROOTFS\" /usr/bin/pacman-key --populate archlinuxarm"
   echo "==> would run: shim_cli \"$ROOTFS\" /usr/bin/pacman -Sy --noconfirm"
   if [ "$ROOTFS_PROFILE" = "recovery" ]; then
     echo "==> would run: shim_cli \"$ROOTFS\" /usr/bin/pacman -S --noconfirm $RECOVERY_PKGS"
@@ -133,22 +135,28 @@ for tty in 2 3 4 5 6; do
   fi
 done
 
-# --- 5. make pacman work under the shim --------------------------------------
-echo "==> configuring the guest (DNS, mount table, pacman)"
-# DNS: resolv.conf is a broken symlink in the tarball
+# --- 5. configure the guest the standard Arch way -----------------------------
+echo "==> configuring the guest (DNS, /dev placeholders)"
+# DNS: the tarball's resolv.conf points at a not-yet-running systemd-resolved;
+# give pacman a working resolver, exactly as a chroot bootstrap would.
 rm -f "$ROOTFS/etc/resolv.conf"
 printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > "$ROOTFS/etc/resolv.conf"
-# pacman needs a mount table + no GPG signature check (keyring can't be written)
-rm -f "$ROOTFS/etc/mtab"
-printf '/dev/root / ext4 rw,relatime 0 0\nproc /proc proc rw 0 0\n' > "$ROOTFS/etc/mtab"
-sed -i '' 's/^#*SigLevel.*/SigLevel = Never/' "$ROOTFS/etc/pacman.conf"
 # /dev/shm + /dev/dri placeholders (keymap shm_open + the DRM render node)
 mkdir -p "$ROOTFS/dev/shm" "$ROOTFS/dev/dri"
 
 SHIM_CLI="$HERE/shim_cli"
 run_pacman() { RDUID0=1 "$SHIM_CLI" "$ROOTFS" /usr/bin/pacman "$@" --disable-sandbox; }
 
-# --- 6. sync + install the profile's package set ------------------------------
+# --- 6. initialize + trust the Arch ARM keyring (the stock pacman.conf flow) --
+# The tarball's pacman.conf already defaults to SigLevel = Required
+# DatabaseOptional (Arch ARM's documented policy: signed packages, unsigned
+# databases), and its comment instructs this exact bootstrap. The shim serves
+# /etc/mtab through /proc/self/mounts, so no hand-written mount table is needed.
+echo "==> initializing the pacman keyring"
+RDUID0=1 "$SHIM_CLI" "$ROOTFS" /usr/bin/pacman-key --init
+RDUID0=1 "$SHIM_CLI" "$ROOTFS" /usr/bin/pacman-key --populate archlinuxarm
+
+# --- 7. sync + install the profile's package set ------------------------------
 echo "==> pacman -Sy"
 run_pacman -Sy --noconfirm
 
