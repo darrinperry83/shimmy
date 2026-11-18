@@ -12,7 +12,7 @@
   "header_sha256": "9ec1faddab5c363614b166ee7eed3f7723529e3a32312aad14fc6d0df5204354",
   "method": "inventory.py case-label scan plus manually reviewed source-risk flags; no guest ABI test",
   "schema_version": 1,
-  "source_commit": "9bc2f78ec9665c4adb968f9413e52aa747ba9dc6",
+  "source_commit": "ca2e12ab1db033e37a723eba04f28bf0b2d4b21a",
   "source_dirty_at_scan": false,
   "syscalls": [
     {
