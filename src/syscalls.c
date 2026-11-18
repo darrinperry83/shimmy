@@ -4439,9 +4439,15 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   // ---------- 38 renameat ----------
   case 38: {
     char host2[PATH_MAX], g2[GPATH_MAX];
-    if ((r = resolve_f((int)a0, (const char*)a1, RSV_NOFOLLOW, host, sizeof host, gabs, sizeof gabs)) < 0)
+    char old_path[PATH_MAX], new_path[PATH_MAX];
+    // Snapshot both guest strings before resolving either path or changing
+    // the filesystem. In particular, an invalid destination must not let a
+    // host dereference guest memory or rename the source.
+    if ((r = readlink_guest_path(a1, old_path, sizeof old_path)) < 0) return r;
+    if ((r = readlink_guest_path(a3, new_path, sizeof new_path)) < 0) return r;
+    if ((r = resolve_f((int)a0, old_path, RSV_NOFOLLOW, host, sizeof host, gabs, sizeof gabs)) < 0)
       return r;
-    if ((r = resolve_f((int)a2, (const char*)a3, RSV_NOFOLLOW, host2, sizeof host2, g2, sizeof g2)) < 0)
+    if ((r = resolve_f((int)a2, new_path, RSV_NOFOLLOW, host2, sizeof host2, g2, sizeof g2)) < 0)
       return r;
     if (cgroup_under(gabs) || cgroup_under(g2)) {
       if (cgroup_is_root(gabs)) return -LX_EBUSY;             // never rename the root cgroup
