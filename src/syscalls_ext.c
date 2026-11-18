@@ -440,6 +440,30 @@ static long lx_io_getevents(uint64_t handle, long min_nr, long nr,
   return count;
 }
 
+// Linux ARM64 io_pgetevents adds an optional __aio_sigset argument to
+// io_getevents. The guest currently has no per-thread temporary signal-mask
+// handoff for this blocking path. The no-mask form is exactly io_getevents;
+// reject an actual mask rather than silently ignoring it.
+static long lx_io_pgetevents(uint64_t handle, long min_nr, long nr,
+                             uint64_t events_addr, uint64_t timeout_addr,
+                             uint64_t usig_addr) {
+  struct { uint64_t sigmask, sigsetsize; } usig;
+  if (usig_addr) {
+    if (gmem_guest_export_copyin(NULL, usig_addr, &usig, sizeof usig) != 0)
+      return -LX_EFAULT;
+    if (usig.sigmask) {
+      // ARM64 Linux _NSIG is 64: kernel sigset_t is one 64-bit word.
+      if (usig.sigsetsize != sizeof(uint64_t)) return -LX_EINVAL;
+      uint64_t ignored_mask;
+      if (gmem_guest_export_copyin(NULL, usig.sigmask, &ignored_mask,
+                                   sizeof ignored_mask) != 0)
+        return -LX_EFAULT;
+      return -LX_EOPNOTSUPP;
+    }
+  }
+  return lx_io_getevents(handle, min_nr, nr, events_addr, timeout_addr);
+}
+
 #define LX_AT_FDCWD              (-100)
 #define LX_AT_SYMLINK_NOFOLLOW   0x100
 #define LX_AT_EACCESS            0x200
@@ -2312,7 +2336,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   case 289: case 290: return -LX_ENOSYS;                        // pkey_alloc/free
   case 258:                                                     // statx alias (see report)
   case 291: return do_statx((int)a0, (const char*)a1, (int)a2, (unsigned)a3, (void*)a4);
-  case 292: return -LX_ENOSYS;                                  // io_pgetevents
+  case 292: return lx_io_pgetevents(a0, (long)a1, (long)a2, a3, a4, a5);
   case 294: return -LX_EPERM;                                   // kexec_file_load
 
   // ===== 403..456: the *_time64 tail and post-5.x additions ================
