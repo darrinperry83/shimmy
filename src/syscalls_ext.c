@@ -4212,9 +4212,20 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     // syscall has five scalar arguments and no xattr_args structure.
     if (a2 & ~(unsigned long)(LX_AT_SYMLINK_NOFOLLOW | LX_AT_EMPTY_PATH))
       return -LX_EINVAL;
-    const char* path = (const char*)a1;
+    // Snapshot guest text before the empty-path shortcut or resolver reads it.
+    // NULL remains the AT_EMPTY_PATH fd spelling supported below.
+    char guest_path[PATH_MAX];
+    if (a1) {
+      e = copy_guest_cstr(a1, guest_path, sizeof guest_path);
+      if (e < 0) return e;
+    }
+    const char* path = a1 ? guest_path : NULL;
     size_t size = (size_t)a4;
     if (size > 65536) size = 65536;                              // XATTR_LIST_MAX
+    // Darwin must never receive a raw guest output pointer. Keep the size
+    // query as NULL/0 and publish a complete result only after host success.
+    if (size && !a3) return -LX_EFAULT;
+    char *staged = NULL;
     ssize_t r;
     if ((a2 & LX_AT_EMPTY_PATH) && (!path || !path[0])) {
       int fd = (int)a0;
@@ -4232,18 +4243,30 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
           strncmp(fdpath, root, rootlen) != 0 ||
           (fdpath[rootlen] != '/' && fdpath[rootlen] != 0))
         return -LX_EOPNOTSUPP;
-      r = flistxattr(fd, (char*)a3, size, 0);
+      staged = size ? malloc(size) : NULL;
+      if (size && !staged) return -LX_ENOMEM;
+      r = flistxattr(fd, staged, size, 0);
     } else {
       if (!path) return -LX_EFAULT;
       if (!path[0]) return -LX_ENOENT;
       e = resolve_at_nf((int)a0, path, host, sizeof host, &hdirfd,
                         (a2 & LX_AT_SYMLINK_NOFOLLOW) != 0);
       if (e < 0) return e;
-      r = listxattr(host, (char*)a3, size,
+      staged = size ? malloc(size) : NULL;
+      if (size && !staged) return -LX_ENOMEM;
+      r = listxattr(host, staged, size,
                     (a2 & LX_AT_SYMLINK_NOFOLLOW) ? XATTR_NOFOLLOW : 0);
     }
-    if (r < 0 && errno == ERANGE && size >= 65536) return -LX_E2BIG;
-    return r < 0 ? eret() : r;
+    if (r < 0) {
+      long err = errno == ERANGE && size >= 65536 ? -LX_E2BIG : eret();
+      free(staged);
+      return err;
+    }
+    long result = r;
+    if (size && r > 0 && gmem_guest_copyout_checked(a3, staged, (size_t)r) != 0)
+      result = -LX_EFAULT;
+    free(staged);
+    return result;
   }
   case 466: {                                                   // removexattrat(dfd, path, flags, name)
     if (a2 & ~(unsigned long)(LX_AT_SYMLINK_NOFOLLOW | LX_AT_EMPTY_PATH))

@@ -35,7 +35,8 @@ def main():
         if result.returncode or "GUEST_LISTXATTRAT_OK" not in result.stdout:
             raise RuntimeError(f"guest failed: rc={result.returncode}\n"
                                f"{result.stdout}\n{result.stderr[-2000:]}")
-        print("GUEST_LISTXATTRAT_OK: path, dirfd, fd-empty, size, flags, symlink")
+        print("GUEST_LISTXATTRAT_OK: path, dirfd, fd-empty, size, flags, symlink; "
+              "invalid guest input/output and no partial cross-page copyout")
 
 
 if __name__ == "__main__":

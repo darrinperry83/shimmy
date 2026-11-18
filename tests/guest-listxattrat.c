@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/xattr.h>
 #include <unistd.h>
 
@@ -62,6 +63,32 @@ int main(void) {
     if (lx_listxattrat(AT_FDCWD, "/tmp/listxattrat-link",
                        LX_AT_SYMLINK_NOFOLLOW, list, sizeof(list)) != 0)
         return 14;
+    const char *bad_path = (const char *)(unsigned long)3;
+    char *bad_list = (char *)(unsigned long)3;
+    if (lx_listxattrat(fd, bad_path, LX_AT_EMPTY_PATH, list,
+                       sizeof(list)) != -14) return 15;
+    if (lx_listxattrat(AT_FDCWD, bad_path, 0, list,
+                       sizeof(list)) != -14) return 16;
+    if (lx_listxattrat(fd, "", LX_AT_EMPTY_PATH, bad_list,
+                       sizeof(list)) != -14) return 17;
+    if (lx_listxattrat(AT_FDCWD, "/tmp/listxattrat-file", 0, bad_list,
+                       sizeof(list)) != -14) return 18;
+    if (lx_listxattrat(AT_FDCWD, "/tmp/listxattrat-file", 0, NULL,
+                       sizeof(list)) != -14) return 19;
+    if (lx_listxattrat(fd, "", LX_AT_EMPTY_PATH, NULL, 0) != needed)
+        return 20;
+    char *pages = mmap(NULL, 32768, PROT_READ | PROT_WRITE,
+                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (pages == MAP_FAILED) return 21;
+    memset(pages + 16368, 0x5a, 16);
+    if (mprotect(pages + 16384, 16384, PROT_NONE) != 0) return 22;
+    if (lx_listxattrat(fd, "", LX_AT_EMPTY_PATH, pages + 16368,
+                       256) != -14) return 23;
+    for (int i = 0; i < 16; ++i)
+        if ((unsigned char)pages[16368 + i] != 0x5a) return 24;
+    if (mprotect(pages + 16384, 16384, PROT_READ | PROT_WRITE) != 0)
+        return 25;
+    munmap(pages, 32768);
     puts("GUEST_LISTXATTRAT_OK");
     close(dirfd);
     close(fd);
