@@ -477,6 +477,7 @@ static long lx_io_pgetevents(uint64_t handle, long min_nr, long nr,
 #define LX_AT_EACCESS            0x200
 #define LX_AT_REMOVEDIR          0x200
 #define LX_AT_SYMLINK_FOLLOW     0x400
+#define LX_AT_HANDLE_FID         0x200
 #define LX_AT_NO_AUTOMOUNT       0x800
 #define LX_AT_EMPTY_PATH         0x1000
 
@@ -3053,23 +3054,29 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   }
   case 262: case 263: return -LX_EPERM;                         // fanotify_init/mark
   case 264: {                                                  // name_to_handle_at(dfd, path, handle, mount_id, flags)
-    // Returns an opaque filesystem handle + a mount id for a path. systemd's is_idmapping_supported()
-    // probes this to decide whether a directory sits on an idmapped mount; EOPNOTSUPP made the probe
-    // fail and took down the RUNTIME_DIRECTORY step ("Failed to set up special execution directory in
-    // /run: No such file or directory"). The shim has no real mount topology, so return an empty handle
-    // and the host device number as the mount id; existence is checked so ENOENT still propagates.
+    // The shim has no exportable file handles or matching open_by_handle_at.
+    // An empty handle and host st_dev are not a valid Linux success result.
+    if (!a2 || !a3) return -LX_EFAULT;
+    if (a4 & ~((uint64_t)LX_AT_SYMLINK_FOLLOW | LX_AT_EMPTY_PATH | LX_AT_HANDLE_FID))
+      return -LX_EINVAL;
+    unsigned int capacity;
+    int mount_id_probe;
+    if (gmem_guest_export_copyin(NULL, a2, &capacity, sizeof capacity) != 0 ||
+        gmem_guest_export_copyin(NULL, a3, &mount_id_probe, sizeof mount_id_probe) != 0)
+      return -LX_EFAULT;
+    (void)capacity;
+    (void)mount_id_probe;
+    char guest_path[PATH_MAX];
+    long e = copy_guest_cstr(a1, guest_path, sizeof guest_path);
+    if (e < 0) return e;
+    if (!guest_path[0]) return (a4 & LX_AT_EMPTY_PATH) ? -LX_EOPNOTSUPP : -LX_ENOENT;
     char host[PATH_MAX]; int hdirfd = -100;
-    long e = resolve_at((int)a0, (const char*)a1, host, sizeof host, &hdirfd);
+    e = resolve_at((int)a0, guest_path, host, sizeof host, &hdirfd);
     if (e < 0) return e;
     struct stat st;
-    if (fstatat(hdirfd, host, &st, 0) < 0) return eret();
-    if (a2) {
-      struct { unsigned int handle_bytes; int handle_type; }* fh = (void*)a2;
-      fh->handle_bytes = 0;                                   // empty handle: nothing to store
-      fh->handle_type = 0;
-    }
-    if (a3) *(int*)a3 = (int)st.st_dev;
-    return 0;
+    if (fstatat(hdirfd, host, &st, (a4 & LX_AT_SYMLINK_FOLLOW) ? 0 : AT_SYMLINK_NOFOLLOW) < 0)
+      return eret();
+    return -LX_EOPNOTSUPP;
   }
   case 265: return -LX_EOPNOTSUPP;                            // open_by_handle_at (no stored handles)
   case 266: return -LX_EPERM;                                   // clock_adjtime
