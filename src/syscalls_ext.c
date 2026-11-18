@@ -1131,20 +1131,25 @@ struct lx_stack { void* ss_sp; int ss_flags; /*pad*/ unsigned long ss_size; };
 #define LX_SS_DISABLE 2
 #define LX_MINSIGSTKSZ 5120
 
-static struct lx_stack g_altstack = { 0, LX_SS_DISABLE, 0 };
+static _Thread_local struct lx_stack g_altstack = { 0, LX_SS_DISABLE, 0 };
 
-static long do_sigaltstack(const struct lx_stack* ss, struct lx_stack* oss) {
+static long do_sigaltstack(unsigned long ss_addr, unsigned long oss_addr) {
+  struct lx_stack next;
   struct lx_stack prev = g_altstack;
-  if (ss) {
-    if (ss->ss_flags & ~(LX_SS_DISABLE | LX_SS_ONSTACK)) return -LX_EINVAL;
-    if (ss->ss_flags & LX_SS_DISABLE) {
-      g_altstack.ss_sp = 0; g_altstack.ss_size = 0; g_altstack.ss_flags = LX_SS_DISABLE;
+  if (ss_addr) {
+    if (gmem_guest_export_copyin(NULL, ss_addr, &next, sizeof next) != 0)
+      return -LX_EFAULT;
+    if (next.ss_flags & ~(LX_SS_DISABLE | LX_SS_ONSTACK)) return -LX_EINVAL;
+    if (next.ss_flags & LX_SS_DISABLE) {
+      next.ss_sp = 0; next.ss_size = 0; next.ss_flags = LX_SS_DISABLE;
     } else {
-      if (ss->ss_size < LX_MINSIGSTKSZ) return -LX_ENOMEM;
-      g_altstack.ss_sp = ss->ss_sp; g_altstack.ss_size = ss->ss_size; g_altstack.ss_flags = 0;
+      if (next.ss_size < LX_MINSIGSTKSZ) return -LX_ENOMEM;
+      next.ss_flags = 0;
     }
   }
-  if (oss) *oss = prev;
+  if (oss_addr && gmem_guest_copyout_checked(oss_addr, &prev, sizeof prev) != 0)
+    return -LX_EFAULT;
+  if (ss_addr) g_altstack = next;
   return 0;
 }
 
@@ -2339,7 +2344,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
       return ok0(kill(getpid(), hs));
     return -LX_ESRCH;
   }
-  case 132: return do_sigaltstack((const struct lx_stack*)a0, (struct lx_stack*)a1);
+  case 132: return do_sigaltstack(a0, a1);
   case 133: {                                                  // rt_sigsuspend
     return syscalls_signal_sigsuspend((const unsigned long long*)a0, (size_t)a1);
   }
