@@ -123,7 +123,7 @@ enum {
 #define L_SOCK_CLOEXEC  0x80000
 #define L_O_NONBLOCK    0x0800
 #define L_O_CLOEXEC     0x80000
-#define L_O_DIRECT      0x4000   // pipe2 packet mode — ignored
+#define L_O_DIRECT      0x4000   // Linux pipe2 packet mode; not emulated
 #define L_EFD_SEMAPHORE 0x0001
 #define L_EFD_NONBLOCK  0x0800
 #define L_EFD_CLOEXEC   0x80000
@@ -2422,11 +2422,19 @@ static long sys_eventfd2(unsigned int initval, int flags) {
 static long sys_pipe2(int* ufd, int flags) {
   if (!ufd) return -L_EFAULT;
   if (flags & ~(L_O_NONBLOCK | L_O_CLOEXEC | L_O_DIRECT)) return -L_EINVAL;
+  if (flags & L_O_DIRECT) return -L_EOPNOTSUPP;
+  // This is the effective net.c dispatch, before core syscalls_ext.c. Admit
+  // the guest output before creating either host descriptor.
+  if (gmem_guest_range_writable((uint64_t)(uintptr_t)ufd, 2 * sizeof(int)) != 0)
+    return -L_EFAULT;
   int fds[2];
   if (pipe(fds) < 0) return lerr();
   apply_fd_flags(fds[0], (flags & L_O_NONBLOCK) != 0, (flags & L_O_CLOEXEC) != 0);
   apply_fd_flags(fds[1], (flags & L_O_NONBLOCK) != 0, (flags & L_O_CLOEXEC) != 0);
-  ufd[0] = fds[0]; ufd[1] = fds[1];
+  if (gmem_guest_copyout_checked((uint64_t)(uintptr_t)ufd, fds, sizeof fds) != 0) {
+    close(fds[0]); close(fds[1]);
+    return -L_EFAULT;
+  }
   return 0;
 }
 

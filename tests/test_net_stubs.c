@@ -25,6 +25,10 @@ int gmem_guest_export_copyin(void *unused, uint64_t addr, void *out, size_t n) {
   memcpy(out, (const void *)(uintptr_t)addr, n);
   return 0;
 }
+int gmem_guest_range_writable(uint64_t addr, size_t n) {
+  (void)n;
+  return addr ? 0 : -1;
+}
 int gmem_guest_copyout_checked(uint64_t addr, const void *in, size_t n) {
   if (!addr) return -1;
   memcpy((void *)(uintptr_t)addr, in, n);
