@@ -1046,6 +1046,13 @@ static int drm_present_fb(uint32_t fb_id, uint32_t crtc_id, int kms_fd) {
             crtc_id, fb_id);
     return -ENOENT;
   }
+  /* logind may briefly claim the virtual DRM master while probing the seat,
+   * so master acquisition alone cannot own the cross-process IOSurface inbox.
+   * The process that actually submits a KMS frame is the compositor. It must
+   * register before greeter/Wayland clients export their first buffer. */
+  if (getenv("RDNATIVE_SESSION") && kms_fd >= 0 &&
+      drm_minor_of_fd(kms_fd) == 0)
+    rdgpu_handoff_import_init();
   struct gem_slot* g = gem_find_by_handle(f->handle);
   if (g) {
     uint64_t generation = 0;

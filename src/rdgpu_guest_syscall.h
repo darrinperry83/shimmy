@@ -45,8 +45,17 @@ typedef long (*RDGPUFDExportIssue)(void *context,pid_t attestedGuestPid,
  * the guest slot table then maps the lease back to the original opaque handle
  * so the driver reuses the SAME IOSurface-backed resource. Returns 0 on
  * success (lease_out filled) or a negative errno. */
+typedef struct {
+    uint8_t lease[16];
+    uint64_t generation;
+    uint32_t width, height;
+} RDGPUFDImportResult;
+/* The host callback may mint a broker lease for a foreign IOSurface only when
+ * can_import_new is true. Same-process imports return their existing lease. */
 typedef int (*RDGPUFDImportResolve)(void *context,pid_t attestedGuestPid,
-                                    int fd,uint8_t lease_out[16]);
+                                    int fd,uint32_t expected_width,
+                                    uint32_t expected_height,int can_import_new,
+                                    RDGPUFDImportResult *out);
 typedef int (*RDGPUFDFrameBegin)(void *context,pid_t attestedGuestPid,
                                  const uint8_t lease[16],uint64_t generation);
 typedef int (*RDGPUFDFrameComplete)(void *context,pid_t attestedGuestPid,

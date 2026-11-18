@@ -451,7 +451,9 @@ static long mock_fd_export(void *,pid_t,const uint8_t [16],uint64_t,
                            uint64_t,uint64_t,uint32_t,uint32_t,uint32_t);
 static int mock_frame_begin(void *,pid_t,const uint8_t [16],uint64_t);
 static int mock_frame_complete(void *,pid_t,const uint8_t [16],uint64_t,uint64_t);
-static int mock_fd_import(void *ctx,pid_t actual,int fd,uint8_t lease_out[16]);
+static int mock_fd_import(void *ctx,pid_t actual,int fd,uint32_t expected_width,
+                          uint32_t expected_height,int can_import_new,
+                          RDGPUFDImportResult *out);
 static long mock_stride(void *ctx,pid_t actual,const uint8_t lease[16],
                          uint64_t generation,uint32_t width,uint32_t height){
     (void)ctx;
@@ -615,6 +617,22 @@ static long mock_fd_export(void *ctx,pid_t actual,const uint8_t lease[16],
         }
         m->carrier=table;m->carrierFd=keeper;
         m->device=st.st_dev;m->inode=st.st_ino;
+        /* A Wayland compositor imports a client's dma-buf before it samples
+         * the first completed frame. Give the carrier a real IOSurface right
+         * now; the broker clears an unwritten image to transparent on the GPU
+         * so no uninitialized pixels become visible. Frame readiness remains
+         * pending until the producer's normal completion path below. */
+        IOSurfaceRef initial=rdgpu_local_sample_surface(metal_fixture,lease,
+                                                        generation);
+        int published=initial?rdgpu_handoff_publish(initial,st.st_dev,
+                                                    st.st_ino):-EIO;
+        if(initial)CFRelease(initial);
+        if(published){
+            rdgpu_handoff_revoke(m->device,m->inode);
+            close(m->carrierFd);m->carrierFd=0;
+            rd_carrier_destroy(m->carrier);m->carrier=NULL;
+            m->device=0;m->inode=0;close(fd);return published;
+        }
         /* Export may also follow an already-completed clear. Publish exactly
          * that completed fence; a pre-draw export (fence=0) stays pending. */
         if(fence&&mock_frame_complete(NULL,actual,lease,generation,fence)){
@@ -737,13 +755,19 @@ static int mock_frame_complete(void *ctx,pid_t actual,const uint8_t lease[16],
  * layer can map the lease back to the original opaque handle and the driver
  * reuses the SAME IOSurface-backed resource instead of allocating a fresh one.
  * A socket-broker import has no local carrier table and fails closed (ESTALE). */
-static int mock_fd_import(void *ctx,pid_t actual,int fd,uint8_t lease_out[16]){
+static int mock_fd_import(void *ctx,pid_t actual,int fd,uint32_t expected_width,
+                          uint32_t expected_height,int can_import_new,
+                          RDGPUFDImportResult *out){
     (void)ctx;
-    if(actual!=getpid()||fd<0||!lease_out)return -EPERM;
+    if(actual!=getpid()||fd<0||!out)return -EPERM;
     for(unsigned i=0;i<sizeof images/sizeof images[0];i++){
         struct mock_image *m=&images[i];
         if(m->carrier&&rd_carrier_matches_fd(m->carrier,fd)){
-            memcpy(lease_out,m->lease,16);
+            if(expected_width&&(expected_width!=m->width||
+                                expected_height!=m->height))return -ESTALE;
+            memcpy(out->lease,m->lease,16);
+            out->generation=m->generation;
+            out->width=m->width;out->height=m->height;
             fprintf(stderr,"RDMESA_MOCK_FD_IMPORT_OK fd=%d dev=%d ino=%llu\n",
                     fd,(int)m->device,(unsigned long long)m->inode);
             return 0;
@@ -751,6 +775,55 @@ static int mock_fd_import(void *ctx,pid_t actual,int fd,uint8_t lease_out[16]){
     }
     struct stat incoming={0};
     int stat_ok=fstat(fd,&incoming)==0;
+    if(stat_ok&&metal_fixture&&
+       rdgpu_handoff_is_carrier_fd(fd)){
+        /* resolve_fd only redeems a kernel-audited Mach send-right whose
+         * carrier identity matches this fd in the same Shimmy boot tree. */
+        IOSurfaceRef surface=rdgpu_handoff_resolve_fd(fd);
+        if(surface){
+            uint32_t w=(uint32_t)IOSurfaceGetWidth(surface);
+            uint32_t h=(uint32_t)IOSurfaceGetHeight(surface);
+            for(unsigned i=0;i<sizeof images/sizeof images[0];i++){
+                struct mock_image *prior=&images[i];
+                if(!prior->lease[0]||prior->carrier||
+                   prior->device!=incoming.st_dev||
+                   prior->inode!=incoming.st_ino)continue;
+                IOSurfaceRef old=rdgpu_local_sample_surface(metal_fixture,
+                                      prior->lease,prior->generation);
+                int same=old&&IOSurfaceGetID(old)==IOSurfaceGetID(surface);
+                if(old)CFRelease(old);
+                if(same){
+                    *out=(RDGPUFDImportResult){.generation=prior->generation,
+                        .width=prior->width,.height=prior->height};
+                    memcpy(out->lease,prior->lease,16);
+                    CFRelease(surface);
+                    return 0;
+                }
+            }
+            if(!can_import_new){CFRelease(surface);return -ENOSPC;}
+            struct mock_image *m=NULL;
+            for(unsigned i=0;i<sizeof images/sizeof images[0];i++)
+                if(!images[i].lease[0]){m=&images[i];break;}
+            if(!m){CFRelease(surface);return -ENOSPC;}
+            uint8_t lease[16]={0};uint64_t generation=0;
+            int ok=w&&h&&expected_width==w&&expected_height==h&&
+                   rdgpu_local_import_surface(metal_fixture,surface,
+                                                     lease,&generation);
+            CFRelease(surface);
+            if(ok){
+                memset(m,0,sizeof *m);
+                memcpy(m->lease,lease,16);
+                m->generation=generation;m->width=w;m->height=h;
+                m->device=incoming.st_dev;m->inode=incoming.st_ino;
+                *out=(RDGPUFDImportResult){.generation=generation,.width=w,.height=h};
+                memcpy(out->lease,lease,16);
+                fprintf(stderr,"RDMESA_FOREIGN_FD_IMPORT pid=%d fd=%d dev=%llu ino=%llu size=%ux%u\n",
+                        (int)getpid(),fd,(unsigned long long)incoming.st_dev,
+                        (unsigned long long)incoming.st_ino,w,h);
+                return 0;
+            }
+        }
+    }
     fprintf(stderr,"RDMESA_MOCK_FD_IMPORT_DENY pid=%d fd=%d stat=%d dev=%llu ino=%llu images=%u\n",
             (int)getpid(),fd,stat_ok,(unsigned long long)incoming.st_dev,
             (unsigned long long)incoming.st_ino,image_count);

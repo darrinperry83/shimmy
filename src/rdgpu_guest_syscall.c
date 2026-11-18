@@ -265,21 +265,52 @@ long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
         return fd;
     }
     if(op==RDGPU_GUEST_FD_IMPORT){
-        if(!a1||a2||a3||a4||a5)return -EINVAL;
+        if(!a1||a4||a5||a2>RDGPU_MAX_IMAGE_EDGE||a3>RDGPU_MAX_IMAGE_EDGE||
+           (!!a2 != !!a3))return -EINVAL;
         if(!s->fdImportResolve)return -EPERM;
         pthread_mutex_lock(&s->lock);
-        uint8_t lease[16];
-        int rc=s->fdImportResolve(s->fdImportContext,s->ownerPid,(int)a1,lease);
+        unsigned free_slot=RDGPU_MAX_IMAGES_PER_PEER;
+        for(unsigned i=0;i<RDGPU_MAX_IMAGES_PER_PEER;i++)
+            if(!s->slots[i].handle){free_slot=i;break;}
+        uint64_t new_handle=0;
+        if(free_slot<RDGPU_MAX_IMAGES_PER_PEER)
+            for(unsigned attempt=0;attempt<8&&!new_handle;attempt++){
+                arc4random_buf(&new_handle,sizeof new_handle);
+                new_handle &= INT64_MAX;
+                if(handle_taken(s,new_handle))new_handle=0;
+            }
+        RDGPUFDImportResult imported={0};
+        int rc=s->fdImportResolve(s->fdImportContext,s->ownerPid,(int)a1,
+                                  (uint32_t)a2,(uint32_t)a3,new_handle!=0,
+                                  &imported);
         if(rc<0){pthread_mutex_unlock(&s->lock);return rc;}
         /* Map the resolved broker lease back to the original opaque handle so
          * the driver can reuse the exact IOSurface-backed resource it exported,
          * instead of allocating a fresh one. */
         RDGPUGuestSlot *import_entry=NULL;
         for(unsigned i=0;i<RDGPU_MAX_IMAGES_PER_PEER;i++)
-            if(s->slots[i].handle&&!memcmp(s->slots[i].lease,lease,16)){
+            if(s->slots[i].handle&&
+               !memcmp(s->slots[i].lease,imported.lease,16)){
                 import_entry=&s->slots[i];break;
             }
-        if(!import_entry){pthread_mutex_unlock(&s->lock);return -ESTALE;}
+        if(!import_entry){
+            if(!new_handle||!imported.generation||!imported.width||
+               !imported.height||imported.width>RDGPU_MAX_IMAGE_EDGE||
+               imported.height>RDGPU_MAX_IMAGE_EDGE||
+               (a2&&(a2!=imported.width||a3!=imported.height))){
+                pthread_mutex_unlock(&s->lock);return -ESTALE;
+            }
+            import_entry=&s->slots[free_slot];
+            import_entry->handle=new_handle;
+            import_entry->generation=imported.generation;
+            import_entry->width=imported.width;
+            import_entry->height=imported.height;
+            memcpy(import_entry->lease,imported.lease,16);
+            import_entry->producerComplete=1;
+            import_entry->exported=1; /* foreign client pixels are read-only */
+        }else if(a2&&(a2!=import_entry->width||a3!=import_entry->height)){
+            pthread_mutex_unlock(&s->lock);return -ESTALE;
+        }
         long handle=(long)import_entry->handle;
         pthread_mutex_unlock(&s->lock);
         return handle;

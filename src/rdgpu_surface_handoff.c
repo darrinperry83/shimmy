@@ -348,6 +348,8 @@ static void *rdgpu_handoff_receive_thread(void *arg) {
         if (kr == MACH_RCV_TIMED_OUT) continue;
         if (kr != KERN_SUCCESS) { usleep(1000); continue; }
         if (!handoff_sender_is_our_boot(hdr, sizeof buffer)) {
+            fprintf(stderr, "RDGPU_HANDOFF_REJECT receiver_pid=%d message_id=%d size=%u\n",
+                    (int)getpid(), hdr->msgh_id, hdr->msgh_size);
             mach_msg_destroy(hdr);
             continue;
         }
@@ -380,8 +382,8 @@ static void *rdgpu_handoff_receive_thread(void *arg) {
         }
         pthread_mutex_unlock(&g_lock);
 
-        fprintf(stderr, "RDGPU_HANDOFF_IMPORT dev=%d ino=%llu id=%u port=%u\n",
-                msg->device, (unsigned long long)msg->inode, msg->surface_id, port);
+        fprintf(stderr, "RDGPU_HANDOFF_IMPORT receiver_pid=%d dev=%d ino=%llu id=%u port=%u\n",
+                (int)getpid(), msg->device, (unsigned long long)msg->inode, msg->surface_id, port);
     }
     return NULL;
 }
@@ -420,7 +422,8 @@ static void rdgpu_handoff_import_init_once(void) {
         return;
     }
     pthread_detach(g_import_thread);
-    fprintf(stderr, "RDGPU_HANDOFF_IMPORT_INIT name=%s recv=%u\n", name, g_recv_port);
+    fprintf(stderr, "RDGPU_HANDOFF_IMPORT_INIT pid=%d name=%s recv=%u\n",
+            (int)getpid(), name, g_recv_port);
 }
 
 void rdgpu_handoff_import_init(void) {
@@ -604,14 +607,11 @@ IOSurfaceRef rdgpu_handoff_resolve_fd(int fd) {
     if (port != MACH_PORT_NULL)
         return IOSurfaceLookupFromMachPort(port); /* +1 reference */
 
-    /* An identity-only carrier imported from another process cannot redeem
-     * the legacy unauthenticated Mach channel. Until its audit identity is
-     * verified, a matching sidecar or cached send-right grants no pixels. */
-    if (rdgpu_handoff_is_carrier_fd(fd)) return NULL;
-
-    /* Cross-process: the surface lives in shim_cli. Ensure the importer's
-     * receive channel is up, then wait (bounded) for the receive thread to
-     * record the delivered right. */
+    /* A carrier's path and inode alone grant nothing. The receive thread only
+     * stores a send-right after checking the Mach audit identity against this
+     * boot tree; lookup below must find that authenticated right. */
+    /* Cross-process: ensure the importer's receive channel is up, then wait
+     * (bounded) for the receive thread to record the delivered right. */
     rdgpu_handoff_import_init();
     IOSurfaceRef surface = NULL;
     for (int attempt = 0; attempt < 400 && !surface; attempt++) {

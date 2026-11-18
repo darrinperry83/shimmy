@@ -3702,10 +3702,11 @@ extern IOSurfaceRef rdgpu_macsurface_resolve_window(uint32_t window_id); // rdgp
 
 int wlsrv_start(const char* socket_path) {
   if (getenv("RDNATIVE_PRESENT_FEEDBACK") && rd_feedback_init()) return -1;
-  // The compositor registers the cross-process dma-buf->IOSurface mach-port
-  // receive channel before any client (shim_cli) can publish, so the exporter's
-  // bootstrap_look_up() always finds it. Idempotent (pthread_once).
-  rdgpu_handoff_import_init();
+  // The embedded Wayland server owns the dma-buf inbox only in standalone
+  // mode. During a native systemd boot the real DRM master (KWin/Hyprland)
+  // registers it when claiming the card. Registering here in PID 1 would
+  // deliver greeter/client IOSurface rights to the wrong process.
+  if (!getenv("RDNATIVE_SESSION")) rdgpu_handoff_import_init();
   snprintf(g_path, sizeof g_path, "%s", socket_path);
   unlink(g_path);
   { const char* st = getenv("WLSRV_SELFTEST");
