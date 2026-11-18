@@ -50,6 +50,7 @@ void fx_note(const char* fmt, ...);
 #include <sys/msg.h>
 #include <sys/uio.h>
 #include <sys/wait.h>
+#include <sys/event.h>
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
 #include <sys/select.h>
@@ -2051,7 +2052,34 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     }
     return 0;
   }
-  case 438: return -LX_ENOSYS;                                  // pidfd_getfd
+  case 438: {                                                   // pidfd_getfd: self regular-file subset
+    // Linux always creates a CLOEXEC copy of the target's open file description.
+    // A guest fd is a host fd, but only a regular file beneath the guest root
+    // is safe to duplicate here: synthetic device/socket fds need their own
+    // per-fd registry handoff, and another process has a different fd table.
+    if ((unsigned int)a2) return -LX_EINVAL;
+    int pfd = (int)a0, target = (int)a1;
+    if (pfd < 0 || fcntl(pfd, F_GETFD) < 0) return -LX_EBADF;
+    pid_t pid = pidfd_shim_pid(pfd);
+    if (pid <= 0) return -LX_EBADF;
+    if (pid != getpid()) return -LX_EOPNOTSUPP;
+    // The ordinary Shimmy pidfd is a kqueue. A socket-backed pidfd can be
+    // authenticated, but its descriptor transfer needs separate coverage.
+    if (kevent(pfd, NULL, 0, NULL, 0, NULL) < 0) return -LX_EOPNOTSUPP;
+    if (target < 0 || shim_fd_reserved(target)) return -LX_EBADF;
+    struct stat st;
+    if (fstat(target, &st) < 0) return -LX_EBADF;
+    if (!S_ISREG(st.st_mode)) return -LX_EOPNOTSUPP;
+    char path[PATH_MAX];
+    const char* root = syscalls_get_root();
+    size_t rootlen = root ? strlen(root) : 0;
+    if (!rootlen || fcntl(target, F_GETPATH, path) < 0 ||
+        strncmp(path, root, rootlen) != 0 ||
+        (path[rootlen] != '/' && path[rootlen] != 0))
+      return -LX_EOPNOTSUPP;
+    int copy = fcntl(target, F_DUPFD_CLOEXEC, 0);
+    return copy < 0 ? eret() : copy;
+  }
   case 439: {                                                   // faccessat2(dfd, path, mode, flags)
     // AT_EMPTY_PATH + "" means "check the file the fd refers to". macOS faccessat() has no
     // AT_EMPTY_PATH, so resolve the fd's own path (F_GETPATH) and check that. systemd's
