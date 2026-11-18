@@ -1723,15 +1723,23 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
                ? 0 : -LX_EFAULT;
   }
   case 124: sched_yield(); return 0;                           // sched_yield
-  case 125: case 126: {                                        // sched_get_priority_max/min
-    int hp;                                                    // Linux policy -> macOS policy
+  case 125: {                                                  // sched_get_priority_max
+    // Linux's priority ABI is fixed: Darwin's RT ranges are different.
     switch ((int)a0) {
-      case 0: hp = SCHED_OTHER; break;                         // SCHED_NORMAL
+      case 1: case 2: return 99;                               // FIFO, RR
+      case 0: case 3: case 5: case 6: case 7: return 0;       // OTHER, BATCH, IDLE, DEADLINE, EXT
+      default: return -LX_EINVAL;
+    }
+  }
+  case 126: {                                                  // sched_get_priority_min (separate task)
+    int hp;
+    switch ((int)a0) {
+      case 0: hp = SCHED_OTHER; break;
       case 1: hp = SCHED_FIFO;  break;
       case 2: hp = SCHED_RR;    break;
       default: return -LX_EINVAL;
     }
-    int r = (nr == 125) ? sched_get_priority_max(hp) : sched_get_priority_min(hp);
+    int r = sched_get_priority_min(hp);
     return r < 0 ? eret() : r;
   }
   case 127:                                                    // sched_rr_get_interval
