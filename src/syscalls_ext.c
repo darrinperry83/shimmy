@@ -3876,6 +3876,11 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return ok0(removexattr(host, guest_name,
                            (a2 & LX_AT_SYMLINK_NOFOLLOW) ? XATTR_NOFOLLOW : 0));
   }
+  case 471:                                                     // rseq_slice_yield
+    // rseq(293) never registers a guest thread here, so Shimmy cannot grant
+    // an rseq scheduler slice. Linux returns 0 when no slice was granted;
+    // that is the only truthful result for this no-argument syscall.
+    return 0;
 
   default:
     return -LX_ENOSYS;                                          // genuinely not implemented
