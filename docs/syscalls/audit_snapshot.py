@@ -2,7 +2,8 @@
 """Refresh a static ARM64 dispatch/risk snapshot; never assert ABI conformance.
 
 Usage: python3 docs/syscalls/audit_snapshot.py /path/to/asm-generic/unistd.h
-The header is input only. This script does not build or run a guest.
+The adjacent asm/unistd_64.h is the authoritative native AArch64 table;
+the generic header identifies compat-only entries. No guest is run.
 """
 import hashlib
 import json
@@ -10,13 +11,18 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from native_header import numbered_native_entries
 
 repo = Path(__file__).resolve().parents[2]
 header = Path(sys.argv[1]).resolve(strict=True)
+native_header = header.parent.parent / "asm/unistd_64.h"
+if header.parent.name != "asm-generic" or not native_header.is_file():
+    raise SystemExit("expected asm-generic/unistd.h beside asm/unistd_64.h")
+_, compat_only = numbered_native_entries(header.read_text())
 with tempfile.TemporaryDirectory(prefix="shimmy-syscall-audit-") as tmp:
     raw = Path(tmp) / "dispatch.json"
     subprocess.run([sys.executable, str(repo / "docs/syscalls/inventory.py"),
-                    str(repo), str(header), str(raw)], check=True,
+                    str(repo), str(native_header), str(raw)], check=True,
                    stdout=subprocess.DEVNULL)
     ledger = json.loads(raw.read_text())
 
@@ -76,12 +82,17 @@ snapshot = {
     "source_commit": ledger["source_commit"],
     "source_dirty_at_scan": bool(subprocess.check_output(
         ["git", "-C", str(repo), "status", "--porcelain", "--", "src"], text=True).strip()),
-    "header_sha256": hashlib.sha256(header.read_bytes()).hexdigest(),
-    "header_basename": str(header).split("/usr/include/", 1)[-1],
-    "method": "inventory.py case-label scan plus manually reviewed source-risk flags; no guest ABI test",
+    "header_sha256": hashlib.sha256(native_header.read_bytes()).hexdigest(),
+    "header_basename": str(native_header).split("/usr/include/", 1)[-1],
+    "generic_header_sha256": hashlib.sha256(header.read_bytes()).hexdigest(),
+    "generic_header_basename": str(header).split("/usr/include/", 1)[-1],
+    "method": "installed native asm/unistd_64.h table, generic-header compat exclusion, inventory.py case-label scan, and manually reviewed source-risk flags; no guest ABI test",
+    "excluded_compat_entries": [{"number": n, "name": name}
+                                for n, name in sorted(compat_only.items())],
     "warning": "A dispatch case, test filename, or documented subset is not full Linux compatibility.",
     "counts": {
         "header_entries": len(rows),
+        "excluded_compat_entries": len(compat_only),
         "case_labels": sum(row["dispatch"] == "case_label" for row in rows),
         "no_case_label": sum(row["dispatch"] == "none" for row in rows),
         "duplicate_case_numbers": sum(row["duplicate_cases"] for row in rows),

@@ -6,13 +6,11 @@ import sys
 import hashlib
 import json
 import subprocess
+from native_header import numbered_native_entries
 
 repo = pathlib.Path(sys.argv[1]).resolve()
 header = pathlib.Path(sys.argv[2]).resolve()
-official = {}
-for name, num in re.findall(r"^#define __NR_(\w+)\s+(\d+)\s*$", header.read_text(), re.M):
-    if name != "syscalls":
-        official.setdefault(int(num), name)
+official, compat_only = numbered_native_entries(header.read_text())
 
 def strip(text):
     # Retain character offsets for later extraction.
@@ -73,6 +71,7 @@ for filename, function, tier in [
 
 all_nrs = set(official)
 print(f"Header unique numbered entries: {len(all_nrs)}; highest: {max(all_nrs)}")
+print(f"Excluded compat-only numbered entries: {len(compat_only)}")
 print(f"Dispatched by source case labels: {len(set(dispatched) & all_nrs)}")
 print(f"No dispatch case: {len(all_nrs - set(dispatched))}")
 print("No dispatch case list:")
@@ -173,8 +172,12 @@ if len(sys.argv) > 3:
         "source_dirty_at_scan": dirty,
         "header": sys.argv[2],
         "header_sha256": hashlib.sha256(header.read_bytes()).hexdigest(),
+        "excluded_compat_entries": [{"number": nr, "name": name}
+                                    for nr, name in sorted(compat_only.items())],
         "method": "static case-label scan; no syscall or integration test was run",
-        "counts": {"numbered_header_entries": len(entries), "has_dispatch_case": len(dispatched),
+        "counts": {"numbered_header_entries": len(entries),
+                   "excluded_compat_entries": len(compat_only),
+                   "has_dispatch_case": len(dispatched),
                    "no_dispatch_case": len(entries) - len(dispatched), **counts},
         "syscalls": entries,
     }
