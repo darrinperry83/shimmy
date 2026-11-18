@@ -36,6 +36,9 @@ int iu_nop_dup(int fd, int cloexec);
 int iu_nop_close(int fd);
 /* Enforces the three Linux mmap offsets/lengths and shared, non-exec access. */
 void *iu_nop_mmap(int fd, uint64_t off, size_t len, int prot, int flags);
+/* Returns a CLOEXEC duplicate of private backing fd after the same checks.
+ * A future guest mmap dispatcher can pass it to gmem_mmap, then close it. */
+int iu_nop_mmap_backing_fd(int fd, uint64_t off, size_t len, int prot, int flags);
 /* CQ readiness for a future poll/epoll interceptor; no host fd poll claim. */
 short iu_nop_poll_revents(int fd, short requested);
 void iu_nop_forget(int fd);

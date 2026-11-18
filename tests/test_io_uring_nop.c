@@ -28,6 +28,11 @@ int main(void) {
   assert(errno == EINVAL);
   assert(iu_nop_mmap(fd, IU_OFF_SQ_RING, 16, PROT_READ | PROT_WRITE, MAP_SHARED) == MAP_FAILED);
   assert(errno == EINVAL);
+  assert(iu_nop_mmap_backing_fd(fd, 4096, 4096, PROT_READ | PROT_WRITE, MAP_SHARED) == -EINVAL);
+  int backing = iu_nop_mmap_backing_fd(fd, IU_OFF_SQ_RING, 4096,
+                                       PROT_READ | PROT_WRITE, MAP_SHARED);
+  assert(backing >= 0 && (fcntl(backing, F_GETFD) & FD_CLOEXEC));
+  close(backing);
   void *sq = iu_nop_mmap(fd, IU_OFF_SQ_RING, 4096, PROT_READ | PROT_WRITE, MAP_SHARED);
   void *cq = iu_nop_mmap(fd, IU_OFF_CQ_RING, 4096, PROT_READ | PROT_WRITE, MAP_SHARED);
   void *sqes = iu_nop_mmap(fd, IU_OFF_SQES, 4096, PROT_READ | PROT_WRITE, MAP_SHARED);
@@ -39,6 +44,8 @@ int main(void) {
   assert(supported[0] == 1 && supported[1] == 0);
   assert(iu_nop_enter(fd, 0, 0, 0) == 0);
   assert(iu_nop_poll_revents(fd, POLLIN) == 0);
+  struct pollfd ready = { .fd=fd, .events=POLLIN };
+  assert(poll(&ready, 1, 0) == 0);
   for (uint32_t n = 0; n < 12; n++) {
     uint32_t tail = *at32(sq, p.sq_off.tail);
     uint32_t idx = tail & 3;
@@ -54,6 +61,7 @@ int main(void) {
     uint32_t ctail = *at32(cq, p.cq_off.tail);
     assert(ctail == head + 1);
     assert(iu_nop_poll_revents(fd, POLLIN) == POLLIN);
+    assert(poll(&ready, 1, 0) == 1 && (ready.revents & POLLIN));
     unsigned char *cqe = (unsigned char *)cq + p.cq_off.cqes + (head & 7) * IU_CQE_SIZE;
     uint64_t got_data; int32_t res; uint32_t flags;
     memcpy(&got_data, cqe, sizeof got_data);
@@ -62,6 +70,7 @@ int main(void) {
     assert(got_data == data && res == 0 && flags == 0);
     *at32(cq, p.cq_off.head) = head + 1;
     assert(iu_nop_poll_revents(fd, POLLIN) == 0);
+    assert(poll(&ready, 1, 0) == 0);
   }
   assert(iu_nop_enter(fd, 0, 1, 1) == -EAGAIN);
   assert(iu_nop_enter(fd, 0, 0, 2) == -EOPNOTSUPP);
