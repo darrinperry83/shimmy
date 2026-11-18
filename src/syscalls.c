@@ -5114,18 +5114,21 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   case 122: {
     long target = (long)(int)a0;
     if (target != 0 && target != guest_tid() &&
-        !(target == (long)getpid() && guest_tid() == 1))
+        !(target == syscalls_guest_pid() && guest_tid() == 1))
       return guest_tid_known((int)target) ? -95 : -LX_ESRCH;
     // Darwin does not offer Linux's arbitrary CPU bitmask pinning. Accept the
     // unrestricted mask (the host scheduler already uses all online CPUs),
     // but never report success for a restriction we did not apply.
     size_t sz = (size_t)a1;
-    const unsigned char* mask = (const unsigned char*)a2;
-    if (!mask) return -LX_EFAULT;
-    if (sz < 8 || sz > 128) return -LX_EINVAL;
+    unsigned char mask[128];
+    if (!a2) return -LX_EFAULT;
+    if (sz < 8) return -LX_EINVAL;
+    if (sz > sizeof mask) return -95; // bounded cpumask_t emulation
     long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
     if (ncpu < 1) ncpu = 1;
+    if (ncpu > 32) ncpu = 32; // match the guest's /sys and status CPU topology
     if ((size_t)((ncpu + 7) / 8) > sz) return -LX_EINVAL;
+    if (gmem_guest_export_copyin(NULL, a2, mask, sz) != 0) return -LX_EFAULT;
     for (long i = 0; i < ncpu && i < 1024; ++i)
       if (!(mask[i / 8] & (1u << (i % 8)))) return -95; // EOPNOTSUPP
     return 0;
