@@ -16,6 +16,9 @@ probe covering an ordinary file, `AT_EMPTY_PATH` with empty and null paths,
 null and non-null invalid output addresses, synthetic `/proc/self/mounts`,
 and a virtual tty by both pathname and descriptor. It checks mode, size,
 identity and a canary beyond the Linux stat struct. The CLI build passes.
+A private Arch clone reached a fresh login prompt with D-Bus broker and
+launcher settled both in isolation and after the squash merge; the exact
+test guests and disposable clones were cleaned.
 
 This is an output-memory and synthetic-identity correction. It does not
 establish complete pathname input validation, all flag combinations, or
