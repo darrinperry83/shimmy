@@ -2452,6 +2452,10 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   case 146: return g_uid0 ? guest_cred_set_uid((int)a0, (int)a0, (int)a0) : ok0(setuid((uid_t)a0));
   case 147: {                                                  // setresuid (no macOS equivalent)
     if (g_uid0) return guest_cred_set_uid((int)a0, (int)a1, (int)a2);
+    // Darwin has no setresuid operation. Never report that a requested saved
+    // UID was installed when setreuid cannot express that third argument.
+    // Refuse before changing either of the other host credentials.
+    if ((int)a2 != -1) return -LX_EOPNOTSUPP;
     uid_t r = (uid_t)a0, ef = (uid_t)a1;
     if ((int)a0 == -1 && (int)a1 == -1) return 0;
     if (setreuid((int)a0 == -1 ? (uid_t)-1 : r, (int)a1 == -1 ? (uid_t)-1 : ef) != 0) return eret();
