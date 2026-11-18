@@ -274,10 +274,26 @@ static long fixture_draw_submit(void *context,const RDGPUDrawBatchRequest *heade
                 h.scissor_width,h.scissor_height);
     }
     struct fixture_draw_resolve_context resolve={.target_handle=header->target_handle};
-    int result=rdgpu_draw_execute(packet,bytes,fixture_resolve,&resolve,
+    void *depth_texture=NULL;
+    if(bytes>=sizeof(struct rdmetal_draw_header_v5)){
+        struct rdmetal_draw_header_v5 depth_header;
+        memcpy(&depth_header,packet,sizeof depth_header);
+        if(depth_header.base.base.base.base.version==RDMETAL_DRAW_VERSION_V5){
+            for(unsigned i=0;i<RDGPU_MAX_IMAGES_PER_PEER;i++){
+                RDGPUGuestSlot *slot=&state.slots[i];
+                if(slot->handle==depth_header.depth_handle&&slot->isDepth){
+                    depth_texture=rdgpu_local_draw_depth(metal_fixture,
+                                                         slot->lease,slot->generation);
+                    break;
+                }
+            }
+            if(!depth_texture)return -EPERM;
+        }
+    }
+    int result=rdgpu_draw_execute_with_depth(packet,bytes,fixture_resolve,&resolve,
                                   texture_bridge?fixture_texture_resolve:NULL,
                                   texture_bridge?fixture_texture_complete:NULL,
-                                  NULL);
+                                  NULL,depth_texture);
     if(result==RDGPU_DRAW_OK&&atomic_load(&gate_mode)==1&&
        !rdgpu_local_draw_complete(metal_fixture,m->lease,m->generation))
         result=RDGPU_DRAW_DENIED;

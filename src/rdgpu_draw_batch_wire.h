@@ -3,7 +3,7 @@
 #include <stdint.h>
 #define RDGPU_DRAW_BATCH_MAGIC 0x48435442u
 #define RDGPU_DRAW_BATCH_VERSION 1u
-#define RDGPU_DRAW_BATCH_MAX_BYTES (2u*16384u*4u+262144u+262144u+112u+64u)
+#define RDGPU_DRAW_BATCH_MAX_BYTES (2u*16384u*4u+262144u+262144u+152u+64u)
 typedef struct {
     uint32_t magic;
     uint16_t version, flags;

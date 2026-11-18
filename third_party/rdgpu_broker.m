@@ -130,6 +130,15 @@ IOSurfaceRef rdgpu_local_draw_surface(RDGPUSession *s,
     pthread_mutex_unlock(&s->lock);
     return surface;
 }
+void *rdgpu_local_draw_depth(RDGPUSession *s,const uint8_t lease[16],
+                             uint64_t generation){
+    if(!s||getpid()!=s->actualPeer)return NULL;
+    pthread_mutex_lock(&s->lock);
+    DepthSlot *slot=find_depth(s,lease,generation);
+    void *texture=slot&&!slot->fence?rd_metal_depth_texture(slot->depth):NULL;
+    pthread_mutex_unlock(&s->lock);
+    return texture;
+}
 IOSurfaceRef rdgpu_local_sample_surface(RDGPUSession *s,
                                         const uint8_t lease[16],uint64_t generation){
     if(!s||getpid()!=s->actualPeer)return NULL;

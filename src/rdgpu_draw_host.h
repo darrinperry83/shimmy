@@ -36,6 +36,11 @@ int rdgpu_draw_execute(const void *packet,size_t bytes,
                        RDGPUDrawTextureResolve tex_resolve,
                        RDGPUDrawTextureComplete tex_complete,
                        void *tex_context);
+int rdgpu_draw_execute_with_depth(const void *packet,size_t bytes,
+                       RDGPUDrawResolve resolve,void *context,
+                       RDGPUDrawTextureResolve tex_resolve,
+                       RDGPUDrawTextureComplete tex_complete,
+                       void *tex_context,void *depth_texture);
 
 #ifdef __cplusplus
 }

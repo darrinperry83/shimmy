@@ -10,6 +10,7 @@
 #define RDMETAL_DRAW_VERSION_TEXTURE 2u
 #define RDMETAL_DRAW_VERSION_V3 3u
 #define RDMETAL_DRAW_VERSION_V4 4u
+#define RDMETAL_DRAW_VERSION_V5 5u
 #define RDMETAL_DRAW_MAX_SHADER_WORDS 16384u
 #define RDMETAL_DRAW_MAX_VERTEX_BYTES 262144u
 #define RDMETAL_DRAW_MAX_INDEX_BYTES 262144u
@@ -63,6 +64,14 @@ struct rdmetal_draw_header_v4 {
    uint32_t scissor_x, scissor_y, scissor_width, scissor_height;
 };
 _Static_assert(sizeof(struct rdmetal_draw_header_v4)==128,"draw v4 header ABI");
+struct rdmetal_draw_header_v5 {
+   struct rdmetal_draw_header_v4 base;
+   uint64_t depth_handle; /* guest-local opaque lease; host revalidates it */
+   uint32_t depth_flags;  /* bit 0 depth test, bit 1 depth write */
+   uint32_t depth_compare; /* PIPE_FUNC_* 0..7 */
+   uint64_t reserved;
+};
+_Static_assert(sizeof(struct rdmetal_draw_header_v5)==152,"draw v5 header ABI");
 #if defined(__BYTE_ORDER__) && __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
 #error "rdmetal draw wire currently requires little-endian producer"
 #endif

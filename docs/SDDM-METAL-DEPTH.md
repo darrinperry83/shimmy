@@ -66,3 +66,14 @@ operation and records the depth resource type. The host GPU test covers a
 export and release; the guest test covers creation and a checked clear through
 that lease. This still does not supply a depth attachment to a Metal draw or
 make Mesa create depth resources via the broker.
+
+On-screen follow-up (disposable Arch root, 2026-11-19): an ARM Mesa build with
+independent depth resources and a V5 depth draw packet compiled, but SDDM was
+still black. The window self-check and broker reported repeated Metal presents
+with zero source pixels. Once trace variables were carried to the re-exec'd
+greeter, the first driver failure was specific: Qt submitted a three-attribute
+vertex layout, while `rdmetal_create_vertex_elements` accepted at most two.
+The first `rdmetal_draw_vbo` had `ve=NULL` and marked the context failed;
+subsequent draws were rejected. The trace showed position R32G32_FLOAT and
+color R8G8B8A8_UNORM in the first two attributes. This is a separate blocker
+after depth allocation; do not report the depth work as a visible greeter fix.

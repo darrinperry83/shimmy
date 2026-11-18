@@ -31,6 +31,8 @@ bool rdgpu_local_image_geometry(RDGPUSession *session,
 /* Synchronous local draw only; draw_execute releases the retained surface. */
 IOSurfaceRef rdgpu_local_draw_surface(RDGPUSession *session,
                                       const uint8_t lease[16],uint64_t generation);
+void *rdgpu_local_draw_depth(RDGPUSession *session,
+                            const uint8_t lease[16],uint64_t generation);
 IOSurfaceRef rdgpu_local_sample_surface(RDGPUSession *session,
                                         const uint8_t lease[16],uint64_t generation);
 bool rdgpu_local_draw_complete(RDGPUSession *session,

@@ -71,7 +71,8 @@ bool checked_header(const rdmetal_draw_header &h,size_t bytes,size_t prefix){
        (h.version!=RDMETAL_DRAW_VERSION&&
         h.version!=RDMETAL_DRAW_VERSION_TEXTURE&&
         h.version!=RDMETAL_DRAW_VERSION_V3&&
-        h.version!=RDMETAL_DRAW_VERSION_V4)||
+        h.version!=RDMETAL_DRAW_VERSION_V4&&
+        h.version!=RDMETAL_DRAW_VERSION_V5)||
        h.flags||!h.target_handle||h.total_bytes!=bytes||
        !h.target_width||!h.target_height||
        h.target_width>4096||h.target_height>4096||
@@ -89,31 +90,43 @@ bool checked_header(const rdmetal_draw_header &h,size_t bytes,size_t prefix){
     if(h.version==RDMETAL_DRAW_VERSION_TEXTURE&&prefix!=sizeof(rdmetal_draw_header_v2))return false;
     if(h.version==RDMETAL_DRAW_VERSION_V3&&prefix!=sizeof(rdmetal_draw_header_v3))return false;
     if(h.version==RDMETAL_DRAW_VERSION_V4&&prefix!=sizeof(rdmetal_draw_header_v4))return false;
+    if(h.version==RDMETAL_DRAW_VERSION_V5&&prefix!=sizeof(rdmetal_draw_header_v5))return false;
     /* The v3 tail (attr1/index/uniform) and the exact vertex-bounds check are
      * validated by rdgpu_draw_execute once the index data is available. */
     return true;
 }
 } // namespace
 
-int rdgpu_draw_execute(const void *packet,size_t bytes,
+int rdgpu_draw_execute_with_depth(const void *packet,size_t bytes,
                        RDGPUDrawResolve resolve,void *context,
                        RDGPUDrawTextureResolve tex_resolve,
                        RDGPUDrawTextureComplete tex_complete,
-                       void *tex_context){
+                       void *tex_context,void *depth_texture){
     if(!packet||!resolve||bytes<sizeof(rdmetal_draw_header)||
-       bytes>sizeof(rdmetal_draw_header_v4)+2*RDMETAL_DRAW_MAX_SHADER_WORDS*4+
+       bytes>sizeof(rdmetal_draw_header_v5)+2*RDMETAL_DRAW_MAX_SHADER_WORDS*4+
              RDMETAL_DRAW_MAX_VERTEX_BYTES+RDMETAL_DRAW_MAX_INDEX_BYTES+
              RDMETAL_DRAW_MAX_UNIFORM_BYTES)return RDGPU_DRAW_BAD_PACKET;
     rdmetal_draw_header h;
     memcpy(&h,packet,sizeof h);
-    const bool v4 = h.version==RDMETAL_DRAW_VERSION_V4;
+    const bool v5 = h.version==RDMETAL_DRAW_VERSION_V5;
+    const bool v4 = h.version==RDMETAL_DRAW_VERSION_V4 || v5;
     const bool v3 = h.version==RDMETAL_DRAW_VERSION_V3 || v4;
     const bool v2tex = h.version==RDMETAL_DRAW_VERSION_TEXTURE;
-    const size_t prefix = v4 ? sizeof(rdmetal_draw_header_v4) :
+    const size_t prefix = v5 ? sizeof(rdmetal_draw_header_v5) :
+                          v4 ? sizeof(rdmetal_draw_header_v4) :
                           v3 ? sizeof(rdmetal_draw_header_v3) :
                           v2tex ? sizeof(rdmetal_draw_header_v2) :
                                   sizeof(rdmetal_draw_header);
     if(!checked_header(h,bytes,prefix))return RDGPU_DRAW_BAD_PACKET;
+    uint32_t depth_flags=0,depth_compare=7;
+    if(v5){
+        rdmetal_draw_header_v5 d;
+        memcpy(&d,packet,sizeof d);
+        if(!d.depth_handle||!depth_texture||d.reserved||
+           (d.depth_flags&~3u)||d.depth_compare>7)
+            return RDGPU_DRAW_BAD_PACKET;
+        depth_flags=d.depth_flags;depth_compare=d.depth_compare;
+    }
     uint32_t scissor_x=0,scissor_y=0;
     uint32_t scissor_width=h.target_width,scissor_height=h.target_height;
     if(v4){
@@ -301,6 +314,16 @@ int rdgpu_draw_execute(const void *packet,size_t bytes,
                 MTLRenderPipelineDescriptor *pipeline=[MTLRenderPipelineDescriptor new];
                 pipeline.vertexFunction=vFunction;pipeline.fragmentFunction=fFunction;
                 pipeline.colorAttachments[0].pixelFormat=MTLPixelFormatBGRA8Unorm;
+                if(v5){
+                    id<MTLTexture> depth=(__bridge id<MTLTexture>)depth_texture;
+                    if(depth.width!=h.target_width||depth.height!=h.target_height||
+                       depth.pixelFormat!=MTLPixelFormatDepth32Float_Stencil8){
+                        result=RDGPU_DRAW_DENIED;
+                        goto draw_cleanup;
+                    }
+                    pipeline.depthAttachmentPixelFormat=MTLPixelFormatDepth32Float_Stencil8;
+                    pipeline.stencilAttachmentPixelFormat=MTLPixelFormatDepth32Float_Stencil8;
+                }
                 MTLVertexDescriptor *layout=[MTLVertexDescriptor vertexDescriptor];
                 layout.attributes[0].format=
                     h.attribute_format==RDMETAL_DRAW_ATTR_FLOAT3?
@@ -326,11 +349,31 @@ int rdgpu_draw_execute(const void *packet,size_t bytes,
                 pass.colorAttachments[0].loadAction=MTLLoadActionLoad;
                 pass.colorAttachments[0].storeAction=MTLStoreActionStore;
                 pass.colorAttachments[0].clearColor=MTLClearColorMake(0,0,0,1);
+                if(v5){
+                    id<MTLTexture> depth=(__bridge id<MTLTexture>)depth_texture;
+                    pass.depthAttachment.texture=depth;
+                    pass.depthAttachment.loadAction=MTLLoadActionLoad;
+                    pass.depthAttachment.storeAction=MTLStoreActionStore;
+                    pass.stencilAttachment.texture=depth;
+                    pass.stencilAttachment.loadAction=MTLLoadActionLoad;
+                    pass.stencilAttachment.storeAction=MTLStoreActionStore;
+                }
                 id<MTLCommandBuffer> command=[queue commandBuffer];
                 id<MTLRenderCommandEncoder> encoder=command&&target&&state&&vertex?
                     [command renderCommandEncoderWithDescriptor:pass]:nil;
                 if(encoder){
                     [encoder setRenderPipelineState:state];
+                    if(v5){
+                        static const MTLCompareFunction compare[]={
+                            MTLCompareFunctionNever,MTLCompareFunctionLess,
+                            MTLCompareFunctionEqual,MTLCompareFunctionLessEqual,
+                            MTLCompareFunctionGreater,MTLCompareFunctionNotEqual,
+                            MTLCompareFunctionGreaterEqual,MTLCompareFunctionAlways};
+                        MTLDepthStencilDescriptor *ds=[MTLDepthStencilDescriptor new];
+                        ds.depthCompareFunction=(depth_flags&1u)?compare[depth_compare]:MTLCompareFunctionAlways;
+                        ds.depthWriteEnabled=(depth_flags&2u)!=0;
+                        [encoder setDepthStencilState:[device newDepthStencilStateWithDescriptor:ds]];
+                    }
                     [encoder setVertexBuffer:vertex offset:0 atIndex:0];
                     MTLScissorRect scissor={scissor_x,scissor_y,
                                             scissor_width,scissor_height};
@@ -368,6 +411,7 @@ int rdgpu_draw_execute(const void *packet,size_t bytes,
                         fprintf(stderr,"RDMETAL_DRAW_SAMPLED textured=%d ok\n",textured?1:0);
                 }
             }
+            draw_cleanup: ;
         } else {
             fprintf(stderr,"RDMETAL_DRAW_DIMS_DENIED sw=%zu sh=%zu tw=%u th=%u\n",
                     IOSurfaceGetWidth(surface),IOSurfaceGetHeight(surface),
@@ -379,4 +423,13 @@ int rdgpu_draw_execute(const void *packet,size_t bytes,
     if(texSurface)CFRelease(texSurface);
     CFRelease(surface);
     return result;
+}
+
+int rdgpu_draw_execute(const void *packet,size_t bytes,
+                       RDGPUDrawResolve resolve,void *context,
+                       RDGPUDrawTextureResolve tex_resolve,
+                       RDGPUDrawTextureComplete tex_complete,
+                       void *tex_context){
+    return rdgpu_draw_execute_with_depth(packet,bytes,resolve,context,
+                                         tex_resolve,tex_complete,tex_context,NULL);
 }

@@ -1,4 +1,5 @@
 #include "../src/rdgpu_guest_syscall.h"
+#include "../src/rdmetal_draw_wire.h"
 #include <assert.h>
 #include <errno.h>
 #include <stdio.h>
@@ -23,6 +24,18 @@ static RDGPUReply transport(void *unused, const RDGPURequest *q) {
     }
     return r;
 }
+static long draw_transport(void *unused,const RDGPUDrawBatchRequest *batch,
+                           const void *packet,size_t bytes){
+    (void)unused;
+    const struct rdmetal_draw_header_v5 *h=packet;
+    assert(batch->packet_bytes==bytes);
+    assert(h->base.base.base.base.version==RDMETAL_DRAW_VERSION_V5);
+    assert(h->depth_flags==3 && h->depth_compare==1);
+    return 88;
+}
+static int draw_poll(void *unused,uint64_t fence){
+    (void)unused;assert(fence==88);return 0;
+}
 
 int main(void) {
     RDGPUGuestState state;
@@ -44,6 +57,17 @@ int main(void) {
     assert(rdgpu_guest_syscall(&state,RDGPU_GUEST_CLEAR_DEPTH_STENCIL,
                               separate,0x3e800000u,7,3,0)==77);
     assert(rdgpu_guest_syscall(&state,RDGPU_WAIT,separate,77,0,0,0)==0);
+    rdgpu_guest_set_draw_transport(&state,draw_transport,draw_poll,NULL);
+    struct rdmetal_draw_header_v5 draw={0};
+    draw.base.base.base.base.magic=RDMETAL_DRAW_MAGIC;
+    draw.base.base.base.base.version=RDMETAL_DRAW_VERSION_V5;
+    draw.base.base.base.base.total_bytes=sizeof draw;
+    draw.base.base.base.base.target_handle=image;
+    draw.depth_handle=separate;
+    draw.depth_flags=3;draw.depth_compare=1;
+    assert(rdgpu_guest_syscall(&state,RDGPU_GUEST_DRAW_BATCH,image,
+                              (uintptr_t)&draw,sizeof draw,0,0)==88);
+    assert(rdgpu_guest_syscall(&state,RDGPU_GUEST_DRAW_POLL,image,88,0,0,0)==0);
     assert(rdgpu_guest_syscall(&state,RDGPU_RELEASE,separate,0,0,0,0)==0);
     puts("guest depth clear validates and carries broker lease");
     return 0;
