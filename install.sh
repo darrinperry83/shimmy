@@ -171,7 +171,7 @@ else
   echo "==> bare rootfs profile '$ROOTFS_PROFILE' — no desktop installed (boots to TTY)"
 fi
 
-# --- 7. recovery: install the shimmy CLI + installer + launch path -------------
+# --- 8. recovery: install the shimmy CLI + installer + launch path -------------
 if [ "$ROOTFS_PROFILE" = "recovery" ]; then
   echo "==> installing the recovery shell (shimmy recover + graphical installer)"
   install -d "$ROOTFS/usr/local/bin"
@@ -222,7 +222,7 @@ WantedBy=multi-user.target
 EOF
 fi
 
-# --- 8. install the rdmetal driver (so the desktop renders) -------------------
+# --- 9. install the rdmetal driver (so the desktop renders) -------------------
 # The recovery rootfs is a headless rescue shell (no desktop), so it skips the
 # GPU driver; every other profile installs it as the default GL driver.
 if [ "$ROOTFS_PROFILE" = "recovery" ]; then
