@@ -2300,7 +2300,15 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     fx_note("SIGNAL tkill nr=%d a0=%ld a1=%ld a2=%ld (guest sig=%d)\n",
             (int)nr, (long)a0, (long)a1, (long)a2, (nr == 130) ? (int)a1 : (int)a2);
     int lsig = (nr == 130) ? (int)a1 : (int)a2;
-    long tgt  = (nr == 130) ? (long)(int)a0 : (long)(int)a0;
+    long tgt  = (nr == 130) ? (long)(int)a0 : (long)(int)a1;
+    if (nr == 131) {
+      // tgkill names both a thread group and a thread. A matching group
+      // alone does not establish that the requested thread exists.
+      long tgid = (long)(int)a0;
+      if (tgid <= 0 || tgt <= 0) return -LX_EINVAL;
+      if (tgid != syscalls_guest_pid() || !guest_tid_known((int)tgt))
+        return -LX_ESRCH;
+    }
     if (lsig < 0 || lsig > 64) return -LX_EINVAL;
     // Linux tkill requires a positive, existing thread ID even for signal
     // zero. A guest ID is never a Darwin PID; do not infer liveness from a

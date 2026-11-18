@@ -240,6 +240,8 @@ The combined integration head through #37 passed a fresh private Arch login prom
 
 `tkill` (#130) now validates a positive, known guest thread ID before signal-zero success or the existing delivery path; invalid IDs return `EINVAL` or `ESRCH`. Its ARM64 guest probe, CLI build, private Arch login/D-Bus boot, and integration probe passed. This does not change `tgkill` (#131) or establish complete target-thread signal delivery.
 
+`tgkill` (#131) now reads the thread ID from the correct ARM64 argument and validates positive group/thread IDs and current guest group membership before signal-zero success or existing delivery. Its ARM64 guest probe, CLI build, private Arch login/D-Bus boot, and combined #130/#131 probes passed. Positive signal delivery remains a separate incomplete behavior.
+
 `rt_sigqueueinfo` (#138) now checks the native 128-byte guest siginfo and target, permits only current-guest signal-zero existence queries, and refuses nonzero delivery rather than signaling the host shim without preserving payload or guest handler semantics. Its ARM64 guest probe, CLI build, private Arch login/D-Bus boot, and combined #130/#138 integration probes passed. `rt_tgsigqueueinfo` (#240) remains separate.
 
 `move_pages` (#239) keeps a bounded query-only subset: at most 256 page addresses are copied from guest memory, queried pages must belong to the guest mapping, and statuses are copied back through checked guest memory. The new and existing ARM64 probes, CLI build, private Arch login/D-Bus boot, and integration probes passed. Page migration is unsupported.
