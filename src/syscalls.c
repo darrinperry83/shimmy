@@ -4505,7 +4505,19 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
 
   // ---------- 48 faccessat ----------
   case 48: {
-    if ((r = resolve((int)a0, (const char*)a1, host, sizeof host, gabs, sizeof gabs)) < 0)
+    // The shared resolver reads a C string. Snapshot it from admitted guest
+    // memory first, so an unmapped pointer returns EFAULT instead of
+    // faulting the host shim during an ordinary access check.
+    if (!a1) return -LX_EFAULT;
+    char guest_path[PATH_MAX];
+    size_t i;
+    for (i = 0; i < sizeof guest_path; ++i) {
+      if (gmem_guest_export_copyin(NULL, a1 + i, &guest_path[i], 1) != 0)
+        return -LX_EFAULT;
+      if (!guest_path[i]) break;
+    }
+    if (i == sizeof guest_path) return -LX_ENAMETOOLONG;
+    if ((r = resolve((int)a0, guest_path, host, sizeof host, gabs, sizeof gabs)) < 0)
       return r;
     if (strcmp(gabs, "/proc/self/exe") == 0 || strcmp(gabs, "/proc/self/maps") == 0 ||
         strcmp(gabs, "/proc/self/cmdline") == 0 || strcmp(gabs, "/proc/self/stat") == 0 ||

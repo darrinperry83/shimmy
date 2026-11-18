@@ -978,7 +978,7 @@
       "verified_compatible": false
     },
     {
-      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "classification_reason": "bounded: checked guest pathname and basic file/dirfd access verified",
       "dispatch_locations": [
         {
           "file": "src/syscalls.c",
@@ -988,12 +988,12 @@
       ],
       "dispatch_state": "case",
       "name": "faccessat",
-      "notes": "",
+      "notes": "Guest pathname copied before resolution; broader permission mapping unverified. See docs/syscalls/48-faccessat-guest-path.md.",
       "number": 48,
       "priority": "P2_other",
       "runtime_evidence": [],
-      "semantic_status": "unknown",
-      "test_evidence": [],
+      "semantic_status": "partial_or_unknown",
+      "test_evidence": ["tests/run-faccessat-path.py"],
       "trap_override": false,
       "verified_compatible": false
     },
