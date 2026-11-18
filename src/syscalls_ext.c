@@ -1836,7 +1836,34 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
       if (!(fl & O_NONBLOCK)) return -LX_EOPNOTSUPP;
     }
     if (!a2) return 0;
-    ssize_t r = writev((int)a0, (const struct iovec*)a1, (int)a2);
+    struct iovec vec[1024];
+    size_t nvec = (size_t)a2;
+    if (gmem_guest_export_copyin(NULL, a1, vec, nvec * sizeof vec[0]) != 0)
+      return -LX_EFAULT;
+    size_t requested = 0;
+    for (size_t i = 0; i < nvec; i++) {
+      if (vec[i].iov_len > SSIZE_MAX - requested) return -LX_EINVAL;
+      requested += vec[i].iov_len;
+    }
+    size_t count = requested > 1024 * 1024 ? 1024 * 1024 : requested;
+    if (!count) return 0;
+    char *buf = malloc(count);
+    if (!buf) return -LX_ENOMEM;
+    size_t gathered = 0;
+    for (size_t i = 0; i < nvec && gathered < count; i++) {
+      size_t part = vec[i].iov_len;
+      if (part > count - gathered) part = count - gathered;
+      if (part && gmem_guest_export_copyin(NULL,
+            (uint64_t)(uintptr_t)vec[i].iov_base, buf + gathered, part) != 0) {
+        free(buf);
+        return -LX_EFAULT;
+      }
+      gathered += part;
+    }
+    ssize_t r = write((int)a0, buf, count);
+    int saved_errno = errno;
+    free(buf);
+    errno = saved_errno;
     return r < 0 ? eret() : r;
   }
   case 76: {                                                   // splice
