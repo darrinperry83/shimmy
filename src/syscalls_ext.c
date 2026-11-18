@@ -1644,7 +1644,24 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (e < 0) return e;
     return ok0(symlinkat(guest_target, hdirfd, host));
   }
-  case 39: return 0;                                            // umount2: nothing is ever really mounted
+  case 39: {                                                   // umount2
+    /* mount(40) currently synthesizes API filesystems without a mount table.
+     * Claiming an unmount succeeded would leave /proc, /dev, etc. visible
+     * while callers believe they were detached. Refuse existing targets
+     * until a real guest mount namespace and detach path exist. */
+    unsigned flags = (unsigned)a1;
+    if (flags & ~15u) return -LX_EINVAL; // FORCE, DETACH, EXPIRE, NOFOLLOW
+    char guest_path[PATH_MAX];
+    e = copy_guest_cstr(a0, guest_path, sizeof guest_path);
+    if (e < 0) return e;
+    if (!guest_path[0]) return -LX_ENOENT;
+    e = resolve_path_nf(guest_path, host, sizeof host, (flags & 8u) != 0);
+    if (e < 0) return e;
+    struct stat st;
+    if ((flags & 8u ? lstat(host, &st) : stat(host, &st)) != 0)
+      return eret();
+    return -LX_EPERM;
+  }
   // mount(): early API filesystems are synthesized in-process, so systemd's
   // mount calls for those existing trees can succeed without a host mount.
   // The per-user tmpfs is different: claiming success for /run/user/<uid>
