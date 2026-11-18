@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 static IOSurfaceRef make_surface(void) {
@@ -120,6 +121,22 @@ static int do_inproc(const char *carrier) {
 
 int main(int argc, char **argv) {
     if (argc == 3 && !strcmp(argv[1], "inproc")) return do_inproc(argv[2]);
+    if (argc == 4 && !strcmp(argv[1], "roundtrip")) {
+        /* The publisher is a real child of the registered receiver, matching
+         * Shimmy's systemd boot process tree and the audited Mach boundary. */
+        rdgpu_handoff_import_init();
+        pid_t child = fork();
+        if (child < 0) return 2;
+        if (child == 0) {
+            execl(argv[0], argv[0], "publish", argv[2], argv[3], NULL);
+            _exit(2);
+        }
+        int rc = do_resolve(argv[2], argv[3]);
+        int status = 0;
+        if (waitpid(child, &status, 0) != child || !WIFEXITED(status) ||
+            WEXITSTATUS(status) != 0) return 1;
+        return rc;
+    }
     if (argc != 4) {
         fprintf(stderr, "usage: %s <publish|resolve|inproc> <carrier-file> [<idfile>]\n", argv[0]);
         return 2;

@@ -152,7 +152,7 @@ build_handoff() {
   echo "== test_handoff =="
   clang $CFLAGS -o test_handoff \
     $SRC/test_handoff.c $SRC/rdgpu_surface_handoff.c \
-    -framework IOSurface -framework CoreFoundation
+    -framework IOSurface -framework CoreFoundation -lbsm
   echo "   -> ./test_handoff"
 }
 
@@ -164,12 +164,12 @@ build_mac_app() {
   clang $CFLAGS -ObjC -fobjc-arc -o rd_mac_app \
     $SRC/rd_mac_app.m $SRC/rdgpu_surface_handoff.c \
     -framework Cocoa -framework Metal -framework QuartzCore \
-    -framework IOSurface -framework CoreFoundation
+    -framework IOSurface -framework CoreFoundation -lbsm
   echo "   -> ./rd_mac_app"
   echo "== rd_mac_probe =="
   clang $CFLAGS -o rd_mac_probe \
     $SRC/rd_mac_probe.c $SRC/rdgpu_surface_handoff.c \
-    -framework IOSurface -framework CoreFoundation
+    -framework IOSurface -framework CoreFoundation -lbsm
   echo "   -> ./rd_mac_probe"
 }
 

@@ -23,9 +23,11 @@
  * No launchd plist, no code signing, no parent fd handoff is required. */
 #include "rdgpu_surface_handoff.h"
 #include <CoreFoundation/CoreFoundation.h>
+#include <bsm/libbsm.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <libproc.h>
 #include <mach/mach.h>
 #include <pthread.h>
 #include <servers/bootstrap.h>
@@ -268,6 +270,38 @@ static pthread_t g_import_thread;
 static volatile sig_atomic_t g_import_stop = 0;
 static pthread_once_t g_import_once = PTHREAD_ONCE_INIT;
 
+/* The bootstrap name is discoverable by other processes in this user's
+ * session. Only accept a send-right published by this Shimmy instance or one
+ * of its still-live descendants running the same host executable. The Mach
+ * audit trailer supplies the PID/UID; message fields must never supply them. */
+static int handoff_sender_is_our_descendant(const mach_msg_header_t *hdr,
+                                            size_t buffer_size) {
+    size_t off = round_msg(hdr->msgh_size);
+    if (off > buffer_size || buffer_size - off < sizeof(mach_msg_audit_trailer_t))
+        return 0;
+    const mach_msg_audit_trailer_t *trailer =
+        (const mach_msg_audit_trailer_t *)((const char *)hdr + off);
+    if (trailer->msgh_trailer_type != MACH_MSG_TRAILER_FORMAT_0 ||
+        trailer->msgh_trailer_size < sizeof *trailer)
+        return 0;
+    pid_t sender = audit_token_to_pid(trailer->msgh_audit);
+    if (sender <= 0 || audit_token_to_euid(trailer->msgh_audit) != geteuid())
+        return 0;
+    if (sender == getpid()) return 1;
+    char ours[PROC_PIDPATHINFO_MAXSIZE], theirs[PROC_PIDPATHINFO_MAXSIZE];
+    if (proc_pidpath(getpid(), ours, sizeof ours) <= 0 ||
+        proc_pidpath(sender, theirs, sizeof theirs) <= 0 ||
+        strcmp(ours, theirs)) return 0;
+    for (int hops = 0; hops < 64 && sender > 1; hops++) {
+        struct proc_bsdinfo info;
+        if (proc_pidinfo(sender, PROC_PIDTBSDINFO, 0, &info, sizeof info)
+            != sizeof info) return 0;
+        sender = (pid_t)info.pbi_ppid;
+        if (sender == getpid()) return 1;
+    }
+    return 0;
+}
+
 /* Per-run rendezvous name. Both shims inherit the same $RDSOCKETGROUP (a
  * unique /tmp/mcXXXX directory minted by the common launcher), so they derive
  * the same bootstrap name. Fall back to uid when the variable is absent (unit
@@ -293,10 +327,17 @@ static void *rdgpu_handoff_receive_thread(void *arg) {
         memset(buffer, 0, sizeof buffer);
         hdr->msgh_size = (mach_msg_size_t)sizeof buffer;
         hdr->msgh_local_port = g_recv_port;
-        kern_return_t kr = mach_msg(hdr, MACH_RCV_MSG, 0, sizeof buffer,
+        kern_return_t kr = mach_msg(hdr, MACH_RCV_MSG |
+                                    MACH_RCV_TRAILER_TYPE(MACH_MSG_TRAILER_FORMAT_0) |
+                                    MACH_RCV_TRAILER_ELEMENTS(MACH_RCV_TRAILER_AUDIT),
+                                    0, sizeof buffer,
                                     g_recv_port, 500, MACH_PORT_NULL);
         if (kr == MACH_RCV_TIMED_OUT) continue;
         if (kr != KERN_SUCCESS) { usleep(1000); continue; }
+        if (!handoff_sender_is_our_descendant(hdr, sizeof buffer)) {
+            mach_msg_destroy(hdr);
+            continue;
+        }
         if (hdr->msgh_id != RDGPU_HANDOFF_MSG_ID) continue;
         if (hdr->msgh_size < (mach_msg_size_t)sizeof(RDGPUHandoffMsg)) continue;
         RDGPUHandoffMsg *msg = (RDGPUHandoffMsg *)buffer;
