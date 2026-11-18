@@ -2126,6 +2126,27 @@ static int fu_wake(unsigned long uaddr, unsigned int n, uint32_t bits) {
   return woke;
 }
 
+// futex_wake(2), the four-argument futex2 syscall (aarch64 #454). Its mask is the
+// equivalent of FUTEX_WAKE_BITSET's val3, but precedes the wake count in the ABI.
+// Our futex queues are process-local and keyed by virtual address, so only the
+// private 32-bit form can be implemented by this backend. Do not claim a shared
+// wake succeeded when another process may own the waiter.
+static long do_futex_wake2(unsigned long uaddr, unsigned long mask,
+                           int nr, unsigned int flags) {
+  enum { FU2_SIZE_MASK = 3, FU2_SIZE_U32 = 2, FU2_NUMA = 4,
+         FU2_MPOL = 8, FU2_PRIVATE = 128 };
+  if (flags & ~(FU2_SIZE_MASK | FU2_NUMA | FU2_MPOL | FU2_PRIVATE)) return -LX_EINVAL;
+  if ((flags & FU2_SIZE_MASK) != FU2_SIZE_U32 || mask > UINT32_MAX) return -LX_EINVAL;
+  if (!mask) return -LX_EINVAL;
+  if (uaddr & (sizeof(uint32_t) - 1)) return -LX_EINVAL;
+  if (!uaddr) return -LX_EFAULT;
+  if (!(flags & FU2_PRIVATE) || (flags & (FU2_NUMA | FU2_MPOL))) return -95; // EOPNOTSUPP
+  // Linux's strict futex2 wake returns zero for nr=0. For a negative int the
+  // kernel wakes the first matching waiter, since its post-increment count
+  // immediately meets the negative limit.
+  return fu_wake(uaddr, nr < 0 ? 1u : (unsigned int)nr, (uint32_t)mask);
+}
+
 // ---- priority-inheritance futexes ----------------------------------------------------------
 // The guest's glibc uses these for pthread_mutex{PTHREAD_PRIO_INHERIT} and its PI condvars.
 // PipeWire's data loop sets loop.prio-inherit=true, so pthread_mutex_init(attr with
@@ -4926,6 +4947,9 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   // ---------- 98 futex ----------
   case 98: return do_futex(a0, (int)a1, (unsigned int)a2,
                            (const struct linux_timespec*)a3, a4, (unsigned int)a5);
+
+  // ---------- 454 futex_wake (futex2) ----------
+  case 454: return do_futex_wake2(a0, a1, (int)a2, (unsigned int)a3);
 
   // ---------- 99 set_robust_list ----------
   case 99: return guest_set_robust_list(a0, a1);
