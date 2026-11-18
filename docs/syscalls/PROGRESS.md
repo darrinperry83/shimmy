@@ -32,6 +32,13 @@ This file records bounded behavior that has been implemented and tested. A dispa
 | 456 | `futex_requeue` | `syscall/456-futex-requeue` | Merged at `53d2b9e`; bounded subset | Private U32, zero-requeue wake with source-value comparison passes a disposable ARM64 guest test. Moving waiters needs queue redesign and remains unsupported. |
 | 447 | `memfd_secret` | `syscall/447-memfd-secret` | Blocked: secret-memory isolation | Existing `ENOSYS` is preserved. Ordinary Darwin mappings cannot promise Linux direct-map exclusion, dump exclusion, and zero-on-release; see `MEMFD_SECRET.md`. |
 | 449 | `futex_waitv` | `syscall/449-futex-waitv` | Merged at `8aae551`; bounded subset | One private aligned U32 waiter, with mismatch/timeout and real wake, passes a disposable ARM64 guest test. Atomic waits on multiple addresses need queue redesign. |
+| 30 | `ioprio_set` | `syscall/30-ioprio-set` | Squash merged at `3b90175`; bounded subset | Default/unset priority reset for current guest process succeeds. Nondefault scheduler requests are rejected; invalid selectors and absent PIDs are checked in a disposable ARM64 guest test. |
+| 31 | `ioprio_get` | `syscall/31-ioprio-get` | Squash merged at `f34130a`; bounded subset | Raw unset priority for current guest process returns 0. Other PIDs, group/user queries, and invalid selectors no longer receive false success; disposable ARM64 guest test passes. |
+| 107 | `timer_create` | `syscall/107-timer-create` | Blocked: timer-family backend | Existing `ENOSYS` is preserved. Timers need IDs, expiry and coherent set/get/delete behavior; see `TIMER_CREATE.md`. |
+| 180 | `mq_open` | `syscall/180-mq-open` | Blocked: message-queue backend | Existing `ENOSYS` is preserved. A usable queue descriptor needs send/receive, poll, notification and lifecycle; see `MQ_OPEN.md`. |
+| 448 | `process_mrelease` | `syscall/448-process-mrelease` | Blocked: early memory reclaim | Existing `ENOSYS` is preserved. A pidfd does not provide Linux's early cross-process memory reclaim; see `PROCESS_MRELEASE.md`. |
+| 468 | `file_getattr` | `syscall/468-file-getattr` | Blocked: guest inode attributes | Existing `ENOSYS` is preserved. No coherent Linux per-inode file-attribute state exists; see `FILE_GETATTR.md`. |
+| 469 | `file_setattr` | `syscall/469-file-setattr` | Blocked: guest inode attributes | Existing `ENOSYS` is preserved. A Darwin `chflags` wrapper would not reproduce Linux permissions or attribute enforcement; see `FILE_SETATTR.md`. |
 
 ## Already merged before this batch
 
@@ -52,3 +59,5 @@ After merging the fifth batch, `./build.sh cli` and all six focused tests for sy
 After merging the sixth batch, `./build.sh cli`, `python3 tests/run-futex-requeue2.py`, `python3 tests/run-futex-wait2.py`, and `python3 tests/run-futex-wake2.py` passed together on 2026-11-18. `cachestat` received a blocker note and no behavior change. Real futex waiter relocation remains unimplemented.
 
 After merging the seventh batch, `./build.sh cli` and `python3 tests/run-futex-waitv.py`, `python3 tests/run-futex-requeue2.py`, `python3 tests/run-futex-wait2.py`, and `python3 tests/run-futex-wake2.py` passed together on 2026-11-18. `memfd_secret` received a security-contract blocker note and no behavior change.
+
+The next per-syscall worktrees are integrated with squash commits. For `ioprio_set` and `ioprio_get`, each branch passed `./build.sh cli` and its disposable ARM64 guest test before integration; the combined integration build and both guest tests also passed on 2026-11-18. `timer_create`, `mq_open`, `process_mrelease`, `file_getattr`, and `file_setattr` are documented blockers without runtime changes.
