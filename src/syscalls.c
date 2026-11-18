@@ -5373,20 +5373,20 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
 
   // ---------- 153 times ----------
   case 153: {
-    struct rusage ru;
+    struct rusage ru, rc;
     if (getrusage(RUSAGE_SELF, &ru) < 0) return herrno();
     if (a0) {
-      struct linux_tms* t = (struct linux_tms*)a0;
-      t->tms_utime = ru.ru_utime.tv_sec * LX_USER_HZ + ru.ru_utime.tv_usec / (1000000 / LX_USER_HZ);
-      t->tms_stime = ru.ru_stime.tv_sec * LX_USER_HZ + ru.ru_stime.tv_usec / (1000000 / LX_USER_HZ);
-      struct rusage rc;
-      if (getrusage(RUSAGE_CHILDREN, &rc) == 0) {
-        t->tms_cutime = rc.ru_utime.tv_sec * LX_USER_HZ + rc.ru_utime.tv_usec / (1000000 / LX_USER_HZ);
-        t->tms_cstime = rc.ru_stime.tv_sec * LX_USER_HZ + rc.ru_stime.tv_usec / (1000000 / LX_USER_HZ);
-      } else { t->tms_cutime = 0; t->tms_cstime = 0; }
+      if (getrusage(RUSAGE_CHILDREN, &rc) < 0) return herrno();
+      struct linux_tms t = {
+        .tms_utime = ru.ru_utime.tv_sec * LX_USER_HZ + ru.ru_utime.tv_usec / (1000000 / LX_USER_HZ),
+        .tms_stime = ru.ru_stime.tv_sec * LX_USER_HZ + ru.ru_stime.tv_usec / (1000000 / LX_USER_HZ),
+        .tms_cutime = rc.ru_utime.tv_sec * LX_USER_HZ + rc.ru_utime.tv_usec / (1000000 / LX_USER_HZ),
+        .tms_cstime = rc.ru_stime.tv_sec * LX_USER_HZ + rc.ru_stime.tv_usec / (1000000 / LX_USER_HZ),
+      };
+      if (gmem_guest_copyout_checked(a0, &t, sizeof t) != 0) return -LX_EFAULT;
     }
     struct timespec now;
-    clock_gettime(CLOCK_MONOTONIC, &now);
+    if (clock_gettime(CLOCK_MONOTONIC, &now) < 0) return herrno();
     return now.tv_sec * LX_USER_HZ + now.tv_nsec / (1000000000L / LX_USER_HZ);
   }
 
