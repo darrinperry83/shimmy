@@ -1536,6 +1536,18 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return -LX_ENOSYS;  // No other syscall number enters this case.
   }
   case 14: case 15: case 16: {                                 // removexattr / l / f
+    if (nr == 14) {
+      // Both arguments are guest strings. Resolve and mutate only after
+      // checked, bounded copies of the pathname and attribute name.
+      char guest_path[PATH_MAX], name[256];
+      e = copy_guest_cstr(a0, guest_path, sizeof guest_path);
+      if (e < 0) return e;
+      e = copy_guest_cstr(a1, name, sizeof name);
+      if (e < 0) return e;
+      e = resolve_path_nf(guest_path, host, sizeof host, 0);
+      if (e < 0) return e;
+      return ok0(removexattr(host, name, 0));
+    }
     if (nr == 16) return ok0(fremovexattr((int)a0, (const char*)a1, 0));
     if (nr == 15) {
       // lremovexattr names the symlink itself. Snapshot both guest strings
