@@ -2722,26 +2722,15 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   // may reach host msgctl until all message syscalls use guest-scoped IDs.
   case 187: return -LX_ENOSYS;                                   // msgctl
 
-  // Guest SysV keys must not resolve or create host-global objects. The
-  // key-taking shmget and semget calls are refused, but their companion
-  // ID-taking calls below still need guest-scoped ownership checks. Qt
-  // QSharedMemory and QSystemSemaphore may receive ENOSYS until a private
-  // IPC namespace and lifecycle are implemented.
-  //
-  // Guest pointers may be host-addressable, but the host IPC namespace is not
-  // guest-private. Direct attachment/removal remains unsafe until separately guarded.
-  // A guest key must never resolve or create a segment in Darwin's host-wide
-  // SysV namespace. #196 also refuses raw attachments, while #195/#197
-  // require separate ID/attachment safeguards; this family is not isolated.
+  // Darwin's SysV namespace is host-wide. Refuse all guest keys, raw IDs,
+  // and attachment addresses until Shimmy has an instance-scoped IPC backend.
+  // Qt QSharedMemory and QSystemSemaphore may receive ENOSYS in this state.
   case 194: return -LX_ENOSYS;                                 // shmget
-  // A numeric guest ID must not attach a same-user segment from Darwin's
-  // global SysV namespace. No instance-scoped ID registry exists yet.
+  // A guest ID must not attach a same-user host segment.
   case 196: return -LX_ENOSYS;                                 // shmat
-  case 197:                                                    // shmdt(addr)
-    { int r = shmdt((const void*)a0); return r < 0 ? eret() : 0; }
-  // No guest-private SysV SHM ID registry exists. A raw numeric ID could name
-  // an unrelated macOS segment, and IPC_RMID would remove it. Refuse every
-  // command before touching host IPC; #194/#196/#197 need separate isolation.
+  // A guest pointer does not establish ownership of a host attachment.
+  case 197: return -LX_ENOSYS;                                 // shmdt
+  // A raw guest ID could name a host segment; IPC_RMID would remove it.
   case 195: return -LX_ENOSYS;                                 // shmctl
 
   case 190: return -LX_ENOSYS;                                 // semget: no private guest IPC namespace
