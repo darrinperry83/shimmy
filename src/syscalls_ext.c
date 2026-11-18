@@ -1867,12 +1867,58 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return r < 0 ? eret() : r;
   }
   case 76: {                                                   // splice
-    long long ioff, ooff, *ip = 0, *op = 0;
-    if (a1) { ioff = *(long long*)a1; ip = &ioff; }
-    if (a3) { ooff = *(long long*)a3; op = &ooff; }
-    long r = bounce_copy((int)a0, ip, (int)a2, op, (size_t)a4, (int)(a5 & 0x2));
-    if (r >= 0 && a1) *(long long*)a1 = ioff;
-    if (r >= 0 && a3) *(long long*)a3 = ooff;
+    if (!a4) return 0;  // Linux returns before validating fds/flags for len=0
+    if ((unsigned)a5 & ~0xfu) return -LX_EINVAL;
+    int in = (int)a0, out = (int)a2;
+    if (in < 0 || out < 0 || shim_fd_reserved(in) || shim_fd_reserved(out))
+      return -LX_EBADF;
+    int infl = fcntl(in, F_GETFL), outfl = fcntl(out, F_GETFL);
+    if (infl < 0 || outfl < 0 || (infl & O_ACCMODE) == O_WRONLY ||
+        (outfl & O_ACCMODE) == O_RDONLY) return -LX_EBADF;
+    if (outfl & O_APPEND) return -LX_EINVAL;
+    struct stat inst, outst;
+    if (fstat(in, &inst) < 0 || fstat(out, &outst) < 0) return eret();
+    int inpipe = S_ISFIFO(inst.st_mode), outpipe = S_ISFIFO(outst.st_mode);
+    if (!inpipe && !outpipe) return -LX_EINVAL;
+    if ((inpipe && a1) || (outpipe && a3)) return -LX_ESPIPE;
+    // Darwin assigns distinct inode numbers to the two ends of one pipe, so
+    // stat cannot establish whether pipe-to-pipe splice is self-referential.
+    // Refuse that subset until Shimmy tracks pipe identity across dup/fork.
+    if (inpipe && outpipe) return -LX_EOPNOTSUPP;
+    long long ioff = 0, ooff = 0, initial_in = 0, initial_out = 0;
+    if (a1 && gmem_guest_export_copyin(NULL, a1, &ioff, sizeof ioff) != 0)
+      return -LX_EFAULT;
+    if (a3 && gmem_guest_export_copyin(NULL, a3, &ooff, sizeof ooff) != 0)
+      return -LX_EFAULT;
+    // Validate writable offsets before transferring any data. A late EFAULT
+    // would otherwise report no transfer after advancing the pipe or file.
+    if ((a1 && gmem_guest_copyout_checked(a1, &ioff, sizeof ioff) != 0) ||
+        (a3 && gmem_guest_copyout_checked(a3, &ooff, sizeof ooff) != 0))
+      return -LX_EFAULT;
+    if ((a1 && ioff < 0) || (a3 && ooff < 0)) return -LX_EINVAL;
+    size_t count = (size_t)a4;
+    if (count > 1024 * 1024) count = 1024 * 1024;
+    if ((a1 && ioff > INT64_MAX - (int64_t)count) ||
+        (a3 && ooff > INT64_MAX - (int64_t)count)) return -LX_EINVAL;
+    initial_in = ioff; initial_out = ooff;
+    off_t old_in_pos = -1;
+    if (!a1 && S_ISREG(inst.st_mode)) old_in_pos = lseek(in, 0, SEEK_CUR);
+    long r = bounce_copy(in, a1 ? &ioff : NULL, out, a3 ? &ooff : NULL,
+                         count, (int)(a5 & 0x2));
+    if (r > 0 && old_in_pos >= 0)
+      (void)lseek(in, old_in_pos + r, SEEK_SET);
+    if (r >= 0) {
+      if (a1) {
+        ioff = initial_in + r;
+        if (gmem_guest_copyout_checked(a1, &ioff, sizeof ioff) != 0)
+          return -LX_EFAULT;
+      }
+      if (a3) {
+        ooff = initial_out + r;
+        if (gmem_guest_copyout_checked(a3, &ooff, sizeof ooff) != 0)
+          return -LX_EFAULT;
+      }
+    }
     return r;
   }
   case 77: return -LX_ENOSYS;                                  // tee
