@@ -4,6 +4,11 @@ This file records bounded behavior that has been implemented and tested. A dispa
 
 Current safety and refusal status is summarized in [`SAFEGUARDS.md`](SAFEGUARDS.md).
 
+The isolated #221 `execve` follow-up snapshots its bounded guest pathname
+before host resolution. Its focused ARM64 error/self-exec probe, CLI build,
+and private Arch login/D-Bus boot gate pass. See
+[`EXECVE-PATH.md`](EXECVE-PATH.md).
+
 The merged #286 `preadv2` follow-up replaces raw guest iovec passthrough
 with checked bounded reads while preserving its ARM64 offset and flag ABI.
 Its focused probe, CLI build, and private Arch login/D-Bus boot gate pass.

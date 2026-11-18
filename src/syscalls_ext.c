@@ -3087,10 +3087,11 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     // stack. Re-execing the SHIM is the same thing done by the kernel instead: the host process
     // is replaced by a fresh shim that loads the new guest from scratch. File descriptors
     // survive execve unless they are CLOEXEC, which is exactly what a spawned helper needs.
-    const char* path = (const char*)a0;
     char* const* gargv = (char* const*)a1;
     char* const* genvp = (char* const*)a2;
-    if (!path) return -LX_EFAULT;
+    char path[PATH_MAX];
+    long e = copy_guest_cstr(a0, path, sizeof path);
+    if (e < 0) return e;
     return guest_execve(path, gargv, genvp);
   }
   case 223: {                                                  // fadvise64: bounded NORMAL advice
