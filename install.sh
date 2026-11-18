@@ -94,9 +94,6 @@ if [ "$DRY_RUN" = "1" ]; then
   elif [ "$INSTALL_DESKTOP" = "1" ]; then
     echo "==> would run: shim_cli \"$ROOTFS\" /usr/bin/pacman -S --noconfirm $DESKTOP_PKGS"
     echo "==> would run: shim_cli \"$ROOTFS\" /usr/bin/pacman -S --noconfirm $EXTRA_PKGS"
-    if [ "$DESKTOP" = "kde" ] || [ "$DESKTOP" = "plasma" ]; then
-      echo "==> would run: enable SDDM (display-manager.service) + sddm Wayland config"
-    fi
   fi
   exit 0
 fi
@@ -162,22 +159,6 @@ elif [ "$INSTALL_DESKTOP" = "1" ]; then
   echo "==> installing desktop '$DESKTOP' (standard Arch install)"
   run_pacman -S --noconfirm $DESKTOP_PKGS
   run_pacman -S --noconfirm $EXTRA_PKGS 2>/dev/null || true
-
-  # KDE: enable SDDM as the display manager and point it at the Wayland path.
-  # Shimmy has no X11 display path, so the stock DisplayServer=x11 default would
-  # never spawn a greeter. display-manager.service is sddm.service's Alias= and
-  # is WantedBy=graphical.target (the vendor default.target already points there).
-  if [ "$DESKTOP" = "kde" ] || [ "$DESKTOP" = "plasma" ]; then
-    ln -sf /usr/lib/systemd/system/sddm.service "$ROOTFS/etc/systemd/system/display-manager.service"
-    install -d "$ROOTFS/etc/sddm.conf.d"
-    cat > "$ROOTFS/etc/sddm.conf.d/10-wayland.conf" <<'EOF'
-[General]
-DisplayServer=wayland
-
-[Wayland]
-CompositorCommand=/usr/bin/kwin_wayland --drm --no-lockscreen --no-global-shortcuts
-EOF
-  fi
 else
   echo "==> bare rootfs profile '$ROOTFS_PROFILE' — no desktop installed (boots to TTY)"
 fi
@@ -264,11 +245,7 @@ if [ "$ROOTFS_PROFILE" = "recovery" ]; then
   echo "    run:  ./run.sh            # boots straight into the graphical installer"
   echo "    or:   ./shim_cli rootfs /usr/local/bin/shimmy-installer-start"
 elif [ "$INSTALL_DESKTOP" = "1" ]; then
-  if [ "$DESKTOP" = "kde" ] || [ "$DESKTOP" = "plasma" ]; then
-    echo "    run:  ./run.sh --init   # systemd -> SDDM greeter -> Plasma"
-  else
-    echo "    run:  ./run.sh --init   # systemd -> getty login -> desktop"
-  fi
+  echo "    run:  ./run.sh --init   # systemd -> display manager (or getty) -> desktop"
 else
   echo "    run:  ./run.sh            # bare base; install a desktop via pacman first"
 fi
