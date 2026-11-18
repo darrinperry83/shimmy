@@ -31,6 +31,7 @@ void fx_note(const char* fmt, ...);
 #include <fcntl.h>
 #include <errno.h>
 #include <limits.h>
+#include <stdint.h>
 #include <stddef.h>
 #include <signal.h>
 #include <poll.h>
@@ -1576,7 +1577,16 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return 0;
   }
   case 91: return g_uid0 ? 0 : -LX_EPERM;                       // capset: no-op under RDUID0
-  case 92: return 0;                                           // personality: accept, ignore
+  case 92: {                                                    // personality: native Linux ABI subset
+    // The query sentinel returns the calling task's old personality. This
+    // ARM64 shim starts as PER_LINUX (0) and does not emulate the execution,
+    // memory or uname behavior of other personalities and compatibility flags.
+    // Accepting a flag while ignoring its side effect is unsafe (especially
+    // ADDR_NO_RANDOMIZE or READ_IMPLIES_EXEC), so only a reset to 0 succeeds.
+    unsigned int requested = (unsigned int)a0;
+    if (requested == UINT32_MAX || requested == 0) return 0;
+    return -LX_EOPNOTSUPP;
+  }
 
   // ===== 95..106: process =================================================
   case 95: {                                                   // waitid
