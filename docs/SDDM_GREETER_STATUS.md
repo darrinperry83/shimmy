@@ -237,3 +237,29 @@ Earlier, KWin had submitted Metal-backed frames. This is now a buffer-format
 and import investigation, not the prior socket watcher or IPC failure. The
 clone still uses the temporary SDDM D-Bus registration bypass; remove it and
 verify an unmodified boot before calling the greeter complete.
+
+### Override-free on-screen check, 18 November
+
+After the socket and epoll changes, a disposable Arch GUI boot was repeated
+with the SDDM `LD_PRELOAD` registration bypass removed. The SDDM parent and
+helper started, and the journal reached `Greeter starting...`, but no KWin or
+greeter process appeared. The system-bus monitor showed SDDM's first
+`RequestName(org.freedesktop.DisplayManager)` receive a successful method
+return (`UINT32 1`). The parent then exchanged several logind queries; the
+monitor captured no second `RequestName` before the stall. The parent and
+helper remained alive. This does not establish whether Qt's second call is
+blocked before sending or another thread prevents it from being processed;
+the next trace must identify that exact wait. The test processes were stopped
+without touching the installed root or live session.
+
+In the separate bypassed run, the greeter did reach its QML theme and exported
+a virtual dma-buf carrier. KWin's import of that carrier failed: the greeter's
+host process logged the carrier identity, while KWin's `RDMESA_MOCK_FD_IMPORT_DENY`
+listed only its own two carrier identities. The fd itself arrived with the
+greeter's `(st_dev, st_ino)`; `rdgpu_mock_gate.c` op 12 searches a process-local
+image table and cannot resolve another producer's lease. KWin then reported
+`importing the supplied dmabufs failed` and the Wayland greeter exited with a
+protocol error. The nearby mixed-framebuffer warning may be another issue,
+but does not prove why this specific import failed. A cross-process broker
+identity and IOSurface import path is required; the current local reuse path
+must not be treated as a cross-process implementation.
