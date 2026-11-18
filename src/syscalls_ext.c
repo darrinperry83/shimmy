@@ -42,6 +42,7 @@ void fx_note(const char* fmt, ...);
 #include "execve.h"
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/sysctl.h>
 #include <sys/time.h>
 #include <sys/sysctl.h>
 #include <sys/timex.h>
@@ -2362,11 +2363,29 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
                  (int)a1 == -1 ? (gid_t)-1 : (gid_t)a1) != 0) return eret();
     return 0;
   }
-  case 150:                                                    // getresgid
-    if (a0) *(unsigned*)a0 = g_uid0 ? guest_cred_gid(0) : getgid();
-    if (a1) *(unsigned*)a1 = g_uid0 ? guest_cred_gid(1) : getegid();
-    if (a2) *(unsigned*)a2 = g_uid0 ? guest_cred_gid(2) : getegid();
+  case 150: {                                                  // getresgid
+    // Linux requires three writable gid_t outputs. Never dereference guest
+    // addresses directly; the saved host GID is not necessarily the egid.
+    if (!a0 || !a1 || !a2) return -LX_EFAULT;
+    uint32_t ids[3];
+    if (g_uid0) {
+      for (int i = 0; i < 3; ++i) ids[i] = guest_cred_gid(i);
+    } else {
+      int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()};
+      struct kinfo_proc proc = {0};
+      size_t len = sizeof proc;
+      if (sysctl(mib, 4, &proc, &len, NULL, 0) != 0) return eret();
+      if (len < sizeof proc) return -LX_EOPNOTSUPP;
+      ids[0] = (uint32_t)getgid();
+      ids[1] = (uint32_t)getegid();
+      ids[2] = (uint32_t)proc.kp_eproc.e_pcred.p_svgid;
+    }
+    if (gmem_guest_copyout_checked(a0, &ids[0], sizeof ids[0]) != 0 ||
+        gmem_guest_copyout_checked(a1, &ids[1], sizeof ids[1]) != 0 ||
+        gmem_guest_copyout_checked(a2, &ids[2], sizeof ids[2]) != 0)
+      return -LX_EFAULT;
     return 0;
+  }
   case 151: return g_uid0 ? (long)guest_cred_uid(1) : (long)geteuid(); // setfsuid -> previous fsuid
   case 152: return g_uid0 ? (long)guest_cred_gid(1) : (long)getegid(); // setfsgid -> previous fsgid
   case 153: {                                                  // times (core normally owns this)
