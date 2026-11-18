@@ -2075,9 +2075,38 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     }
     return 0;
   }
-  case 236:                                                     // get_mempolicy
-    if (a0) *(int*)a0 = 0;                                      // MPOL_DEFAULT
+  case 236: {                                                   // get_mempolicy
+    /* This runtime exposes one NUMA node and only the process default policy.
+     * MPOL_F_ADDR needs per-VMA policy state, which is not modeled here. */
+    const unsigned long flags = (unsigned long)a4;
+    const unsigned long maxnode = (unsigned long)a2;
+    const unsigned long MPOL_F_NODE = 1, MPOL_F_ADDR = 2;
+    const unsigned long MPOL_F_MEMS_ALLOWED = 4;
+    if (flags & ~(MPOL_F_NODE | MPOL_F_ADDR | MPOL_F_MEMS_ALLOWED))
+      return -LX_EINVAL;
+    if ((flags & MPOL_F_MEMS_ALLOWED) && (flags & (MPOL_F_NODE | MPOL_F_ADDR)))
+      return -LX_EINVAL;
+    if (flags & MPOL_F_ADDR) return -LX_EOPNOTSUPP;
+    if (flags & MPOL_F_NODE) return -LX_EINVAL; // MPOL_DEFAULT has no preferred node
+    if (a3 && !(flags & MPOL_F_MEMS_ALLOWED)) return -LX_EINVAL;
+    if (a1 && maxnode < 1) return -LX_EINVAL;
+    /* Linux copy_nodes_to_user() rounds (maxnode - 1) up to a word and
+     * rejects copies larger than one page. Avoid arithmetic overflow. */
+    if (a1 && maxnode > 32769UL) return -LX_EINVAL;
+    if (a0) {
+      const int policy = 0; // MPOL_DEFAULT
+      if (gmem_guest_copyout_checked(a0, &policy, sizeof policy) != 0)
+        return -LX_EFAULT;
+    }
+    if (a1) {
+      const size_t bytes = (size_t)(((maxnode - 1 + 63) / 64) * 8);
+      unsigned char mask[4096] = {0};
+      if (flags & MPOL_F_MEMS_ALLOWED) mask[0] = 1;
+      if (bytes && gmem_guest_copyout_checked(a1, mask, bytes) != 0)
+        return -LX_EFAULT;
+    }
     return 0;
+  }
   case 237: return 0;                                           // set_mempolicy: no-op
   case 238: return -LX_ENOSYS;                                  // migrate_pages
   case 239: {                                                   // move_pages: query current process
