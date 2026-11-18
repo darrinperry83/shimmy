@@ -98,7 +98,7 @@
   "header_sha256": "a6277c8757890bd4fe8afaf76a8ea79274e7b0484ec147e717634c16fe54e1d9",
   "method": "installed native asm/unistd_64.h table, generic-header compat exclusion, inventory.py case-label scan, and manually reviewed source-risk flags; no guest ABI test",
   "schema_version": 1,
-  "source_commit": "3e5c0443a0cd9a610716d97df443090b8133e19f",
+  "source_commit": "c4224593e27fa1207296410a128489339c993f2b",
   "source_dirty_at_scan": false,
   "syscalls": [
     {
@@ -431,7 +431,7 @@
       "locations": [
         {
           "file": "src/net.c",
-          "line": 3298,
+          "line": 3316,
           "tier": "network"
         }
       ],
@@ -448,7 +448,7 @@
       "locations": [
         {
           "file": "src/net.c",
-          "line": 3301,
+          "line": 3319,
           "tier": "network"
         }
       ],
@@ -465,7 +465,7 @@
       "locations": [
         {
           "file": "src/net.c",
-          "line": 3303,
+          "line": 3321,
           "tier": "network"
         }
       ],
@@ -482,7 +482,7 @@
       "locations": [
         {
           "file": "src/net.c",
-          "line": 3306,
+          "line": 3324,
           "tier": "network"
         }
       ],
@@ -1116,7 +1116,7 @@
         },
         {
           "file": "src/net.c",
-          "line": 3315,
+          "line": 3333,
           "tier": "network"
         }
       ],
@@ -1337,7 +1337,7 @@
       "locations": [
         {
           "file": "src/net.c",
-          "line": 3318,
+          "line": 3336,
           "tier": "network"
         }
       ],
@@ -1354,7 +1354,7 @@
       "locations": [
         {
           "file": "src/net.c",
-          "line": 3320,
+          "line": 3338,
           "tier": "network"
         }
       ],
@@ -3489,7 +3489,7 @@
       "locations": [
         {
           "file": "src/net.c",
-          "line": 3323,
+          "line": 3341,
           "tier": "network"
         }
       ],
@@ -3506,7 +3506,7 @@
       "locations": [
         {
           "file": "src/net.c",
-          "line": 3325,
+          "line": 3343,
           "tier": "network"
         }
       ],
@@ -3523,7 +3523,7 @@
       "locations": [
         {
           "file": "src/net.c",
-          "line": 3327,
+          "line": 3345,
           "tier": "network"
         }
       ],
@@ -3540,7 +3540,7 @@
       "locations": [
         {
           "file": "src/net.c",
-          "line": 3329,
+          "line": 3347,
           "tier": "network"
         }
       ],
@@ -3557,7 +3557,7 @@
       "locations": [
         {
           "file": "src/net.c",
-          "line": 3339,
+          "line": 3357,
           "tier": "network"
         }
       ],
@@ -3574,7 +3574,7 @@
       "locations": [
         {
           "file": "src/net.c",
-          "line": 3343,
+          "line": 3361,
           "tier": "network"
         }
       ],
@@ -3591,7 +3591,7 @@
       "locations": [
         {
           "file": "src/net.c",
-          "line": 3345,
+          "line": 3363,
           "tier": "network"
         }
       ],
@@ -3608,7 +3608,7 @@
       "locations": [
         {
           "file": "src/net.c",
-          "line": 3347,
+          "line": 3365,
           "tier": "network"
         }
       ],
@@ -3625,7 +3625,7 @@
       "locations": [
         {
           "file": "src/net.c",
-          "line": 3349,
+          "line": 3367,
           "tier": "network"
         }
       ],
@@ -3642,7 +3642,7 @@
       "locations": [
         {
           "file": "src/net.c",
-          "line": 3352,
+          "line": 3370,
           "tier": "network"
         }
       ],
@@ -3659,7 +3659,7 @@
       "locations": [
         {
           "file": "src/net.c",
-          "line": 3354,
+          "line": 3372,
           "tier": "network"
         }
       ],
@@ -3676,7 +3676,7 @@
       "locations": [
         {
           "file": "src/net.c",
-          "line": 3357,
+          "line": 3375,
           "tier": "network"
         }
       ],
@@ -3693,7 +3693,7 @@
       "locations": [
         {
           "file": "src/net.c",
-          "line": 3360,
+          "line": 3378,
           "tier": "network"
         }
       ],
@@ -3710,7 +3710,7 @@
       "locations": [
         {
           "file": "src/net.c",
-          "line": 3362,
+          "line": 3380,
           "tier": "network"
         }
       ],
@@ -3727,7 +3727,7 @@
       "locations": [
         {
           "file": "src/net.c",
-          "line": 3364,
+          "line": 3382,
           "tier": "network"
         }
       ],
@@ -4237,7 +4237,7 @@
       "locations": [
         {
           "file": "src/net.c",
-          "line": 3341,
+          "line": 3359,
           "tier": "network"
         }
       ],
@@ -4254,7 +4254,7 @@
       "locations": [
         {
           "file": "src/net.c",
-          "line": 3366,
+          "line": 3384,
           "tier": "network"
         }
       ],
@@ -4429,7 +4429,7 @@
       "locations": [
         {
           "file": "src/net.c",
-          "line": 3369,
+          "line": 3387,
           "tier": "network"
         }
       ],
@@ -5165,7 +5165,7 @@
         },
         {
           "file": "src/net.c",
-          "line": 3310,
+          "line": 3328,
           "tier": "network"
         }
       ],
@@ -5530,7 +5530,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 4248,
+          "line": 4271,
           "tier": "extended"
         }
       ],
@@ -5591,7 +5591,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 4267,
+          "line": 4290,
           "tier": "extended"
         }
       ],
