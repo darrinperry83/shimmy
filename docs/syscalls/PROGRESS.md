@@ -64,6 +64,9 @@ This file records bounded behavior that has been implemented and tested. A dispa
 | 127 | `sched_rr_get_interval` | `syscall/127-sched-rr-get-interval` | Squash merged at `4341d2a`; honest errors | Removes fabricated fixed 1 ms interval. Valid current-thread requests remain unsupported until a guest scheduler slice is modeled. ARM64 guest test passes. |
 | 122 | `sched_setaffinity` | `syscall/122-sched-setaffinity` | Squash merged at `eca4858`; bounded subset | Checked guest mask, current-thread unrestricted virtual CPU set only; restricted masks remain unsupported. ARM64 guest test passes. |
 | 123 | `sched_getaffinity` | `syscall/123-sched-getaffinity` | Squash merged at `604a899`; bounded subset | Checked eight-byte virtual CPU mask capped to 32 guest CPUs; invalid target and pointer errors. ARM64 guest test passes. |
+| 213 | `readahead` | `syscall/213-readahead` | Squash merged at `3db06af`; bounded subset | Validated readable regular-file ranges issue a Darwin asynchronous read hint; nonregular, invalid and oversized requests are rejected. ARM64 guest test passes. |
+| 223 | `fadvise64` | `syscall/223-fadvise64` | Squash merged at `4239189`; bounded subset | Valid regular-file `POSIX_FADV_NORMAL` uses the existing default state; other advice is rejected until per-file behavior exists. ARM64 guest test passes. |
+| 233 | `madvise` | `syscall/233-madvise` | Squash merged at `bc032af`; bounded subset | Mapped guest ranges and nondestructive NORMAL/RANDOM/SEQUENTIAL/WILLNEED hints reach Darwin; data/VMA/fork effects remain unsupported. ARM64 guest test passes. |
 
 ## Already merged before this batch
 
@@ -77,7 +80,9 @@ The next six squash merges (`syslog`, `personality`, `mbind`, `get_mempolicy`, `
 
 The scheduler trio (118–120) passed a combined CLI build and all three disposable ARM64 guest tests on 2026-11-18. This is only the current guest thread's default scheduler policy and priority; other-thread policy changes, real-time scheduling, and timing guarantees are not supported.
 
-The next scheduler/affinity set (121–123 and 125–127) passed a combined CLI build and six disposable ARM64 guest tests on 2026-11-18. Guest PID identity and the virtual CPU topology are under additional review before this set is pushed; the host `/proc/cpuinfo` presentation is not yet unified with the 32-CPU status/sysfs cap.
+The next scheduler/affinity set (121–123 and 125–127) passed a combined CLI build and six disposable ARM64 guest tests on 2026-11-18. A separate squash correction at `5f4ffbd` removes redundant main-thread aliases and host PID acceptance in scheduler target checks. Its ARM64 regression passes in ordinary and PID 1 init processes, each with a forked child. The host `/proc/cpuinfo` presentation is not yet unified with the 32-CPU status/sysfs cap.
+
+After merging the advisory-call trio (213, 223, 233), the CLI build and all ten focused ARM64 probes for this set, including the scheduler identity regression, passed together on 2026-11-18. The installed Arch root was not modified. This does not establish live systemd or GUI regression coverage.
 
 ## Batch integration proof
 
