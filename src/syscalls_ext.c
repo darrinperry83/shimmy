@@ -1466,6 +1466,28 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
       errno = saved_errno;
       return r < 0 ? eret() : r;
     }
+    if (nr == 9) {
+      char guest_path[PATH_MAX], name[256];
+      e = copy_guest_cstr(a0, guest_path, sizeof guest_path);
+      if (e < 0) return e;
+      e = copy_guest_cstr(a1, name, sizeof name);
+      if (e < 0) return e;
+      e = resolve_path_nf(guest_path, host, sizeof host, 1);
+      if (e < 0) return e;
+      size_t requested = (size_t)a3;
+      size_t cap = requested > 1024 * 1024 ? 1024 * 1024 : requested;
+      char *value = cap ? malloc(cap) : NULL;
+      if (cap && !value) return -LX_ENOMEM;
+      ssize_t r = getxattr(host, name, value, cap, 0, XATTR_NOFOLLOW);
+      if (requested && r > 0 && gmem_guest_copyout_checked(a2, value, (size_t)r) != 0) {
+        free(value);
+        return -LX_EFAULT;
+      }
+      int saved_errno = errno;
+      free(value);
+      errno = saved_errno;
+      return r < 0 ? eret() : r;
+    }
     ssize_t r;
     e = resolve_path_nf((const char*)a0, host, sizeof host, nr == 9);
     if (e < 0) return e;
