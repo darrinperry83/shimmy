@@ -1751,7 +1751,13 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
       return -LX_EFAULT;
     return -LX_EOPNOTSUPP;
   }
-  case 128: return -LX_EINTR;                                  // restart_syscall
+  case 128:                                                    // restart_syscall
+    // Linux calls the thread's restart_block.fn. Shimmy never installs a
+    // restart block for interrupted guest operations: nanosleep and
+    // clock_nanosleep return EINTR directly, and guest signal frames are not
+    // built. With no saved operation/deadline, restarting here would invent
+    // work or extend a timeout. Linux's no-restart block returns EINTR.
+    return -LX_EINTR;
 
   // ===== 130..140: signals =================================================
   case 130: case 131: {                                        // tkill(tid,sig) / tgkill(tgid,tid,sig)
