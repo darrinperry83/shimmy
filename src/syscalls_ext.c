@@ -1633,12 +1633,16 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (fd < 0 || shim_fd_reserved(fd)) return -LX_EBADF;
     return ok0(fchmod(fd, (mode_t)a1));
   }
-  case 53:                                                     // fchmodat(dfd, path, mode)
+  case 53: {                                                   // fchmodat(dfd, path, mode)
     // The original Linux syscall has three arguments. x3 is unspecified here;
     // treating it as flags makes chmod fail at random (ldconfig hits EINVAL).
-    e = resolve_at((int)a0, (const char*)a1, host, sizeof host, &hdirfd);
+    char guest_path[PATH_MAX];
+    e = copy_guest_cstr(a1, guest_path, sizeof guest_path);
+    if (e < 0) return e;
+    e = resolve_at((int)a0, guest_path, host, sizeof host, &hdirfd);
     if (e < 0) return e;
     return ok0(fchmodat(hdirfd, host, (mode_t)a2, 0));
+  }
   case 54:                                                     // fchownat
     if (g_uid0) {
       struct stat st;

@@ -1078,7 +1078,7 @@
       "verified_compatible": false
     },
     {
-      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "classification_reason": "bounded: checked guest pathname and ordinary file mode change verified",
       "dispatch_locations": [
         {
           "file": "src/syscalls_ext.c",
@@ -1088,12 +1088,12 @@
       ],
       "dispatch_state": "case",
       "name": "fchmodat",
-      "notes": "",
+      "notes": "Guest pathname is copied before resolution; broader permission semantics unverified. See docs/syscalls/53-fchmodat-guest-path.md.",
       "number": 53,
       "priority": "P2_other",
       "runtime_evidence": [],
-      "semantic_status": "unknown",
-      "test_evidence": [],
+      "semantic_status": "partial_or_unknown",
+      "test_evidence": ["tests/run-fchmodat-path.py"],
       "trap_override": false,
       "verified_compatible": false
     },
