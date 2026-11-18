@@ -29,6 +29,9 @@ if not root.is_relative_to(build) or not (root / "usr/bin/sddm").is_file():
     raise SystemExit("RD_SDDM_ROOT must be a disposable SDDM Arch clone under build/")
 if not (root / "etc/systemd/system/display-manager.service").is_symlink():
     raise SystemExit("enable display-manager.service only in the disposable clone")
+shadow = root / "etc/shadow"
+if not shadow.is_file() or not any(line.startswith("sddm:") for line in shadow.read_text().splitlines()):
+    raise SystemExit("complete the disposable SDDM account with systemd-sysusers before probing")
 
 group = Path(tempfile.mkdtemp(prefix="shimmy-sddm-probe-", dir="/tmp"))
 log = build / "sddm-probe-boot.log"

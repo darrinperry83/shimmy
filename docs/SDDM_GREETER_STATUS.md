@@ -93,3 +93,30 @@ register the same name twice but leave SDDM's particular ordering unresolved.
 The separate eventfd counter experiment corrected a real Linux semantic gap
 in a test branch; an isolated SDDM retest still showed no KWin process. It is
 not the proven cause of the greeter stall and is not merged here.
+
+## 18 November isolated GUI retest
+
+At development `5983c9c`, both GUI and CLI rebuilt after a fresh pull. The
+on-screen boot reached `Started Simple Desktop Display Manager`, and SDDM
+reached `Greeter starting`, but no greeter KWin process appeared. The test
+root had originally been populated by extracting the cached package rather
+than completing its account setup. It contained `sddm` passwd and group
+entries but lacked an `/etc/shadow` entry. In one traced run, the parent and
+helper completed a 57-byte/688-byte auth-socket exchange, then
+`user@962.service` exited `224/PAM`; the journal showed `unix_chkpwd` could
+not obtain user information for `sddm`. This was a **fixture defect**, not a
+demonstrated Shimmy PAM defect. The guest's own `systemd-sysusers` recreated
+all three account records in the disposable root, and the SDDM probe now
+rejects incomplete accounts before booting.
+
+With the corrected account, the greeter still failed to appear. In another
+run the parent had 44 unread helper-auth bytes while its main guest thread
+waited in a futex and its Qt D-Bus thread waited in `ppoll`. A gated experiment
+broadened the existing eventfd repoll condition; the eventfd receive queues
+drained, but SDDM still did not launch KWin, so that source experiment was
+reverted. The later helper journal reported PAM session opening, followed
+50 seconds later by `pam_systemd` receiving `io.systemd.System` from
+`CreateSession`. `systemd-logind` logged 25-second timeouts starting both
+`user-runtime-dir@962.service` and `user@962.service`. These observations
+identify the current session-service handoff as the next target; neither a
+working greeter nor a repaired D-Bus/varlink exchange has been demonstrated.
