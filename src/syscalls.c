@@ -5136,18 +5136,19 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   case 123: {
     long target = (long)(int)a0;
     if (target != 0 && target != guest_tid() &&
-        !(target == (long)getpid() && guest_tid() == 1))
+        !(target == syscalls_guest_pid() && guest_tid() == syscalls_guest_pid()))
       return guest_tid_known((int)target) ? -95 : -LX_ESRCH;
     size_t sz = (size_t)a1;
-    unsigned char* mask = (unsigned char*)a2;
-    if (!mask) return -LX_EFAULT;
-    if (sz < 8) return -LX_EINVAL;
+    // The virtual topology exposes at most 32 online CPUs. Linux's raw
+    // syscall copies a kernel-sized mask and returns its byte count, not the
+    // size supplied by the caller. AArch64 masks use 64-bit words.
+    if (sz < 8 || (sz & 7)) return -LX_EINVAL;
     long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
     if (ncpu < 1) ncpu = 1;
-    if (sz > 128) sz = 128;                     // kernel copies out a cpumask_t, not `sz`
-    memset(mask, 0, sz);
-    for (long i = 0; i < ncpu && (size_t)(i / 8) < sz; i++) mask[i / 8] |= (unsigned char)(1u << (i % 8));
-    return (long)sz;
+    if (ncpu > 32) ncpu = 32;
+    uint64_t mask = (UINT64_C(1) << ncpu) - 1;
+    if (gmem_guest_copyout_checked(a2, &mask, sizeof mask) != 0) return -LX_EFAULT;
+    return sizeof mask;
   }
 
   // ---------- 129 kill ----------
