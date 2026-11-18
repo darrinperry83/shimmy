@@ -2443,7 +2443,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     rl.rlim_cur = host_rlim(n->rlim_cur); rl.rlim_max = host_rlim(n->rlim_max);
     return ok0(setrlimit(hr, &rl));
   }
-  case 166: return (long)umask((mode_t)a0);                    // umask
+  case 166: return (long)umask((mode_t)(a0 & 0777));           // umask: Linux masks to S_IRWXUGO
   case 167: return do_prctl((int)a0, a1, a2, a3, a4);          // prctl
   case 168:                                                    // getcpu
     if (a0) *(unsigned*)a0 = 0;
