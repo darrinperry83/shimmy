@@ -1757,7 +1757,10 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
       case S_IFDIR: return -LX_EPERM;
       default: return -LX_EINVAL;
     }
-    e = resolve_at_nf((int)a0, (const char*)a1, host, sizeof host, &hdirfd, 1);
+    char guest_path[PATH_MAX];
+    e = copy_guest_cstr(a1, guest_path, sizeof guest_path);
+    if (e < 0) return e;
+    e = resolve_at_nf((int)a0, guest_path, host, sizeof host, &hdirfd, 1);
     if (e < 0) return e;
     if (S_ISFIFO(mode)) {
       // mkfifoat exists on macOS; fall back to a cwd-relative mkfifo if the dirfd is AT_FDCWD.
