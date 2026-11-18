@@ -1,4 +1,5 @@
 #include "guest_ownership.h"
+#include "guest_cred_registry.h"
 // syscalls_ext.c — extended/rare Linux aarch64 syscalls (the FALLBACK tier).
 //
 // linux_syscall() (syscalls.c) owns the hot core set and tail-calls us for everything else.
@@ -1915,7 +1916,22 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
 
   // ===== 95..106: process =================================================
   case 95: {                                                   // waitid
-    int lopt = (int)a3, hopt = 0;
+    /* Linux's raw ABI has a fifth rusage pointer. Darwin waitid cannot
+     * provide it, so never consume a child while silently ignoring it. */
+    if (a4) return -LX_EOPNOTSUPP;
+    unsigned lopt = (unsigned)a3;
+    const unsigned events = LX_WSTOPPED | LX_WEXITED | LX_WCONTINUED;
+    const unsigned supported = events | LX_WNOHANG | LX_WNOWAIT;
+    if ((lopt & ~supported) || !(lopt & events)) return -LX_EINVAL;
+    if (a0 > LX_P_PIDFD) return -LX_EINVAL;
+    if (a0 == P_PID && (int)a1 <= 0) return -LX_EINVAL;
+    if (a0 == P_PGID && (long)(int)a1 < 0) return -LX_EINVAL;
+    // Validate writable guest output before a wait can reap a child.
+    unsigned char original[128];
+    if (a2 && (gmem_guest_export_copyin(NULL, a2, original, sizeof original) != 0 ||
+               gmem_guest_copyout_checked(a2, original, sizeof original) != 0))
+      return -LX_EFAULT;
+    int hopt = 0;
     if (lopt & LX_WNOHANG)    hopt |= WNOHANG;
     if (lopt & LX_WSTOPPED)   hopt |= WSTOPPED;
     if (lopt & LX_WEXITED)    hopt |= WEXITED;
@@ -1924,18 +1940,32 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     siginfo_t si; memset(&si, 0, sizeof si);
     // waitid(P_PIDFD, pidfd, ...): macOS has no pidfd idtype; resolve the pid from the registry.
     if ((int)a0 == LX_P_PIDFD) {
+      if (pidfd_shim_pid((int)a1) <= 0) return -LX_EBADF;
       if (pidfd_shim_waitid((int)a1, (id_t)a1, &si, hopt) != 0) return eret();
     } else if (waitid((idtype_t)a0, (id_t)a1, &si, hopt) != 0) return eret();
     if (si.si_pid > 0 && !(lopt & LX_WNOWAIT)) syscalls_signal_child_reaped(si.si_pid);
     if (a2) {                                                  // Linux siginfo layout, by hand
-      unsigned char* u = (unsigned char*)a2;
-      memset(u, 0, 128);
-      *(int*)(u + 0)  = 17;                                    // si_signo = Linux SIGCHLD
-      *(int*)(u + 4)  = 0;                                     // si_errno
-      *(int*)(u + 8)  = si.si_code;                            // CLD_* match
-      *(int*)(u + 16) = (int)si.si_pid;
-      *(unsigned*)(u + 20) = (unsigned)si.si_uid;
-      *(int*)(u + 24) = si.si_status;
+      unsigned char u[128] = {0};
+      if (si.si_pid > 0) {
+        *(int*)(u + 0)  = 17;                                  // Linux SIGCHLD
+        *(int*)(u + 8)  = si.si_code;                          // CLD_* match
+        *(int*)(u + 16) = (int)si.si_pid;
+        unsigned uid = (unsigned)si.si_uid;
+        if (g_uid0) {
+          uint32_t guest_uid, guest_gid;
+          uid = guest_cred_registry_lookup(si.si_pid, &guest_uid, &guest_gid) == 0
+                  ? guest_uid : 0u; // legacy root child without a registry record
+        }
+        *(unsigned*)(u + 20) = uid;
+        int status = si.si_status;
+        if (si.si_code != CLD_EXITED) {
+          status = 0;
+          for (int lx = 1; lx < 32; ++lx)
+            if (host_signo(lx) == si.si_status) { status = lx; break; }
+        }
+        *(int*)(u + 24) = status;
+      }
+      if (gmem_guest_copyout_checked(a2, u, sizeof u) != 0) return -LX_EFAULT;
     }
     return 0;
   }
