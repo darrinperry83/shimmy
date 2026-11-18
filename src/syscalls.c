@@ -4639,10 +4639,15 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
                          (unsigned long)how.mode, 0, 0);
   }
   case 56: {
+    // The resolver expects a host-readable pathname. Snapshot the bounded
+    // guest string first so a bad guest address returns EFAULT rather than
+    // faulting the shim during this common filesystem operation.
+    char guest_path[PATH_MAX];
+    if ((r = readlink_guest_path(a1, guest_path, sizeof guest_path)) < 0) return r;
     // O_NOFOLLOW must stop the GUEST-side resolver too, not only the host open(): if we resolved
     // the final component here, the host would be handed a non-link and O_NOFOLLOW would silently
     // become a no-op instead of the ELOOP the guest asked for.
-    if ((r = resolve_f((int)a0, (const char*)a1, ((int)a2 & LO_NOFOLLOW) ? RSV_NOFOLLOW : 0,
+    if ((r = resolve_f((int)a0, guest_path, ((int)a2 & LO_NOFOLLOW) ? RSV_NOFOLLOW : 0,
                        host, sizeof host, gabs, sizeof gabs)) < 0)
       return r;
     // RDPATHS=1 names the FILE. RDVERBOSE prints pointers, which is useless when the question is
