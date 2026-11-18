@@ -1,6 +1,6 @@
 # `msgget` (AArch64 syscall 186): host IPC namespace blocker
 
-The current `msgget` handler forwards the guest's key and flags directly to
+The original `msgget` handler forwarded the guest's key and flags directly to
 Darwin `msgget` (`src/syscalls_ext.c`). Darwin SysV message queues are shared
 with other macOS processes under the host account. A guest can therefore
 resolve an existing host queue by key or create a queue visible outside its
@@ -29,6 +29,7 @@ ordering and message types, `IPC_NOWAIT` and blocking wakeups, `IPC_STAT/SET/
 RMID`, permissions, fork/exec sharing, and cleanup after abnormal exit. Use
 only disposable queues and remove them even when a test fails.
 
-**Status:** security and semantic blocker; this branch makes no runtime
-change and does not count syscall 186 as Linux-compatible. No host IPC queue
-was created or removed during this audit.
+**Status:** security and semantic blocker. Syscall 186 now returns `ENOSYS`
+before touching host IPC. This is a narrow safeguard, not Linux-compatible
+message queues: calls 187–189 still accept host queue IDs and need a joint
+isolation design. The focused guest probe makes no host IPC queue.

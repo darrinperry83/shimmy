@@ -2801,11 +2801,11 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   case 180: case 181: case 182: case 183: case 184: case 185:  // mq_*
     return -LX_ENOSYS;
 
-  // SysV message queues are FORWARDED to the host, exactly like shm/sem below. macOS implements
-  // msgget/msgsnd/msgrcv/msgctl natively, the four signatures match Linux 1:1, struct msgbuf's
-  // leading `long mtype` is identical on both, and guest pointers ARE host pointers. IPC_NOWAIT
-  // and MSG_NOERROR share their values, and msgctl's IPC_RMID/IPC_SET/IPC_STAT are 0/1/2 on both.
-  case 186: { int r = msgget((key_t)a0, (int)a1); return r < 0 ? eret() : r; }   // msgget
+  // Darwin SysV queues share a host-wide namespace. Passing a guest key to msgget can resolve
+  // another macOS process's queue or create a persistent host object. Until all four message
+  // calls share an instance-scoped ID registry, refuse queue lookup and creation truthfully.
+  // The ID-taking calls below still need their own isolation; this is only a #186 safeguard.
+  case 186: return -LX_ENOSYS;                                   // msgget
   case 189: { int r = msgsnd((int)a0, (const void*)a1, (size_t)a2, (int)a3);     // msgsnd
               return r < 0 ? eret() : 0; }
   case 188: { ssize_t r = msgrcv((int)a0, (void*)a1, (size_t)a2, (long)a3, (int)a4);  // msgrcv

@@ -3753,7 +3753,7 @@
       "verified_compatible": false
     },
     {
-      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "classification_reason": "safeguarded: host-global SysV queue access refused with ENOSYS; Linux semantics unsupported",
       "dispatch_locations": [
         {
           "file": "src/syscalls_ext.c",
@@ -3763,12 +3763,12 @@
       ],
       "dispatch_state": "case",
       "name": "msgget",
-      "notes": "",
+      "notes": "Safeguarded against host-global key lookup and creation. #187-189 still accept raw host queue IDs; see docs/syscalls/186-msgget-blocker.md.",
       "number": 186,
       "priority": "P1_common",
       "runtime_evidence": [],
-      "semantic_status": "unknown",
-      "test_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": ["tests/run-msgget-refuse.py"],
       "trap_override": false,
       "verified_compatible": false
     },
