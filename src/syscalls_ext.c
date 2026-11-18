@@ -2107,7 +2107,36 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     }
     return 0;
   }
-  case 237: return 0;                                           // set_mempolicy: no-op
+  case 237: {                                                   // set_mempolicy: default-only
+    // On the one-node guest, clearing the per-task policy is truthful. Other
+    // modes require policy state and allocation behavior; success would claim
+    // placement that Darwin's allocator does not implement.
+    enum { MPOL_MODE_FLAGS = 0xe000u, MPOL_STATIC = 0x8000u,
+           MPOL_RELATIVE = 0x4000u, MPOL_NUMA_BALANCING = 0x2000u,
+           MPOL_BIND = 2, MPOL_PREFERRED_MANY = 5, MPOL_MAX = 7 };
+    unsigned raw = (unsigned)(int)a0;
+    unsigned mode = raw & ~MPOL_MODE_FLAGS;
+    unsigned flags = raw & MPOL_MODE_FLAGS;
+    if (mode >= MPOL_MAX ||
+        ((flags & (MPOL_STATIC | MPOL_RELATIVE)) ==
+         (MPOL_STATIC | MPOL_RELATIVE)) ||
+        ((flags & MPOL_NUMA_BALANCING) &&
+         mode != MPOL_BIND && mode != MPOL_PREFERRED_MANY))
+      return -LX_EINVAL;
+    if (mode || flags) return -LX_EOPNOTSUPP;
+
+    // Linux get_nodes() decrements maxnode, and ignores a NULL mask or a
+    // one-bit mask without dereferencing the latter. Preserve those cases.
+    if (!a1 || a2 == 1) return 0;
+    if (!a2) return -LX_EINVAL;
+    if (a2 > 65) return -LX_EOPNOTSUPP; // wider masks are outside this subset
+    uint64_t bits;
+    if (gmem_guest_export_copyin(NULL, a1, &bits, sizeof bits) != 0)
+      return -LX_EFAULT;
+    unsigned count = (unsigned)a2 - 1;
+    uint64_t relevant = count == 64 ? UINT64_MAX : ((1ULL << count) - 1);
+    return (bits & relevant) ? -LX_EINVAL : 0;
+  }
   case 238: return -LX_ENOSYS;                                  // migrate_pages
   case 239: {                                                   // move_pages: query current process
     /* Shimmy presents one NUMA node. Darwin has no equivalent to migrating
