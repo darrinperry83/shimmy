@@ -249,3 +249,20 @@ long posix_timer_shim_gettime(uint64_t timer_id, uint64_t setting_addr) {
   return gmem_guest_copyout_checked(setting_addr, &setting, sizeof setting) == 0 ?
          0 : -LX_EFAULT;
 }
+
+long posix_timer_shim_getoverrun(uint64_t timer_id) {
+  pthread_once(&g_timer_once, timer_init_once);
+  if (g_atfork_error) return -LX_EAGAIN;
+  pthread_mutex_lock(&g_timer_mu);
+  struct lx_posix_timer* timer = g_timers;
+  while (timer && timer->id != (int32_t)timer_id) timer = timer->next;
+  if (!timer) {
+    pthread_mutex_unlock(&g_timer_mu);
+    return -LX_EINVAL;
+  }
+  // Linux returns it_overrun_last, which changes only when a timer signal is
+  // delivered. SIGEV_NONE never queues or delivers one, even when a periodic
+  // timer expires repeatedly. Its last-delivered overrun stays zero.
+  pthread_mutex_unlock(&g_timer_mu);
+  return 0;
+}
