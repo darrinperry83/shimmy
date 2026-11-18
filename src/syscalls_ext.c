@@ -1977,10 +1977,14 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (fd < 0 || shim_fd_reserved(fd)) return -LX_EBADF;
     return ok0(fsync(fd));
   }
-  case 83:                                                     // fdatasync
+  case 83: {                                                   // fdatasync
     // macOS fsync does not push the drive cache; F_FULLFSYNC does. fdatasync only owes us
     // metadata-lite durability, so plain fsync is the right (and much cheaper) mapping.
-    return ok0(fsync((int)a0));
+    int fd = (int)a0;
+    // A guest sync must not reach a shim-owned host descriptor by number.
+    if (fd < 0 || shim_fd_reserved(fd)) return -LX_EBADF;
+    return ok0(fsync(fd));
+  }
   case 84: {                                                  // sync_file_range
     /* A zero-flags request performs no writeback on Linux.  Do not map a
      * range request to whole-file fsync: its wait/write/error contract is

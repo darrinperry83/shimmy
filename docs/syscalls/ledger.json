@@ -1683,7 +1683,7 @@
       "verified_compatible": false
     },
     {
-      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "classification_reason": "bounded: regular file sync verified; shim-owned descriptors rejected",
       "dispatch_locations": [
         {
           "file": "src/syscalls_ext.c",
@@ -1693,12 +1693,12 @@
       ],
       "dispatch_state": "case",
       "name": "fdatasync",
-      "notes": "",
+      "notes": "Reserved descriptor guard; full Linux durability semantics unverified. See docs/syscalls/83-fdatasync-reserved-fd.md.",
       "number": 83,
       "priority": "P2_other",
       "runtime_evidence": [],
-      "semantic_status": "unknown",
-      "test_evidence": [],
+      "semantic_status": "partial_or_unknown",
+      "test_evidence": ["tests/run-fdatasync-reserved.py"],
       "trap_override": false,
       "verified_compatible": false
     },
