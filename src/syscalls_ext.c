@@ -1740,9 +1740,21 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
       default: return -LX_EINVAL;
     }
   }
-  case 127:                                                    // sched_rr_get_interval
-    if (a1) { struct lx_timespec* t = (struct lx_timespec*)a1; t->tv_sec = 0; t->tv_nsec = 1000000; }
-    return 0;
+  case 127: {                                                  // sched_rr_get_interval
+    /* The guest currently exposes SCHED_OTHER, but does not model the Linux
+     * fair runqueue or its per-task slice. A fixed 1 ms value is fabricated:
+     * Linux derives this interval from scheduler state, and may report zero.
+     * Reject a valid query until that state exists rather than publish a
+     * misleading quantum. Never write through an unchecked guest pointer. */
+    long target = (long)(int)a0;
+    if (target < 0) return -LX_EINVAL;
+    if (target && target != guest_tid() &&
+        !(target == (long)syscalls_guest_pid() && guest_tid() == 1))
+      return guest_tid_known((int)target) ? -LX_EOPNOTSUPP : -LX_ESRCH;
+    if (!a1 || gmem_guest_range_mapped(a1, sizeof(struct lx_timespec)) != 0)
+      return -LX_EFAULT;
+    return -LX_EOPNOTSUPP;
+  }
   case 128: return -LX_EINTR;                                  // restart_syscall
 
   // ===== 130..140: signals =================================================
