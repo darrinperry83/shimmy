@@ -1971,7 +1971,12 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
 
   // ===== 81..92: sync, timers, utimes, caps =================================
   case 81: sync(); return 0;                                   // sync
-  case 82: return ok0(fsync((int)a0));                         // fsync
+  case 82: {                                                   // fsync
+    int fd = (int)a0;
+    // The guest must not flush a shim-owned host descriptor by number.
+    if (fd < 0 || shim_fd_reserved(fd)) return -LX_EBADF;
+    return ok0(fsync(fd));
+  }
   case 83:                                                     // fdatasync
     // macOS fsync does not push the drive cache; F_FULLFSYNC does. fdatasync only owes us
     // metadata-lite durability, so plain fsync is the right (and much cheaper) mapping.
