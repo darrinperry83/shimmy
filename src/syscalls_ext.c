@@ -1422,14 +1422,33 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return ok0(setxattr(host, (const char*)a1, (const void*)a2, (size_t)a3, 0, hopt));
   }
   case 8: case 9: case 10: {                                   // getxattr / lgetxattr / fgetxattr
-    ssize_t r;
-    if (nr == 10) r = fgetxattr((int)a0, (const char*)a1, (void*)a2, (size_t)a3, 0, 0);
-    else {
-      e = resolve_path_nf((const char*)a0, host, sizeof host, nr == 9);
+    if (nr == 10) {
+      // The xattr name and value destination are guest addresses. Snapshot
+      // the bounded name and stage host output before checked guest copyout.
+      char name[256]; // Linux XATTR_NAME_MAX plus NUL
+      e = copy_guest_cstr(a1, name, sizeof name);
       if (e < 0) return e;
-      r = getxattr(host, (const char*)a1, (void*)a2, (size_t)a3, 0,
-                   nr == 9 ? XATTR_NOFOLLOW : 0);
+      size_t requested = (size_t)a3;
+      size_t cap = requested > 1024 * 1024 ? 1024 * 1024 : requested;
+      char *value = cap ? malloc(cap) : NULL;
+      if (cap && !value) return -LX_ENOMEM;
+      ssize_t r = fgetxattr((int)a0, name, value, cap, 0, 0);
+      // This is a read-only query, so only its actual result needs guest
+      // space. A large advertised capacity may still hold a small xattr.
+      if (requested && r > 0 && gmem_guest_copyout_checked(a2, value, (size_t)r) != 0) {
+        free(value);
+        return -LX_EFAULT;
+      }
+      int saved_errno = errno;
+      free(value);
+      errno = saved_errno;
+      return r < 0 ? eret() : r;
     }
+    ssize_t r;
+    e = resolve_path_nf((const char*)a0, host, sizeof host, nr == 9);
+    if (e < 0) return e;
+    r = getxattr(host, (const char*)a1, (void*)a2, (size_t)a3, 0,
+                 nr == 9 ? XATTR_NOFOLLOW : 0);
     return r < 0 ? eret() : r;
   }
   case 11: case 12: case 13: {                                 // listxattr / l / f
