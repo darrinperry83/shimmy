@@ -1,0 +1,9 @@
+# `timer_create` (ARM64 syscall 107): requires a POSIX timer backend
+
+Linux `timer_create(clockid, sigevent *, timer_t *)` allocates a process-owned timer ID and publishes it to the caller. A null event requests signal delivery by default; `SIGEV_NONE` suppresses notification, while signal and thread-ID modes need delivery through the guest signal system. A newly created timer is disarmed, but the ID must work with `timer_settime`, `timer_gettime`, `timer_getoverrun`, and `timer_delete`. Timers are shared among threads, removed on `fork`, and removed on `exec`.
+
+Shimmy currently returns `ENOSYS` for the entire POSIX timer family (107–111). It has no per-process timer table or expiration worker, and its virtual signal delivery is incomplete. Adding only an integer ID allocator to syscall 107 would report success for a timer that cannot be armed, queried, deleted, or notify its owner. That would be a false compatibility claim. Keep the existing `ENOSYS` result until the family has a coherent backend.
+
+The first bounded implementation should handle `CLOCK_MONOTONIC` and `CLOCK_REALTIME` with `SIGEV_NONE`: define a per-process timer registry with stable IDs, a locking/lifecycle rule for concurrent threads, and working create, settime, gettime, overrun, and delete operations. Add default and explicit signal notification only after the guest signal path can queue `SI_TIMER` with the correct timer ID and value. Tests should cover ARM64 `sigevent` and `timer_t` layouts, bad guest pointers, clock validation, disarmed state, one-shot and periodic expirations, concurrent deletion, and fork/exec cleanup. Compare the result against Linux before enabling syscall 107.
+
+Primary source: [Linux `kernel/time/posix-timers.c`, `do_timer_create` and `SYSCALL_DEFINE3(timer_create)`](https://github.com/torvalds/linux/blob/master/kernel/time/posix-timers.c).
