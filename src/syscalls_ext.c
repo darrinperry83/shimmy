@@ -101,11 +101,30 @@ struct lx_aio_ring_header {
   uint32_t id, nr, head, tail;
   uint32_t magic, compat_features, incompat_features, header_length;
 };
+struct lx_aio_event {
+  uint64_t data, obj;
+  int64_t res, res2;
+};
+struct lx_aio_iocb {
+  uint64_t data;
+  uint32_t key, rw_flags;
+  uint16_t opcode;
+  int16_t reqprio;
+  uint32_t fd;
+  uint64_t buf, nbytes;
+  int64_t offset;
+  uint64_t reserved2;
+  uint32_t flags, resfd;
+};
+_Static_assert(sizeof(struct lx_aio_iocb) == 64, "Linux ARM64 iocb size");
 struct lx_aio_context {
   uint64_t handle;
   size_t mapping_length;
   unsigned requested_events;
   pid_t host_pid;
+  struct lx_aio_event* completions;
+  unsigned completion_head, completion_tail, completion_count;
+  unsigned ring_tail;
 };
 static pthread_mutex_t g_lx_aio_mu = PTHREAD_MUTEX_INITIALIZER;
 static struct lx_aio_context g_lx_aio_contexts[32];
@@ -130,11 +149,17 @@ static long lx_io_setup(unsigned nr_events, uint64_t ctxp) {
     pthread_mutex_unlock(&g_lx_aio_mu);
     return -LX_EAGAIN;
   }
+  struct lx_aio_event* completions = calloc(nr_events, sizeof *completions);
+  if (!completions) {
+    pthread_mutex_unlock(&g_lx_aio_mu);
+    return -LX_ENOMEM;
+  }
   // One spare ring entry distinguishes full from empty. The Linux ring
   // header is 32 bytes followed by 32-byte io_event records.
   size_t length = sizeof(struct lx_aio_ring_header) + ((size_t)nr_events + 1) * 32;
   long mapping = gmem_mmap(0, length, PROT_READ | PROT_WRITE, 0x01 | 0x20, -1, 0);
   if (mapping < 0) {
+    free(completions);
     pthread_mutex_unlock(&g_lx_aio_mu);
     return mapping;
   }
@@ -146,12 +171,14 @@ static long lx_io_setup(unsigned nr_events, uint64_t ctxp) {
   if (gmem_guest_copyout_checked((uint64_t)mapping, &ring, sizeof ring) != 0 ||
       gmem_guest_copyout_checked(ctxp, &mapping, sizeof mapping) != 0) {
     gmem_munmap((unsigned long)mapping, length);
+    free(completions);
     pthread_mutex_unlock(&g_lx_aio_mu);
     return -LX_EFAULT;
   }
   g_lx_aio_contexts[slot] = (struct lx_aio_context){
     .handle = (uint64_t)mapping, .mapping_length = length,
     .requested_events = nr_events, .host_pid = getpid(),
+    .completions = completions,
   };
   pthread_mutex_unlock(&g_lx_aio_mu);
   return 0;
@@ -177,12 +204,108 @@ static long lx_io_destroy(uint64_t handle) {
     return -LX_EINVAL;
   }
   size_t length = g_lx_aio_contexts[slot].mapping_length;
+  free(g_lx_aio_contexts[slot].completions);
   g_lx_aio_contexts[slot] = (struct lx_aio_context){0};
   // Linux tears down the context even when userspace has unmapped the ring.
   // The mapping operation's result is not the syscall's completion status.
   (void)gmem_munmap((unsigned long)handle, length);
   pthread_mutex_unlock(&g_lx_aio_mu);
   return 0;
+}
+
+// A bounded, synchronously completed AIO submission. Linux permits a regular
+// file request to finish inline; we still publish a real io_event for the
+// subsequent io_getevents family call. Holding the registry lock pins the
+// context through completion and makes io_destroy wait for this operation.
+// This stage is not exposed on development until io_getevents is implemented.
+static long lx_io_submit(uint64_t handle, long nr, uint64_t iocbpp) {
+  if (nr < 0) return -LX_EINVAL;
+  pthread_mutex_lock(&g_lx_aio_mu);
+  struct lx_aio_context* ctx = NULL;
+  for (unsigned i = 0; i < 32; ++i)
+    if (g_lx_aio_contexts[i].handle == handle &&
+        g_lx_aio_contexts[i].host_pid == getpid()) {
+      ctx = &g_lx_aio_contexts[i];
+      break;
+    }
+  if (!ctx) { pthread_mutex_unlock(&g_lx_aio_mu); return -LX_EINVAL; }
+  if (!nr) { pthread_mutex_unlock(&g_lx_aio_mu); return 0; }
+  if (nr > ctx->requested_events) nr = ctx->requested_events;
+  long submitted = 0, error = 0;
+  for (; submitted < nr; ++submitted) {
+    if (ctx->completion_count >= ctx->requested_events) { error = -LX_EAGAIN; break; }
+    uint64_t iocb_addr = 0;
+    if (!iocbpp ||
+        gmem_guest_export_copyin(NULL, iocbpp + (uint64_t)submitted * 8,
+                                 &iocb_addr, sizeof iocb_addr) != 0 || !iocb_addr) {
+      error = -LX_EFAULT; break;
+    }
+    struct lx_aio_iocb cb;
+    if (gmem_guest_export_copyin(NULL, iocb_addr, &cb, sizeof cb) != 0) {
+      error = -LX_EFAULT; break;
+    }
+    if (cb.reserved2 || cb.rw_flags || cb.flags || cb.reqprio ||
+        (cb.opcode != 0 && cb.opcode != 1) || cb.offset < 0 ||
+        cb.nbytes > 1048576 || cb.nbytes > SSIZE_MAX) {
+      error = -LX_EOPNOTSUPP; break;
+    }
+    int fd = (int)cb.fd;
+    if (fd < 0 || shim_fd_reserved(fd)) { error = -LX_EBADF; break; }
+    // Duplicate before inspection so a concurrent guest close cannot turn
+    // this request into an operation on a later reuse of the descriptor.
+    int pinned = fcntl(fd, F_DUPFD_CLOEXEC, 0);
+    if (pinned < 0) { error = -linux_errno_from_host(errno); break; }
+    struct stat st;
+    char path[PATH_MAX];
+    const char* root = syscalls_get_root();
+    size_t rootlen = root ? strlen(root) : 0;
+    if (fstat(pinned, &st) < 0 || !S_ISREG(st.st_mode) || !rootlen ||
+        fcntl(pinned, F_GETPATH, path) < 0 ||
+        strncmp(path, root, rootlen) != 0 ||
+        (path[rootlen] != '/' && path[rootlen] != 0)) {
+      close(pinned); error = -LX_EOPNOTSUPP; break;
+    }
+    void* data = cb.nbytes ? malloc((size_t)cb.nbytes) : NULL;
+    if (cb.nbytes && !data) { close(pinned); error = -LX_ENOMEM; break; }
+    if (cb.opcode == 1 && cb.nbytes &&
+        gmem_guest_export_copyin(NULL, cb.buf, data, (size_t)cb.nbytes) != 0) {
+      free(data); close(pinned); error = -LX_EFAULT; break;
+    }
+    // The kernel writes aio_key=0 into the caller's iocb on accepted work.
+    uint32_t zero = 0;
+    if (gmem_guest_copyout_checked(iocb_addr + 8, &zero, sizeof zero) != 0) {
+      free(data); close(pinned); error = -LX_EFAULT; break;
+    }
+    ssize_t done = cb.opcode == 0
+        ? pread(pinned, data, (size_t)cb.nbytes, (off_t)cb.offset)
+        : pwrite(pinned, data, (size_t)cb.nbytes, (off_t)cb.offset);
+    int saved_errno = errno;
+    close(pinned);
+    int64_t result = done < 0 ? -linux_errno_from_host(saved_errno) : done;
+    if (cb.opcode == 0 && done > 0 &&
+        gmem_guest_copyout_checked(cb.buf, data, (size_t)done) != 0)
+      result = -LX_EFAULT;
+    free(data);
+    struct lx_aio_event event = {
+      .data = cb.data, .obj = iocb_addr, .res = result, .res2 = 0,
+    };
+    ctx->completions[ctx->completion_tail] = event;
+    ctx->completion_tail = (ctx->completion_tail + 1) % ctx->requested_events;
+    ++ctx->completion_count;
+    // Mirror into the Linux ring for direct-ring readers. The host queue is
+    // authoritative so io_getevents still works if userspace unmapped it.
+    unsigned pos = ctx->ring_tail;
+    uint64_t event_addr = handle + sizeof(struct lx_aio_ring_header) +
+                          (uint64_t)pos * sizeof event;
+    if (gmem_guest_copyout_checked(event_addr, &event, sizeof event) == 0) {
+      uint32_t tail = (pos + 1) % (ctx->requested_events + 1);
+      if (gmem_guest_copyout_checked(handle + offsetof(struct lx_aio_ring_header, tail),
+                                     &tail, sizeof tail) == 0)
+        ctx->ring_tail = tail;
+    }
+  }
+  pthread_mutex_unlock(&g_lx_aio_mu);
+  return submitted ? submitted : error;
 }
 
 #define LX_AT_FDCWD              (-100)
@@ -961,7 +1084,8 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   // ===== 0..16: aio + extended attributes ==================================
   case 0: return lx_io_setup((unsigned)a0, a1);                 // io_setup; family gate pending
   case 1: return lx_io_destroy(a0);                            // io_destroy; family gate pending
-  case 2: case 3: case 4: return -LX_ENOSYS;                   // aio family pending
+  case 2: return lx_io_submit(a0, (long)a1, a2);               // io_submit; family gate pending
+  case 3: case 4: return -LX_ENOSYS;                           // aio family pending
   case 5: case 6: case 7: {                                    // setxattr / lsetxattr / fsetxattr
     int hopt = 0;                                              // Linux XATTR_CREATE=1 REPLACE=2
     if ((int)a4 & 1) hopt |= XATTR_CREATE;
