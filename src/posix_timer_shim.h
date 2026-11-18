@@ -8,5 +8,7 @@
 long posix_timer_shim_create(uint64_t clockid, uint64_t sigevent_addr,
                              uint64_t timer_id_addr);
 long posix_timer_shim_delete(uint64_t timer_id);
+long posix_timer_shim_settime(uint64_t timer_id, uint64_t flags,
+                              uint64_t new_addr, uint64_t old_addr);
 
 #endif
