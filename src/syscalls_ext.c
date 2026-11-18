@@ -2011,7 +2011,13 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
       return -LX_EFAULT;
     return result;
   }
-  case 87: return timerfd_gettime_shim((int)a0, (linux_itimerspec*)a1);
+  case 87: {                                                   // timerfd_gettime
+    linux_itimerspec current;
+    long result = timerfd_gettime_shim((int)a0, &current);
+    if (result < 0) return result; // Linux validates fd before copying out
+    return gmem_guest_copyout_checked(a1, &current, sizeof current) == 0 ?
+           0 : -LX_EFAULT;
+  }
   case 88: {                                                   // utimensat(dfd, path, times, flags)
     unsigned flags = (unsigned)a3;
     if (flags & ~(LX_AT_SYMLINK_NOFOLLOW | LX_AT_EMPTY_PATH)) return -LX_EINVAL;
