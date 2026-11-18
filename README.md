@@ -136,6 +136,20 @@ cd shimmy
 ./run.sh                       # runs Linux alongside macOS (WindowServer still up)
 ```
 
+When a newer RD Metal driver is built, update the existing Arch root without
+reinstalling Linux:
+
+```sh
+./update-rdmetal.sh --root /path/to/arch-root --driver /path/to/rdmetal_dri.so
+./update-rdmetal.sh --root /path/to/arch-root --driver /path/to/rdmetal_dri.so --check
+```
+
+The updater verifies the aarch64 driver and installed SHA-256, replaces the file
+atomically, and retains the previous binary beside it. `install.sh` uses the
+same updater for a fresh root. Set `RDMETAL_DRIVER` to a built artifact when its
+usual `rdmetal/rdmetal-libs` staging directory is absent; desktop installation
+fails rather than silently continuing without a driver.
+
 The desktop is installed by you through the package manager; there is no `--desktop` flag:
 
 ```sh

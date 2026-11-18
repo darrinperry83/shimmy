@@ -218,10 +218,9 @@ fi
 # GPU driver; every other profile installs it as the default GL driver.
 if [ "$ROOTFS_PROFILE" = "recovery" ]; then
   echo "==> skipping rdmetal driver (recovery is a headless rescue rootfs)"
-elif [ -d "$HERE/rdmetal/rdmetal-libs" ]; then
+elif [ -f "${RDMETAL_DRIVER:-$HERE/rdmetal/rdmetal-libs/dri/rdmetal_dri.so}" ]; then
   echo "==> installing the rdmetal driver"
-  install -d "$ROOTFS/usr/lib/dri"
-  install -m 644 "$HERE/rdmetal/rdmetal-libs/dri/rdmetal_dri.so" "$ROOTFS/usr/lib/dri/rdmetal_dri.so"
+  "$HERE/update-rdmetal.sh" --root "$ROOTFS" --driver "${RDMETAL_DRIVER:-$HERE/rdmetal/rdmetal-libs/dri/rdmetal_dri.so}"
   for lib in libEGL.so.1.0.0 libGLESv2.so.2.0.0 libgbm.so.1.0.0 libglapi.so.0.0.0; do
     [ -f "$HERE/rdmetal/rdmetal-libs/$lib" ] && install -m 644 "$HERE/rdmetal/rdmetal-libs/$lib" "$ROOTFS/usr/lib/$lib"
   done
@@ -232,7 +231,10 @@ elif [ -d "$HERE/rdmetal/rdmetal-libs" ]; then
   ln -sf libglapi.so.0.0.0 "$ROOTFS/usr/lib/libglapi.so.0"
   echo "    -> rdmetal_dri.so + EGL/GLES/gbm libs installed; default driver (no env vars)"
 else
-  echo "    ! rdmetal/rdmetal-libs/ not found — run the rdmetal build first (see shimmy-rdmetal)"
+  echo "    ! rdmetal driver not found — build it first, then set RDMETAL_DRIVER to the built rdmetal_dri.so"
+  if [ "$INSTALL_DESKTOP" = "1" ] || [ -n "${RDMETAL_DRIVER:-}" ]; then
+    exit 1
+  fi
 fi
 
 echo ""
