@@ -2506,6 +2506,10 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   }
   case 149: {                                                  // setresgid
     if (g_uid0) return guest_cred_set_gid((int)a0, (int)a1, (int)a2);
+    // Darwin has no setresgid.  setregid cannot install the explicit saved
+    // GID requested by Linux, so never report that change as successful.
+    // Refuse before touching either of the other host credentials.
+    if ((int)a2 != -1) return -LX_EOPNOTSUPP;
     if ((int)a0 == -1 && (int)a1 == -1) return 0;
     if (setregid((int)a0 == -1 ? (gid_t)-1 : (gid_t)a0,
                  (int)a1 == -1 ? (gid_t)-1 : (gid_t)a1) != 0) return eret();

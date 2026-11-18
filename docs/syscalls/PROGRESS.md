@@ -312,3 +312,5 @@ The merged head through #152 passed CLI build and the focused probes for #39, #1
 After rebasing this batch onto concurrent `0d920f2` (`drmasahi.c` and SDDM documentation), the CLI rebuild, three focused probes, and a second fresh private Arch login/D-Bus boot passed. The exact rebased test guest and clone were cleaned before publication.
 
 An independent Arch ARM64 `<sys/timex.h>` probe for `adjtimex` (#171) now confirms the 208-byte UAPI layout and bounded read-only query/refusal. The existing and new probes and integration CLI build passed. No runtime change was needed; adjustment of the shared host clock remains unsupported and is recorded in the safeguards ledger.
+
+`setresgid` (#149) now refuses explicit saved-GID requests in host-identity mode before changing real or effective host credentials; virtual-root behavior is unchanged. Its ARM64 no-mutation and existing getresgid probes, CLI build, and private Arch login/D-Bus boot passed in isolation. The integration CLI build and both probes passed after merge. Host-identity mode remains narrower than Linux.
