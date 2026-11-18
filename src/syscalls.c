@@ -106,6 +106,7 @@ extern void rd_rtnl_dup(int oldfd, int newfd);
 #define LX_ENOTEMPTY 39
 #define LX_ELOOP 40
 #define LX_EOVERFLOW 75
+#define LX_EOPNOTSUPP 95
 #define LX_ETIMEDOUT 110
 
 // open flags (aarch64 == the "arm/alpha-ish" musl variant, NOT plain asm-generic)
@@ -5434,7 +5435,34 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   case 226: return gmem_mprotect(a0, (size_t)a1, (int)a2);
 
   // ---------- 233 madvise ----------
-  case 233: return 0;                           // advisory only; never fatal to ignore
+  case 233: {
+    /* Linux and Darwin use the same values for the four nondestructive
+     * access-pattern hints. Keep the guest range check in front of the host
+     * call: a host mapping is not necessarily part of the guest address space.
+     * Do not acknowledge DONTNEED/FREE/fork/THP/etc. without their Linux
+     * data or VMA semantics. */
+    int advice = (int)a2;
+    switch (advice) {
+      case 0: case 1: case 2: case 3: break;
+      case 4: case 8: case 9: case 10: case 11: case 12: case 13:
+      case 14: case 15: case 16: case 17: case 18: case 19:
+      case 20: case 21: case 22: case 23: case 24: case 25:
+      case 100: case 101: case 102: case 103:
+        return -LX_EOPNOTSUPP;
+      default: return -LX_EINVAL;
+    }
+    const uint64_t page = (uint64_t)getpagesize();
+    if (a0 & (page - 1)) return -LX_EINVAL;
+    if (a1 > UINT64_MAX - (page - 1)) return -LX_EINVAL;
+    uint64_t rounded = (a1 + page - 1) & ~(page - 1);
+    if (a0 > UINT64_MAX - rounded) return -LX_EINVAL;
+    if (!rounded) return 0; // Linux treats a valid zero-length hint as a no-op
+    if (rounded > SIZE_MAX ||
+        gmem_guest_range_mapped(a0, (size_t)rounded) != 0)
+      return -LX_ENOMEM;
+    return madvise((void *)(uintptr_t)a0, (size_t)rounded, advice) == 0
+               ? 0 : herrno();
+  }
 
   // ---------- 260 wait4 ----------
   case 260: {
