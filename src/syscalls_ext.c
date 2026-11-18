@@ -574,6 +574,24 @@ static int host_range_mapped(unsigned long addr, size_t len) {
   return 1;
 }
 
+// Eager page locking shared by mlock and mlock2(flags=0). Only guest-owned
+// mappings may be pinned; a raw host mlock could otherwise pin Shimmy memory.
+static long guest_mlock_eager(unsigned long addr, unsigned long len) {
+  const unsigned long page = 16384;                           // guest AT_PAGESZ
+  if (!len) return 0;
+  unsigned long base = addr & ~(page - 1);
+  unsigned long offset = addr - base;
+  if (len > ULONG_MAX - offset) return -LX_EINVAL;
+  unsigned long span = len + offset;
+  if (span > ULONG_MAX - (page - 1)) return -LX_EINVAL;
+  unsigned long rounded = (span + page - 1) & ~(page - 1);
+  if (base > ULONG_MAX - rounded) return -LX_EINVAL;
+  if (rounded > 1024ul * 1024) return -LX_EOPNOTSUPP;
+  if (base < FOUR_GB || gmem_guest_range_mapped(base, (size_t)rounded) != 0 ||
+      !host_range_mapped(base, (size_t)rounded)) return -LX_ENOMEM;
+  return ok0(mlock((void*)base, (size_t)rounded));
+}
+
 // Linux `struct timeval` — tv_usec is 64-bit here, unlike macOS.
 struct lx_timeval { long long tv_sec; long long tv_usec; };
 struct lx_itimerval { struct lx_timeval it_interval; struct lx_timeval it_value; };
@@ -2124,7 +2142,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (!hf) hf = MS_SYNC;
     return ok0(msync((void*)a0, (size_t)a1, hf));
   }
-  case 228: return ok0(mlock((void*)a0, (size_t)a1));           // mlock
+  case 228: return guest_mlock_eager(a0, a1);                   // mlock
   case 229: return ok0(munlock((void*)a0, (size_t)a1));         // munlock
   case 230: return ok0(mlockall((int)a0));                      // mlockall (MCL_* match)
   case 231:
@@ -2543,22 +2561,11 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     // Darwin mlock is eager. It cannot honor Linux MLOCK_ONFAULT's deferred
     // VMA state, so never report that request as applied. Also keep a guest
     // pointer from pinning unrelated memory in the macOS host process.
-    const unsigned long page = 16384;                           // guest AT_PAGESZ
     int flags = (int)a2;
     if (flags & ~1) return -LX_EINVAL;                           // MLOCK_ONFAULT = 1
     if (!a1) return 0;
     if (flags) return -LX_EOPNOTSUPP;
-    unsigned long base = a0 & ~(page - 1);
-    unsigned long offset = a0 - base;
-    if (a1 > ULONG_MAX - offset) return -LX_EINVAL;
-    unsigned long span = a1 + offset;
-    if (span > ULONG_MAX - (page - 1)) return -LX_EINVAL;
-    unsigned long rounded = (span + page - 1) & ~(page - 1);
-    if (base > ULONG_MAX - rounded) return -LX_EINVAL;
-    if (rounded > 1024ul * 1024) return -LX_EOPNOTSUPP;
-    if (base < FOUR_GB || gmem_guest_range_mapped(base, (size_t)rounded) != 0 ||
-        !host_range_mapped(base, (size_t)rounded)) return -LX_ENOMEM;
-    return ok0(mlock((void*)base, (size_t)rounded));
+    return guest_mlock_eager(a0, a1);
   }
   case 285: {                                                   // copy_file_range: regular-file subset
     int in = (int)a0, out = (int)a2;
