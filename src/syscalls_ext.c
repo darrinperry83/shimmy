@@ -1521,28 +1521,36 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return r < 0 ? eret() : r;
   }
   case 24: return do_dup3((int)a0, (int)a1, (int)a2);          // dup3
-  // inotify: an INERT file-change backend. glib's GIO registers its file-monitor backend by
+  // inotify: a bounded watched-file backend. glib's GIO registers its file-monitor backend by
   // calling inotify_init1() and giving up if it fails — and when no monitor backend exists it
   // reports "Unable to find default local file monitor type" and then NULL-derefs. So the fd has
-  // to be real and pollable (a pipe read end: normally quiet, except IN_IGNORED on removal).
-  // No filesystem-change watch ever fires. Apps that merely want notification degrade to not noticing
-  // changes; apps that merely want a monitor object work.
+  // to be real and pollable (a pipe read end). Watched-file writes and self deletion now
+  // produce events; directory child-name events still need a separate implementation.
   case 26: {                                                    // inotify_init1(flags)
     if (a0 & ~(unsigned long)(LX_O_NONBLOCK_ | LX_O_CLOEXEC_)) return -LX_EINVAL;
     int fds[2];
     if (pipe(fds) != 0) return eret();
     // The write end is deliberately KEPT OPEN. Closing it would make the
     // read end instantly readable-at-EOF, and glib treats that as fatal: "inotify unexpectedly
-    // hit eof". Holding it open makes the fd simply quiet forever, which is what we want. It must
+    // hit eof". Holding it open makes the fd quiet until a watch fires. It must
     // ALSO be reserved: udevd's worker spawn (posix_spawn) does close_range(3,~0U) in the vfork'd
     // child, and an unreserved write end gets closed there, making udevd's inotify read end EOF ->
     // a spurious IN_* wake -> udevd reloads its rules dirs in a 100% CPU loop.
     fds[0] = shim_fd_reserve(fds[0]);   // read end: the vfork child's close_range() must skip it too
     fds[1] = shim_fd_reserve(fds[1]);
-    fcntl(fds[1], F_SETFL, fcntl(fds[1], F_GETFL) | O_NONBLOCK);
-    if (inotify_watch_register(fds[0], fds[1]) != 0) {
+    int watch_kq = kqueue();
+    if (watch_kq < 0) {
+      long error = eret();
       shim_fd_unreserve(fds[0]); shim_fd_unreserve(fds[1]);
       close(fds[0]); close(fds[1]);
+      return error;
+    }
+    watch_kq = shim_fd_reserve(watch_kq);
+    fcntl(fds[1], F_SETFL, fcntl(fds[1], F_GETFL) | O_NONBLOCK);
+    if (inotify_watch_register(fds[0], fds[1], watch_kq,
+                               shim_fd_reserve, shim_fd_unreserve) != 0) {
+      shim_fd_unreserve(fds[0]); shim_fd_unreserve(fds[1]); shim_fd_unreserve(watch_kq);
+      close(fds[0]); close(fds[1]); close(watch_kq);
       return -LX_ENOMEM;
     }
     if (a0 & LX_O_NONBLOCK_) fcntl(fds[0], F_SETFL, O_NONBLOCK);

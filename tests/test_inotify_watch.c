@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/event.h>
 #include <unistd.h>
 
 struct event { int32_t wd; uint32_t mask, cookie, len; };
@@ -14,8 +15,8 @@ struct event { int32_t wd; uint32_t mask, cookie, len; };
 int main(void) {
   int a[2], b[2];
   assert(pipe(a) == 0 && pipe(b) == 0);
-  assert(inotify_watch_register(a[0], a[1]) == 0);
-  assert(inotify_watch_register(b[0], b[1]) == 0);
+  assert(inotify_watch_register(a[0], a[1], kqueue(), NULL, NULL) == 0);
+  assert(inotify_watch_register(b[0], b[1], kqueue(), NULL, NULL) == 0);
   char path[] = "/tmp/shimmy-inotify-watch-XXXXXX";
   int file = mkstemp(path);
   assert(file >= 0);
