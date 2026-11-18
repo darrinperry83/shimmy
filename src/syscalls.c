@@ -5108,30 +5108,27 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   }
   case 80: {
     struct stat st;
+    struct linux_stat out;
     if (!a1) return -LX_EFAULT;
     if (!net_opath_socket_stat((int)a0, &st) && fstat((int)a0, &st) < 0) return herrno();
-    if (stat_m2l(&st, (struct linux_stat*)a1)<0) return herrno();
+    if (stat_m2l(&st, &out)<0) return herrno();
     if (drm_owns_fd((int)a0)) {
-      struct linux_stat* o = (struct linux_stat*)a1;
-      drm_fake_stat(&o->st_mode, &o->st_rdev,
+      drm_fake_stat(&out.st_mode, &out.st_rdev,
                     drm_minor_of_fd((int)a0) == 0 ? "/dev/dri/card0" : "/dev/dri/renderD128");
     }
     if (snd_owns_fd((int)a0)) {
-      struct linux_stat* o = (struct linux_stat*)a1;
-      snd_fake_stat(&o->st_mode, &o->st_rdev, "controlC0");
+      snd_fake_stat(&out.st_mode, &out.st_rdev, "controlC0");
     }
     if (evdev_owns_fd((int)a0)) {
-      struct linux_stat* o = (struct linux_stat*)a1;
       int dev = evdev_device_of_fd((int)a0);
-      evdev_fake_stat(&o->st_mode, &o->st_rdev, dev == EVDEV_DEV_PTR ? "event1" : "event0");
+      evdev_fake_stat(&out.st_mode, &out.st_rdev, dev == EVDEV_DEV_PTR ? "event1" : "event0");
     }
     if (vt_owns_fd((int)a0)) {
-      struct linux_stat* o = (struct linux_stat*)a1;
       char tty[24];
       snprintf(tty, sizeof tty, "/dev/tty%d", vt_number_for_fd((int)a0));
-      vt_fake_stat(&o->st_mode, &o->st_rdev, tty);
+      vt_fake_stat(&out.st_mode, &out.st_rdev, tty);
     }
-    return 0;
+    return gmem_guest_copyout_checked(a1, &out, sizeof out) == 0 ? 0 : -LX_EFAULT;
   }
 
   // ---------- 93 exit / 94 exit_group ----------
