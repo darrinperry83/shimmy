@@ -1262,7 +1262,8 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   }
   case 104: case 105: case 106: return -LX_EPERM;              // kexec_load, init/delete_module
   case 107: return posix_timer_shim_create(a0, a1, a2);         // staged SIGEV_NONE subset
-  case 108: case 109:
+  case 108: return posix_timer_shim_gettime(a0, a1);            // staged SIGEV_NONE subset
+  case 109:
     return -LX_ENOSYS;                                         // POSIX timer_*
   case 110: return posix_timer_shim_settime(a0, a1, a2, a3);    // staged SIGEV_NONE subset
   case 111: return posix_timer_shim_delete(a0);                 // staged timer_delete

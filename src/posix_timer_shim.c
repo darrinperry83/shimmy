@@ -42,6 +42,9 @@ struct lx_posix_timer {
   // Initially disarmed. Later family calls will own these fields under lock.
   int64_t interval_sec, interval_nsec;
   int64_t deadline_sec, deadline_nsec;
+  // Linux runs relative CLOCK_REALTIME timers on a monotonic timebase, so
+  // wall-clock adjustments cannot move an already-armed relative deadline.
+  int relative_realtime;
 };
 
 static pthread_mutex_t g_timer_mu = PTHREAD_MUTEX_INITIALIZER;
@@ -139,6 +142,10 @@ static void from_ns(__int128 ns, int64_t* sec, int64_t* nsec) {
 static __int128 max_ns(void) {
   return to_ns(INT64_MAX, 999999999);
 }
+static clockid_t timer_host_clock(const struct lx_posix_timer* timer) {
+  return timer->clockid == LX_CLOCK_REALTIME && !timer->relative_realtime ?
+         CLOCK_REALTIME : CLOCK_UPTIME_RAW;
+}
 
 // This is also the readback operation required by timer_gettime. SIGEV_NONE
 // timers are never placed on a host timer queue; Linux computes their expiry
@@ -184,26 +191,33 @@ long posix_timer_shim_settime(uint64_t timer_id, uint64_t flags,
     return -LX_EINVAL;
   }
   struct timespec now_ts;
-  // Match the Linux CLOCK_MONOTONIC mapping already exposed by Shimmy's
-  // clock_gettime (syscalls.c:clockid_l2m), so absolute guest deadlines and
-  // timer readback use the same epoch.
-  clockid_t host_clock = timer->clockid == LX_CLOCK_REALTIME ?
-                         CLOCK_REALTIME : CLOCK_UPTIME_RAW;
-  if (clock_gettime(host_clock, &now_ts) != 0) {
+  // Read the old setting using its existing timebase before choosing the
+  // new one. A realtime timer can switch between relative and absolute mode.
+  if (clock_gettime(timer_host_clock(timer), &now_ts) != 0) {
     pthread_mutex_unlock(&g_timer_mu);
     return -LX_EINVAL;
   }
-  __int128 now = to_ns(now_ts.tv_sec, now_ts.tv_nsec);
   struct lx_itimerspec old;
-  snapshot_locked(timer, now, &old);
+  snapshot_locked(timer, to_ns(now_ts.tv_sec, now_ts.tv_nsec), &old);
 
   __int128 value = to_ns(setting.value_sec, setting.value_nsec);
+  int relative_realtime = value && timer->clockid == LX_CLOCK_REALTIME &&
+                          !(flags & LX_TIMER_ABSTIME);
   if (value && !(flags & LX_TIMER_ABSTIME)) {
-    value += now;
+    // This is also the epoch Shimmy exposes as guest CLOCK_MONOTONIC.
+    clockid_t effective = relative_realtime ? CLOCK_UPTIME_RAW :
+                          timer_host_clock(timer);
+    if (clock_gettime(effective, &now_ts) != 0) {
+      pthread_mutex_unlock(&g_timer_mu);
+      return -LX_EINVAL;
+    }
+    value += to_ns(now_ts.tv_sec, now_ts.tv_nsec);
     if (value > max_ns()) value = max_ns();
   }
-  timer->interval_sec = setting.interval_sec;
-  timer->interval_nsec = setting.interval_nsec;
+  // Linux clears the interval when it_value is zero (disarm).
+  timer->interval_sec = value ? setting.interval_sec : 0;
+  timer->interval_nsec = value ? setting.interval_nsec : 0;
+  timer->relative_realtime = relative_realtime;
   from_ns(value, &timer->deadline_sec, &timer->deadline_nsec);
   pthread_mutex_unlock(&g_timer_mu);
 
@@ -212,4 +226,26 @@ long posix_timer_shim_settime(uint64_t timer_id, uint64_t flags,
   if (old_addr && gmem_guest_copyout_checked(old_addr, &old, sizeof old) != 0)
     return -LX_EFAULT;
   return 0;
+}
+
+long posix_timer_shim_gettime(uint64_t timer_id, uint64_t setting_addr) {
+  pthread_once(&g_timer_once, timer_init_once);
+  if (g_atfork_error) return -LX_EAGAIN;
+  pthread_mutex_lock(&g_timer_mu);
+  struct lx_posix_timer* timer = g_timers;
+  while (timer && timer->id != (int32_t)timer_id) timer = timer->next;
+  if (!timer) {
+    pthread_mutex_unlock(&g_timer_mu);
+    return -LX_EINVAL;
+  }
+  struct timespec now_ts;
+  if (clock_gettime(timer_host_clock(timer), &now_ts) != 0) {
+    pthread_mutex_unlock(&g_timer_mu);
+    return -LX_EINVAL;
+  }
+  struct lx_itimerspec setting;
+  snapshot_locked(timer, to_ns(now_ts.tv_sec, now_ts.tv_nsec), &setting);
+  pthread_mutex_unlock(&g_timer_mu);
+  return gmem_guest_copyout_checked(setting_addr, &setting, sizeof setting) == 0 ?
+         0 : -LX_EFAULT;
 }
