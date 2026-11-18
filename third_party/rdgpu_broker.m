@@ -163,6 +163,51 @@ int rdgpu_local_upload_image(RDGPUSession *s,
     pthread_mutex_unlock(&s->lock);
     return result;
 }
+int rdgpu_local_upload_image_region(RDGPUSession *s,
+                             const uint8_t lease[16],uint64_t generation,
+                             uint32_t source_format,const void *pixels,
+                             size_t bytes,uint32_t x,uint32_t y,
+                             uint32_t width,uint32_t height,uint32_t source_stride){
+    if(!s||getpid()!=s->actualPeer||!pixels)return -EPERM;
+    if(source_format!=RDGPU_UPLOAD_BGRA8&&source_format!=RDGPU_UPLOAD_RGBA8&&
+       source_format!=RDGPU_UPLOAD_BGRX8)return -EINVAL;
+    if(!width||!height||width>RDGPU_MAX_IMAGE_EDGE||height>RDGPU_MAX_IMAGE_EDGE||
+       source_stride<(uint64_t)width*4||
+       bytes!=(size_t)(height-1)*source_stride+(size_t)width*4)return -EINVAL;
+    pthread_mutex_lock(&s->lock);
+    ImageSlot *slot=find(s,lease,generation);
+    if(!slot){pthread_mutex_unlock(&s->lock);return -ESTALE;}
+    IOSurfaceRef surface=rd_metal_image_surface(slot->image);
+    size_t surface_width=surface?IOSurfaceGetWidth(surface):0;
+    size_t surface_height=surface?IOSurfaceGetHeight(surface):0;
+    size_t stride=surface?IOSurfaceGetBytesPerRow(surface):0;
+    if(!surface_width||!surface_height||x>surface_width||y>surface_height||
+       width>surface_width-x||height>surface_height-y||stride<surface_width*4){
+        pthread_mutex_unlock(&s->lock);return -EINVAL;
+    }
+    if(slot->fence||slot->exportRefs){pthread_mutex_unlock(&s->lock);return -EBUSY;}
+    slot->completed=false;
+    if(IOSurfaceLock(surface,0,NULL)!=kIOReturnSuccess){
+        pthread_mutex_unlock(&s->lock);return -EIO;
+    }
+    uint8_t *dst=IOSurfaceGetBaseAddress(surface);
+    if(!dst){IOSurfaceUnlock(surface,0,NULL);pthread_mutex_unlock(&s->lock);return -EIO;}
+    const uint8_t *src=pixels;
+    for(size_t row=0;row<height;row++){
+        uint8_t *d=dst+(y+row)*stride+(size_t)x*4;
+        const uint8_t *srow=src+row*source_stride;
+        for(size_t col=0;col<width;col++){
+            const uint8_t *p=srow+col*4;uint8_t *q=d+col*4;
+            if(source_format==RDGPU_UPLOAD_RGBA8){q[0]=p[2];q[1]=p[1];q[2]=p[0];q[3]=p[3];}
+            else{q[0]=p[0];q[1]=p[1];q[2]=p[2];
+                 q[3]=source_format==RDGPU_UPLOAD_BGRX8?255:p[3];}
+        }
+    }
+    int result=IOSurfaceUnlock(surface,0,NULL)==kIOReturnSuccess?0:-EIO;
+    slot->completed=result==0;
+    pthread_mutex_unlock(&s->lock);
+    return result;
+}
 RDGPUSession *rdgpu_test_session_create(pid_t actualPeer,
                                         RDGPUVerifyTestPeer verify,void *context){
     // A null verifier fails closed. The caller obtains actualPeer from the OS,

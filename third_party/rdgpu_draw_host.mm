@@ -70,7 +70,8 @@ bool checked_header(const rdmetal_draw_header &h,size_t bytes,size_t prefix){
     if(h.magic!=RDMETAL_DRAW_MAGIC||
        (h.version!=RDMETAL_DRAW_VERSION&&
         h.version!=RDMETAL_DRAW_VERSION_TEXTURE&&
-        h.version!=RDMETAL_DRAW_VERSION_V3)||
+        h.version!=RDMETAL_DRAW_VERSION_V3&&
+        h.version!=RDMETAL_DRAW_VERSION_V4)||
        h.flags||!h.target_handle||h.total_bytes!=bytes||
        !h.target_width||!h.target_height||
        h.target_width>4096||h.target_height>4096||
@@ -87,6 +88,7 @@ bool checked_header(const rdmetal_draw_header &h,size_t bytes,size_t prefix){
     if(h.version==RDMETAL_DRAW_VERSION&&prefix!=sizeof(rdmetal_draw_header))return false;
     if(h.version==RDMETAL_DRAW_VERSION_TEXTURE&&prefix!=sizeof(rdmetal_draw_header_v2))return false;
     if(h.version==RDMETAL_DRAW_VERSION_V3&&prefix!=sizeof(rdmetal_draw_header_v3))return false;
+    if(h.version==RDMETAL_DRAW_VERSION_V4&&prefix!=sizeof(rdmetal_draw_header_v4))return false;
     /* The v3 tail (attr1/index/uniform) and the exact vertex-bounds check are
      * validated by rdgpu_draw_execute once the index data is available. */
     return true;
@@ -99,17 +101,32 @@ int rdgpu_draw_execute(const void *packet,size_t bytes,
                        RDGPUDrawTextureComplete tex_complete,
                        void *tex_context){
     if(!packet||!resolve||bytes<sizeof(rdmetal_draw_header)||
-       bytes>sizeof(rdmetal_draw_header_v3)+2*RDMETAL_DRAW_MAX_SHADER_WORDS*4+
+       bytes>sizeof(rdmetal_draw_header_v4)+2*RDMETAL_DRAW_MAX_SHADER_WORDS*4+
              RDMETAL_DRAW_MAX_VERTEX_BYTES+RDMETAL_DRAW_MAX_INDEX_BYTES+
              RDMETAL_DRAW_MAX_UNIFORM_BYTES)return RDGPU_DRAW_BAD_PACKET;
     rdmetal_draw_header h;
     memcpy(&h,packet,sizeof h);
-    const bool v3 = h.version==RDMETAL_DRAW_VERSION_V3;
+    const bool v4 = h.version==RDMETAL_DRAW_VERSION_V4;
+    const bool v3 = h.version==RDMETAL_DRAW_VERSION_V3 || v4;
     const bool v2tex = h.version==RDMETAL_DRAW_VERSION_TEXTURE;
-    const size_t prefix = v3 ? sizeof(rdmetal_draw_header_v3) :
+    const size_t prefix = v4 ? sizeof(rdmetal_draw_header_v4) :
+                          v3 ? sizeof(rdmetal_draw_header_v3) :
                           v2tex ? sizeof(rdmetal_draw_header_v2) :
                                   sizeof(rdmetal_draw_header);
     if(!checked_header(h,bytes,prefix))return RDGPU_DRAW_BAD_PACKET;
+    uint32_t scissor_x=0,scissor_y=0;
+    uint32_t scissor_width=h.target_width,scissor_height=h.target_height;
+    if(v4){
+        rdmetal_draw_header_v4 v4h;
+        memcpy(&v4h,packet,sizeof v4h);
+        scissor_x=v4h.scissor_x;scissor_y=v4h.scissor_y;
+        scissor_width=v4h.scissor_width;scissor_height=v4h.scissor_height;
+        if(scissor_x>=h.target_width||scissor_y>=h.target_height||
+           !scissor_width||!scissor_height||
+           scissor_width>h.target_width-scissor_x||
+           scissor_height>h.target_height-scissor_y)
+            return RDGPU_DRAW_BAD_PACKET;
+    }
     uint64_t texture_handle=0,texture_generation=0;
     uint32_t attr1_format=RDMETAL_DRAW_ATTR_NONE,attr1_offset=0;
     uint32_t index_type=RDMETAL_DRAW_INDEX_NONE,index_count=0,uniform_bytes=0;
@@ -315,6 +332,9 @@ int rdgpu_draw_execute(const void *packet,size_t bytes,
                 if(encoder){
                     [encoder setRenderPipelineState:state];
                     [encoder setVertexBuffer:vertex offset:0 atIndex:0];
+                    MTLScissorRect scissor={scissor_x,scissor_y,
+                                            scissor_width,scissor_height};
+                    [encoder setScissorRect:scissor];
                     if(textured){
                         MTLSamplerDescriptor *samplerDesc=[MTLSamplerDescriptor new];
                         samplerDesc.minFilter=MTLSamplerMinMagFilterNearest;

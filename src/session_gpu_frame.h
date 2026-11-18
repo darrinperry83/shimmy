@@ -38,9 +38,9 @@ int session_gpu_host_start_from_master(uid_t expected_uid,
 /* A DRM-master child registers the actual native lock FD. The host learns its
  * PID from the Mach audit trailer, never from this function's arguments. */
 int session_gpu_child_register_master(pid_t owner_pid, session_gpu_epoch epoch,
-                                      int master_lock_fd);
+                                      int master_lock_fd, int drm_fd);
 int session_gpu_child_unregister_master(pid_t owner_pid, session_gpu_epoch epoch,
-                                        int master_lock_fd);
+                                        int master_lock_fd, int drm_fd);
 /* Revoke the old producer and clear its frame; useful on logout/restart. */
 int session_gpu_host_set_producer(pid_t expected_pid, uid_t expected_uid);
 void session_gpu_host_stop(void);
@@ -56,6 +56,13 @@ int session_gpu_child_present(pid_t owner_pid, session_gpu_epoch epoch,
  * current DRM-master lock. An earlier registration alone is not sufficient. */
 int session_gpu_child_present_master(pid_t owner_pid, session_gpu_epoch epoch,
                                      int master_lock_fd, IOSurfaceRef surface,
+                                     uint64_t generation, uint32_t crtc,
+                                     uint32_t width, uint32_t height,
+                                     uint32_t format);
+/* A logind-handoff compositor presents with the exact DRM open file
+ * description previously registered by the lock-owning logind process. */
+int session_gpu_child_present_device(pid_t owner_pid, session_gpu_epoch epoch,
+                                     int drm_fd, IOSurfaceRef surface,
                                      uint64_t generation, uint32_t crtc,
                                      uint32_t width, uint32_t height,
                                      uint32_t format);

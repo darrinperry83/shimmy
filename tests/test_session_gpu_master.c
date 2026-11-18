@@ -11,6 +11,7 @@
 #include <string.h>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -70,7 +71,7 @@ static int count(void) {
   return n;
 }
 
-static void run_child(int in, int out, const char *path, pid_t owner,
+static void run_child(int in, int out, const char *path, int device_fd, pid_t owner,
                       session_gpu_epoch epoch, int real_master) {
   IOSurfaceRef s = surface();
   if (!s) _exit(3);
@@ -84,9 +85,11 @@ static void run_child(int in, int out, const char *path, pid_t owner,
       if (fd >= 0 && real_master && flock(fd, LOCK_EX | LOCK_NB) != 0) fd = -1;
       rc = fd >= 0 ? 0 : -1;
     } else if (c == 'r') {
-      rc = session_gpu_child_register_master(owner, epoch, fd);
+      rc = session_gpu_child_register_master(owner, epoch, fd, device_fd);
     } else if (c == 'p') {
       rc = session_gpu_child_present_master(owner, epoch, fd, s, 1, 1, 8, 8, BGRA);
+    } else if (c == 'h') {
+      rc = session_gpu_child_present_device(owner, epoch, device_fd, s, 1, 1, 8, 8, BGRA);
     } else if (c == 'n') {
       rc = session_gpu_child_present(owner, epoch, s, 1, 1, 8, 8, BGRA);
     } else if (c == 'u') {
@@ -129,6 +132,8 @@ int main(void) {
   session_gpu_epoch epoch = {(uint64_t)arc4random() << 32 | arc4random(),
                              (uint64_t)arc4random() << 32 | arc4random()};
   int master_in[2], master_out[2], stranger_in[2], stranger_out[2];
+  int device_fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+  assert(device_fd >= 0);
   assert(pipe(master_in) == 0 && pipe(master_out) == 0 &&
          pipe(stranger_in) == 0 && pipe(stranger_out) == 0);
   pid_t owner = getpid();
@@ -137,17 +142,18 @@ int main(void) {
     close(master_in[1]); close(master_out[0]);
     close(stranger_in[0]); close(stranger_in[1]);
     close(stranger_out[0]); close(stranger_out[1]);
-    run_child(master_in[0], master_out[1], path, owner, epoch, 1);
+    run_child(master_in[0], master_out[1], path, device_fd, owner, epoch, 1);
   }
   pid_t stranger = fork(); assert(stranger >= 0);
   if (!stranger) {
     close(stranger_in[1]); close(stranger_out[0]);
     close(master_in[0]); close(master_in[1]);
     close(master_out[0]); close(master_out[1]);
-    run_child(stranger_in[0], stranger_out[1], path, owner, epoch, 0);
+    run_child(stranger_in[0], stranger_out[1], path, device_fd, owner, epoch, 0);
   }
   close(master_in[0]); close(master_out[1]);
   close(stranger_in[0]); close(stranger_out[1]);
+  close(device_fd);
   assert(session_gpu_host_start_from_master(geteuid(), epoch, path,
                                             present, lost, NULL) == 0);
   command(stranger_in[1], stranger_out[0], 'o', 'y');
@@ -156,19 +162,21 @@ int main(void) {
   command(stranger_in[1], stranger_out[0], 'r', 'n'); /* same inode, other FD */
   command(master_in[1], master_out[0], 'r', 'y');
   command(stranger_in[1], stranger_out[0], 'p', 'n'); /* audit+flock reject */
-  usleep(250000); assert(count() == 0);
-  command(master_in[1], master_out[0], 'n', 'n'); /* no master right: reject */
-  usleep(250000); assert(count() == 0);
-  command(master_in[1], master_out[0], 'p', 'y');
+  command(stranger_in[1], stranger_out[0], 'h', 'y'); /* exact handed-off DRM fd */
   wait_for(&frames, 1);
+  usleep(250000); assert(count() == 1);
+  command(master_in[1], master_out[0], 'n', 'n'); /* no master right: reject */
+  usleep(250000); assert(count() == 1);
+  command(master_in[1], master_out[0], 'p', 'y');
+  wait_for(&frames, 2);
   command(master_in[1], master_out[0], 'd', 'y'); /* copied then explicitly unlocked */
   command(master_in[1], master_out[0], 'r', 'n');
   command(master_in[1], master_out[0], 'p', 'n');
-  usleep(250000); assert(count() == 1);
+  usleep(250000); assert(count() == 2);
   assert(write(master_in[1], "q", 1) == 1);
   int status;
   assert(waitpid(master, &status, 0) == master && WIFEXITED(status));
-  wait_for(&losses, 1);
+  wait_for(&losses, 2);
   assert(write(stranger_in[1], "q", 1) == 1);
   assert(waitpid(stranger, &status, 0) == stranger && WIFEXITED(status));
   session_gpu_host_stop();

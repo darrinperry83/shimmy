@@ -51,7 +51,15 @@ static bool replace(RDGuestRangeLedger *ledger,uintptr_t lo,uintptr_t hi,
         while(j&&result[j-1].lo>value.lo){result[j]=result[j-1];j--;}
         result[j]=value;
     }
-    memcpy(ledger->spans,result,count*sizeof result[0]);ledger->count=count;
+    size_t merged=0;
+    for(size_t i=0;i<count;i++){
+        if(merged && result[merged-1].hi==result[i].lo &&
+           result[merged-1].writable==result[i].writable)
+            result[merged-1].hi=result[i].hi;
+        else
+            result[merged++]=result[i];
+    }
+    memcpy(ledger->spans,result,merged*sizeof result[0]);ledger->count=merged;
     return true;
 }
 bool rdguest_range_map(RDGuestRangeLedger *ledger,uintptr_t lo,size_t len,bool writable){

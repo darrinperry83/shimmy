@@ -546,7 +546,8 @@ static void drm_master_release(void) {
     pid_t owner = 0;
     session_gpu_epoch epoch;
     if (g_gpu_master_registered && gpu_session_child(&owner, &epoch) > 0) {
-      int rc = session_gpu_child_unregister_master(owner, epoch, g_master_lock_fd);
+      int rc = session_gpu_child_unregister_master(owner, epoch, g_master_lock_fd,
+                                                   g_master_owner_fd);
       if (rc) fprintf(stderr, "DRM_MASTER_GPU_REVOKE pid=%d rc=%d\n", getpid(), rc);
     }
     g_gpu_master_registered = 0;
@@ -653,7 +654,7 @@ static long drm_master_ioctl(int fd, unsigned nr) {
   int native_child = gpu_session_child(&owner, &epoch);
   if (native_child < 0) { drm_master_release(); return native_child; }
   if (native_child > 0) {
-    int rc = session_gpu_child_register_master(owner, epoch, g_master_lock_fd);
+    int rc = session_gpu_child_register_master(owner, epoch, g_master_lock_fd, fd);
     if (rc) {
       fprintf(stderr, "DRM_MASTER_GPU_REGISTER pid=%d rc=%d\n", getpid(), rc);
       drm_master_release();
@@ -1006,7 +1007,7 @@ static void scanout_retire(uint32_t crtc_id, int replacement_fd, uint64_t replac
 // the BGRA bytes to gpuwin_present_crtc(bgra=1, crtc_id) so the primary (crtc 1) and secondary
 // (crtc 2) outputs each present their own frame. XRGB8888 is already B,G,R,X in memory, so no
 // swizzle — only a stride repack when the dumb pitch has padding the staging upload lacks.
-static int drm_present_fb(uint32_t fb_id, uint32_t crtc_id) {
+static int drm_present_fb(uint32_t fb_id, uint32_t crtc_id, int kms_fd) {
   struct fb_slot* f = fb_find(fb_id);
   if (!f || !f->handle) {
     fprintf(stderr, "DRM_PRESENT crtc=%u fb_id=0x%x -> no framebuffer recorded (skip)\n",
@@ -1055,9 +1056,13 @@ static int drm_present_fb(uint32_t fb_id, uint32_t crtc_id) {
     int native_child = gpu_session_child(&owner, &epoch);
     if (native_child < 0) r = native_child;
     else if (native_child > 0) {
-      if (g_master_lock_fd < 0) r = -EACCES;
-      else r = session_gpu_child_present_master(owner, epoch, g_master_lock_fd,
+      if (g_master_lock_fd >= 0)
+        r = session_gpu_child_present_master(owner, epoch, g_master_lock_fd,
                  surface, generation, crtc_id, f->width, f->height, 'BGRA');
+      else if (kms_fd >= 0 && drm_minor_of_fd(kms_fd) == 0)
+        r = session_gpu_child_present_device(owner, epoch, kms_fd,
+                 surface, generation, crtc_id, f->width, f->height, 'BGRA');
+      else r = -EACCES;
     } else r = (int)gpuwin_present_iosurface_crtc(surface, crtc_id, generation);
     CFRelease(surface);
     if (r) {
@@ -2415,7 +2420,7 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
     int ready = drm_check_fb_ready(pf->fb_id);
     if (ready) return ready;
     if (pf->fb_id && gem_find_by_handle(fb_find(pf->fb_id)->handle)) {
-      int presented = drm_present_fb(pf->fb_id, crtc);
+      int presented = drm_present_fb(pf->fb_id, crtc, fd);
       if (presented) return presented;
     }
     struct crtc_state* cr = crtc_by_id(crtc);
@@ -2424,7 +2429,7 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
     pl->fb_id = pf->fb_id;
     pl->crtc_id = crtc;
     if (pf->fb_id && !gem_find_by_handle(fb_find(pf->fb_id)->handle))
-      (void)drm_present_fb(pf->fb_id, crtc);
+      (void)drm_present_fb(pf->fb_id, crtc, fd);
     if (pf->flags & DRM_MODE_PAGE_FLIP_EVENT) event_enqueue(fd, pf->user_data, crtc);
     if (tracing())
       fprintf(stderr, "[drm] MODE_PAGE_FLIP crtc_id=%u fb_id=0x%x flags=0x%x user_data=0x%llx%s\n",
@@ -2545,7 +2550,7 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
         uint32_t crtc = pl->crtc_id ? pl->crtc_id : (uint32_t)(pi + 1);
         flip_crtc[pi] = crtc;
         if (!event_crtc) event_crtc = crtc;
-        int presented = drm_present_fb(flip_fb[pi], crtc);
+        int presented = drm_present_fb(flip_fb[pi], crtc, fd);
         struct fb_slot* f = fb_find(flip_fb[pi]);
         if (presented && f && gem_find_by_handle(f->handle)) {
           g_crtc = old_crtc; g_crtc2 = old_crtc2;

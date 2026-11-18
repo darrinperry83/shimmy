@@ -40,6 +40,11 @@ int rdgpu_local_upload_image(RDGPUSession *session,
                              const uint8_t lease[16],uint64_t generation,
                              uint32_t source_format,const void *pixels,
                              size_t bytes);
+int rdgpu_local_upload_image_region(RDGPUSession *session,
+                             const uint8_t lease[16],uint64_t generation,
+                             uint32_t source_format,const void *pixels,
+                             size_t bytes,uint32_t x,uint32_t y,
+                             uint32_t width,uint32_t height,uint32_t source_stride);
 
 /* Host-only fixture entry. A broker in a different process still requires
  * signed-shim attestation and a kernel-authenticated connection. Never

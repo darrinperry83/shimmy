@@ -16,6 +16,7 @@
 #define RDGPU_GUEST_FD_IMPORT 12u
 #define RDGPU_GUEST_IMAGE_STRIDE 13u
 #define RDGPU_GUEST_IMAGE_UPLOAD 14u
+#define RDGPU_GUEST_IMAGE_UPLOAD_REGION 15u
 typedef long (*RDGPUImageStrideQuery)(void *context,pid_t attestedGuestPid,
                                      const uint8_t lease[16],uint64_t generation,
                                      uint32_t width,uint32_t height);
@@ -25,6 +26,11 @@ typedef int (*RDGPUImageUpload)(void *context,pid_t attestedGuestPid,
                                 const uint8_t lease[16],uint64_t generation,
                                 uint32_t sourceFormat,const void *snapshot,
                                 size_t bytes);
+typedef int (*RDGPUImageUploadRegion)(void *context,pid_t attestedGuestPid,
+                                const uint8_t lease[16],uint64_t generation,
+                                uint32_t sourceFormat,const void *snapshot,
+                                size_t bytes,uint32_t x,uint32_t y,
+                                uint32_t width,uint32_t height,uint32_t stride);
 typedef int (*RDGPUUploadCopyin)(void *context,uint64_t guestAddress,
                                  void *snapshot,size_t bytes);
 /* The issuer runs in the trusted host shim after exact slot lookup. It must
@@ -110,6 +116,7 @@ typedef struct {
     RDGPUImageStrideQuery imageStrideQuery;
     void *imageStrideContext;
     RDGPUImageUpload imageUpload;
+    RDGPUImageUploadRegion imageUploadRegion;
     RDGPUUploadCopyin uploadCopyin;
     void *imageUploadContext;
     void *exportTransportContext;
@@ -148,6 +155,8 @@ void rdgpu_guest_set_image_upload_transport(RDGPUGuestState *state,
                                              RDGPUImageUpload upload,
                                              RDGPUUploadCopyin copyin,
                                              void *context);
+void rdgpu_guest_set_image_upload_region_transport(RDGPUGuestState *state,
+                                             RDGPUImageUploadRegion upload);
 long rdgpu_guest_syscall(RDGPUGuestState *state,uint64_t op,uint64_t a1,
                           uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5);
 #endif

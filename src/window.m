@@ -2594,6 +2594,29 @@ long gpuwin_present_iosurface_crtc(IOSurfaceRef surface, uint32_t crtc_id,
   if (atomic_fetch_sub(&wait->refs, 1) == 1) free(wait);
   if (timed_out) return -ETIMEDOUT;
   if (completed != 1) return -EIO;
+  if (getenv("RDGPU_WINDOW_SELFCHECK")) {
+    static atomic_uint_fast64_t checks;
+    uint64_t n = atomic_fetch_add(&checks, 1) + 1;
+    if (n <= 4 || n % 120 == 0) {
+      if (IOSurfaceLock(surface, kIOSurfaceLockReadOnly, NULL) == kIOReturnSuccess) {
+        const uint8_t* base = IOSurfaceGetBaseAddress(surface);
+        size_t pitch = IOSurfaceGetBytesPerRow(surface), nonblack = 0, total = 0;
+        if (base && pitch >= w * 4) {
+          for (size_t y = 0; y < h; y += h / 256 ? h / 256 : 1)
+            for (size_t x = 0; x < w; x += w / 256 ? w / 256 : 1) {
+              const uint8_t* p = base + y * pitch + x * 4;
+              nonblack += p[0] || p[1] || p[2];
+              total++;
+            }
+        }
+        fprintf(stderr, "[window-metal-selfcheck] frame=%llu nonblack=%zu/%zu size=%llux%llu\n",
+                (unsigned long long)n, nonblack, total,
+                (unsigned long long)w, (unsigned long long)h);
+        IOSurfaceUnlock(surface, kIOSurfaceLockReadOnly, NULL);
+      } else fprintf(stderr, "[window-metal-selfcheck] frame=%llu lock failed\n",
+                     (unsigned long long)n);
+    }
+  }
   if (getenv("RDGPU_PRESENT_STATS")) {
     static atomic_uint_fast64_t frames;
     uint64_t n = atomic_fetch_add(&frames, 1) + 1;

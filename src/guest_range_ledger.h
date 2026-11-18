@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#define RDGUEST_RANGE_MAX 1024u
+#define RDGUEST_RANGE_MAX 8192u
 typedef struct { uintptr_t lo,hi; bool writable; } RDGuestRange;
 typedef struct {
     pthread_mutex_t lock;

@@ -41,6 +41,7 @@ typedef struct {
   mach_msg_header_t header;
   mach_msg_body_t body;
   mach_msg_port_descriptor_t port;
+  mach_msg_port_descriptor_t drm_port;
   uint32_t magic, version;
   uint64_t epoch_high, epoch_low;
   uint32_t claimed_pid;
@@ -71,7 +72,29 @@ static int g_require_master_proof;
 static char g_master_path[1024];
 static dev_t g_master_dev;
 static ino_t g_master_ino;
+static dev_t g_drm_dev;
+static ino_t g_drm_ino;
+static pid_t g_master_claim_pid;
 static int verify_master_fileport(mach_port_t port);
+
+static int verify_handed_drm_fileport(mach_port_t port) {
+  int fd = fileport_makefd(port);
+  if (fd < 0) return -EBADF;
+  struct stat st;
+  int valid = !fstat(fd, &st) && S_ISSOCK(st.st_mode) &&
+      st.st_dev == g_drm_dev && st.st_ino == g_drm_ino &&
+      g_master_claim_pid > 1 &&
+      !(kill(g_master_claim_pid, 0) < 0 && errno == ESRCH);
+  close(fd);
+  if (!valid) return -EACCES;
+  int probe = open(g_master_path, O_RDWR | O_NOFOLLOW | O_CLOEXEC);
+  if (probe < 0) return -EACCES;
+  int held = flock(probe, LOCK_EX | LOCK_NB) < 0 &&
+      (errno == EWOULDBLOCK || errno == EAGAIN);
+  if (!held) (void)flock(probe, LOCK_UN);
+  close(probe);
+  return held ? 0 : -EACCES;
+}
 
 static int audit_sender(mach_msg_header_t *hdr, size_t cap,
                         pid_t *pid, uid_t *uid) {
@@ -157,7 +180,8 @@ static int receive_one(mach_msg_header_t *hdr, size_t cap) {
     if (m->body.msgh_descriptor_count != 2 ||
         m->master_port.type != MACH_MSG_PORT_DESCRIPTOR ||
         m->master_port.name == MACH_PORT_NULL ||
-        verify_master_fileport(m->master_port.name)) return -EACCES;
+        (verify_master_fileport(m->master_port.name) &&
+         verify_handed_drm_fileport(m->master_port.name))) return -EACCES;
   } else if (m->body.msgh_descriptor_count != 1) return -EACCES;
 
   IOSurfaceRef surface = IOSurfaceLookupFromMachPort(m->port.name);
@@ -235,9 +259,11 @@ static int receive_master(mach_msg_header_t *hdr, size_t cap) {
        hdr->msgh_id != GPU_MASTER_RELEASE_MSG_ID) ||
       !(hdr->msgh_bits & MACH_MSGH_BITS_COMPLEX)) return -EBADMSG;
   gpu_master_message *m = (gpu_master_message *)hdr;
-  if (m->body.msgh_descriptor_count != 1 ||
+  if (m->body.msgh_descriptor_count != 2 ||
       m->port.type != MACH_MSG_PORT_DESCRIPTOR ||
       m->port.name == MACH_PORT_NULL ||
+      m->drm_port.type != MACH_MSG_PORT_DESCRIPTOR ||
+      m->drm_port.name == MACH_PORT_NULL ||
       m->magic != GPU_FRAME_MAGIC || m->version != GPU_FRAME_VERSION)
     return -EBADMSG;
   pid_t sender;
@@ -253,6 +279,14 @@ static int receive_master(mach_msg_header_t *hdr, size_t cap) {
   if (!authorized) return -EACCES;
   int rc = verify_master_fileport(m->port.name);
   if (rc) return rc;
+  int device_fd = fileport_makefd(m->drm_port.name);
+  struct stat device_st = {0};
+  if (device_fd < 0 || fstat(device_fd, &device_st) ||
+      !S_ISSOCK(device_st.st_mode)) {
+    if (device_fd >= 0) close(device_fd);
+    return -EACCES;
+  }
+  close(device_fd);
 
   pthread_mutex_lock(&g_delivery_lock);
   pthread_mutex_lock(&g_lock);
@@ -260,11 +294,14 @@ static int receive_master(mach_msg_header_t *hdr, size_t cap) {
       sender_uid == g_expected_uid &&
       m->epoch_high == g_epoch.high && m->epoch_low == g_epoch.low;
   int release = hdr->msgh_id == GPU_MASTER_RELEASE_MSG_ID;
-  if (release && g_expected_pid != sender) authorized = 0;
+  if (release && g_master_claim_pid != sender) authorized = 0;
   int replaced = authorized && (release || g_expected_pid != sender) &&
       (g_has_frame[0] || g_has_frame[1]);
   if (authorized) {
     g_expected_pid = release ? 0 : sender;
+    g_master_claim_pid = release ? 0 : sender;
+    g_drm_dev = release ? 0 : device_st.st_dev;
+    g_drm_ino = release ? 0 : device_st.st_ino;
     memset(g_last_generation, 0, sizeof g_last_generation);
     memset(g_has_frame, 0, sizeof g_has_frame);
   }
@@ -394,6 +431,9 @@ static int host_start_common(pid_t expected_pid, uid_t expected_uid,
   pthread_mutex_lock(&g_lock);
   g_recv_port = port;
   g_expected_pid = expected_pid;
+  g_master_claim_pid = 0;
+  g_drm_dev = 0;
+  g_drm_ino = 0;
   g_expected_uid = expected_uid;
   g_epoch = epoch;
   g_require_master_proof = master_path != NULL;
@@ -477,8 +517,9 @@ void session_gpu_host_stop(void) {
 }
 
 static int child_master_action(pid_t owner_pid, session_gpu_epoch epoch,
-                               int master_lock_fd, int32_t message_id) {
-  if (master_lock_fd < 0) return -EBADF;
+                               int master_lock_fd, int drm_fd,
+                               int32_t message_id) {
+  if (master_lock_fd < 0 || drm_fd < 0) return -EBADF;
   char name[BOOTSTRAP_MAX_NAME_LEN];
   int rc = service_name(name, sizeof name, owner_pid, epoch);
   if (rc) return rc;
@@ -490,10 +531,17 @@ static int child_master_action(pid_t owner_pid, session_gpu_epoch epoch,
     mach_port_deallocate(mach_task_self(), target);
     return -EBADF;
   }
+  fileport_t drm_capability = FILEPORT_NULL;
+  if (fileport_makeport(drm_fd, &drm_capability) != 0) {
+    mach_port_deallocate(mach_task_self(), capability);
+    mach_port_deallocate(mach_task_self(), target);
+    return -EBADF;
+  }
   mach_port_t reply_port = MACH_PORT_NULL;
   if (mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE,
                          &reply_port) != KERN_SUCCESS) {
     mach_port_deallocate(mach_task_self(), capability);
+    mach_port_deallocate(mach_task_self(), drm_capability);
     mach_port_deallocate(mach_task_self(), target);
     return -EIO;
   }
@@ -505,10 +553,13 @@ static int child_master_action(pid_t owner_pid, session_gpu_epoch epoch,
   m.header.msgh_remote_port = target;
   m.header.msgh_local_port = reply_port;
   m.header.msgh_id = message_id;
-  m.body.msgh_descriptor_count = 1;
+  m.body.msgh_descriptor_count = 2;
   m.port.name = capability;
   m.port.disposition = MACH_MSG_TYPE_COPY_SEND;
   m.port.type = MACH_MSG_PORT_DESCRIPTOR;
+  m.drm_port.name = drm_capability;
+  m.drm_port.disposition = MACH_MSG_TYPE_COPY_SEND;
+  m.drm_port.type = MACH_MSG_PORT_DESCRIPTOR;
   m.magic = GPU_FRAME_MAGIC;
   m.version = GPU_FRAME_VERSION;
   m.epoch_high = epoch.high;
@@ -517,6 +568,7 @@ static int child_master_action(pid_t owner_pid, session_gpu_epoch epoch,
   kern_return_t kr = mach_msg(&m.header, MACH_SEND_MSG | MACH_SEND_TIMEOUT,
                               sizeof m, 0, MACH_PORT_NULL, 200, MACH_PORT_NULL);
   mach_port_deallocate(mach_task_self(), capability);
+  mach_port_deallocate(mach_task_self(), drm_capability);
   mach_port_deallocate(mach_task_self(), target);
   if (kr != KERN_SUCCESS) {
     fprintf(stderr, "session_gpu: master request send failed kr=%d\n", kr);
@@ -542,14 +594,14 @@ static int child_master_action(pid_t owner_pid, session_gpu_epoch epoch,
 }
 
 int session_gpu_child_register_master(pid_t owner_pid, session_gpu_epoch epoch,
-                                      int master_lock_fd) {
-  return child_master_action(owner_pid, epoch, master_lock_fd,
+                                      int master_lock_fd, int drm_fd) {
+  return child_master_action(owner_pid, epoch, master_lock_fd, drm_fd,
                              GPU_MASTER_MSG_ID);
 }
 
 int session_gpu_child_unregister_master(pid_t owner_pid, session_gpu_epoch epoch,
-                                        int master_lock_fd) {
-  return child_master_action(owner_pid, epoch, master_lock_fd,
+                                        int master_lock_fd, int drm_fd) {
+  return child_master_action(owner_pid, epoch, master_lock_fd, drm_fd,
                              GPU_MASTER_RELEASE_MSG_ID);
 }
 
@@ -650,5 +702,15 @@ int session_gpu_child_present_master(pid_t owner_pid, session_gpu_epoch epoch,
                                      uint32_t format) {
   if (master_lock_fd < 0) return -EBADF;
   return child_present_common(owner_pid, epoch, master_lock_fd, surface,
+                              generation, crtc, width, height, format);
+}
+
+int session_gpu_child_present_device(pid_t owner_pid, session_gpu_epoch epoch,
+                                     int drm_fd, IOSurfaceRef surface,
+                                     uint64_t generation, uint32_t crtc,
+                                     uint32_t width, uint32_t height,
+                                     uint32_t format) {
+  if (drm_fd < 0) return -EBADF;
+  return child_present_common(owner_pid, epoch, drm_fd, surface,
                               generation, crtc, width, height, format);
 }

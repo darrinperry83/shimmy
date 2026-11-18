@@ -96,6 +96,13 @@ void rdgpu_guest_set_image_upload_transport(RDGPUGuestState *s,
     s->imageUploadContext=context;
     pthread_mutex_unlock(&s->lock);
 }
+void rdgpu_guest_set_image_upload_region_transport(RDGPUGuestState *s,
+                                             RDGPUImageUploadRegion upload){
+    if(!s||!s->ready)return;
+    pthread_mutex_lock(&s->lock);
+    s->imageUploadRegion=upload;
+    pthread_mutex_unlock(&s->lock);
+}
 static RDGPUGuestSlot *slot(RDGPUGuestState *s,uint64_t handle){
     if(!handle)return NULL;
     for(unsigned i=0;i<RDGPU_MAX_IMAGES_PER_PEER;i++)
@@ -127,6 +134,49 @@ static int valid_reply(const RDGPURequest *q,const RDGPUReply *r){
 long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
                           uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5){
     if(!s||!s->ready||s->disabled||getpid()!=s->ownerPid)return -EPERM;
+    if(op==RDGPU_GUEST_IMAGE_UPLOAD_REGION){
+        uint32_t x=(uint32_t)(a3>>32),y=(uint32_t)a3;
+        uint32_t width=(uint32_t)(a4>>32),height=(uint32_t)a4;
+        uint32_t format=(uint32_t)(a5>>32),stride=(uint32_t)a5;
+        if(!a1||!a2||!width||!height||width>RDGPU_MAX_IMAGE_EDGE||
+           height>RDGPU_MAX_IMAGE_EDGE||stride<(uint64_t)width*4||
+           (format!=RDGPU_UPLOAD_BGRA8&&format!=RDGPU_UPLOAD_RGBA8&&
+            format!=RDGPU_UPLOAD_BGRX8))return -EINVAL;
+        uint64_t expected=(uint64_t)(height-1)*stride+(uint64_t)width*4;
+        if(expected>RDGPU_MAX_IMAGE_BYTES)return -EINVAL;
+        pthread_mutex_lock(&s->lock);
+        RDGPUGuestSlot *entry=slot(s,a1);
+        if(!entry){pthread_mutex_unlock(&s->lock);return -ESTALE;}
+        if(x>entry->width||y>entry->height||width>entry->width-x||
+           height>entry->height-y){pthread_mutex_unlock(&s->lock);return -EINVAL;}
+        if(entry->drawFence||entry->exported||!s->imageUploadRegion||
+           !s->uploadCopyin){pthread_mutex_unlock(&s->lock);return -EBUSY;}
+        void *snapshot=malloc((size_t)expected);
+        if(!snapshot){pthread_mutex_unlock(&s->lock);return -ENOMEM;}
+        if(s->uploadCopyin(s->imageUploadContext,a2,snapshot,(size_t)expected)){
+            free(snapshot);pthread_mutex_unlock(&s->lock);return -EFAULT;
+        }
+        if(entry->carrierIssued&&
+           (!s->fdFrameBegin||s->fdFrameBegin(s->fdFrameContext,s->ownerPid,
+             entry->lease,entry->generation))){
+            free(snapshot);pthread_mutex_unlock(&s->lock);return -EBUSY;
+        }
+        entry->producerComplete=0;
+        int uploaded=s->imageUploadRegion(s->imageUploadContext,s->ownerPid,
+            entry->lease,entry->generation,format,snapshot,(size_t)expected,
+            x,y,width,height,stride);
+        free(snapshot);
+        if(uploaded){pthread_mutex_unlock(&s->lock);return uploaded;}
+        uint64_t completed=++s->nextRequest;
+        if(!completed||(entry->carrierIssued&&
+           (!s->fdFrameComplete||s->fdFrameComplete(s->fdFrameContext,
+             s->ownerPid,entry->lease,entry->generation,completed)))){
+            pthread_mutex_unlock(&s->lock);return -EIO;
+        }
+        entry->producerComplete=1;
+        entry->lastCompletedFence=completed;
+        pthread_mutex_unlock(&s->lock);return 0;
+    }
     if(op==RDGPU_GUEST_IMAGE_UPLOAD){
         if(!a1||!a2||!a3||a5||
            (a4!=RDGPU_UPLOAD_BGRA8&&a4!=RDGPU_UPLOAD_RGBA8&&
@@ -146,6 +196,8 @@ long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
         if(!snapshot){pthread_mutex_unlock(&s->lock);return -ENOMEM;}
         if(s->uploadCopyin(s->imageUploadContext,a2,snapshot,
                            (size_t)expected)){
+            fprintf(stderr,"RDMETAL_UPLOAD_COPYIN_REJECT ptr=%p bytes=%llu\n",
+                    (void*)a2,(unsigned long long)expected);
             free(snapshot);pthread_mutex_unlock(&s->lock);return -EFAULT;
         }
         if(entry->carrierIssued&&
@@ -282,7 +334,8 @@ long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
         if(draw.magic!=RDMETAL_DRAW_MAGIC||
            (draw.version!=RDMETAL_DRAW_VERSION&&
             draw.version!=RDMETAL_DRAW_VERSION_TEXTURE&&
-            draw.version!=RDMETAL_DRAW_VERSION_V3)||
+            draw.version!=RDMETAL_DRAW_VERSION_V3&&
+            draw.version!=RDMETAL_DRAW_VERSION_V4)||
            draw.total_bytes!=a3||draw.target_handle!=a1){
             free(snapshot);pthread_mutex_unlock(&s->lock);return -EINVAL;
         }

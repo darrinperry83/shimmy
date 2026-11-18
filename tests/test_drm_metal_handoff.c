@@ -12,13 +12,20 @@
 int session_gpu_epoch_parse(const char *text, session_gpu_epoch *out) {
   (void)text; (void)out; return -EINVAL;
 }
-int session_gpu_child_register_master(pid_t pid, session_gpu_epoch epoch, int fd) {
-  (void)pid; (void)epoch; (void)fd; return -ENOSYS;
+int session_gpu_child_register_master(pid_t pid, session_gpu_epoch epoch, int fd, int drm_fd) {
+  (void)pid; (void)epoch; (void)fd; (void)drm_fd; return -ENOSYS;
 }
-int session_gpu_child_unregister_master(pid_t pid, session_gpu_epoch epoch, int fd) {
-  (void)pid; (void)epoch; (void)fd; return -ENOSYS;
+int session_gpu_child_unregister_master(pid_t pid, session_gpu_epoch epoch, int fd, int drm_fd) {
+  (void)pid; (void)epoch; (void)fd; (void)drm_fd; return -ENOSYS;
 }
 int session_gpu_child_present_master(pid_t pid, session_gpu_epoch epoch, int fd,
+                                     IOSurfaceRef surface, uint64_t generation,
+                                     uint32_t crtc, uint32_t width,
+                                     uint32_t height, uint32_t format) {
+  (void)pid; (void)epoch; (void)fd; (void)surface; (void)generation;
+  (void)crtc; (void)width; (void)height; (void)format; return -ENOSYS;
+}
+int session_gpu_child_present_device(pid_t pid, session_gpu_epoch epoch, int fd,
                                      IOSurfaceRef surface, uint64_t generation,
                                      uint32_t crtc, uint32_t width,
                                      uint32_t height, uint32_t format) {
