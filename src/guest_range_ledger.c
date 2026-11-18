@@ -123,6 +123,17 @@ bool rdguest_range_copyout(RDGuestRangeLedger *ledger,uintptr_t guestAddress,
     }
     pthread_mutex_unlock(&ledger->lock);return ok;
 }
+bool rdguest_range_copyout_bytes(RDGuestRangeLedger *ledger,uintptr_t guestAddress,
+                                const void *bytes,size_t length){
+    uintptr_t hi;
+    if(!ledger||!bytes||!length||length>UINT32_MAX||
+       !bounds(guestAddress,length,&hi))return false;
+    pthread_mutex_lock(&ledger->lock);
+    bool ok=covered(ledger,guestAddress,hi,true);
+    if(ok)ok=mach_vm_write(mach_task_self(),(mach_vm_address_t)guestAddress,
+                           (vm_offset_t)bytes,(mach_msg_type_number_t)length)==KERN_SUCCESS;
+    pthread_mutex_unlock(&ledger->lock);return ok;
+}
 bool rdguest_range_copyin(RDGuestRangeLedger *ledger,uintptr_t guestAddress,
                           void *snapshot,size_t length){
     uintptr_t hi;

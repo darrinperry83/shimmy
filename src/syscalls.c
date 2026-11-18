@@ -2126,6 +2126,27 @@ static int fu_wake(unsigned long uaddr, unsigned int n, uint32_t bits) {
   return woke;
 }
 
+// futex_wake(2), the four-argument futex2 syscall (aarch64 #454). Its mask is the
+// equivalent of FUTEX_WAKE_BITSET's val3, but precedes the wake count in the ABI.
+// Our futex queues are process-local and keyed by virtual address, so only the
+// private 32-bit form can be implemented by this backend. Do not claim a shared
+// wake succeeded when another process may own the waiter.
+static long do_futex_wake2(unsigned long uaddr, unsigned long mask,
+                           int nr, unsigned int flags) {
+  enum { FU2_SIZE_MASK = 3, FU2_SIZE_U32 = 2, FU2_NUMA = 4,
+         FU2_MPOL = 8, FU2_PRIVATE = 128 };
+  if (flags & ~(FU2_SIZE_MASK | FU2_NUMA | FU2_MPOL | FU2_PRIVATE)) return -LX_EINVAL;
+  if ((flags & FU2_SIZE_MASK) != FU2_SIZE_U32 || mask > UINT32_MAX) return -LX_EINVAL;
+  if (!mask) return -LX_EINVAL;
+  if (uaddr & (sizeof(uint32_t) - 1)) return -LX_EINVAL;
+  if (!uaddr) return -LX_EFAULT;
+  if (!(flags & FU2_PRIVATE) || (flags & (FU2_NUMA | FU2_MPOL))) return -95; // EOPNOTSUPP
+  // Linux's strict futex2 wake returns zero for nr=0. For a negative int the
+  // kernel wakes the first matching waiter, since its post-increment count
+  // immediately meets the negative limit.
+  return fu_wake(uaddr, nr < 0 ? 1u : (unsigned int)nr, (uint32_t)mask);
+}
+
 // ---- priority-inheritance futexes ----------------------------------------------------------
 // The guest's glibc uses these for pthread_mutex{PTHREAD_PRIO_INHERIT} and its PI condvars.
 // PipeWire's data loop sets loop.prio-inherit=true, so pthread_mutex_init(attr with
@@ -2395,6 +2416,101 @@ static long do_futex(unsigned long uaddr, int op, unsigned int val,
          fx_now(), op, cmd, uaddr, val, val3, guest_tid());
       return -LX_ENOSYS;
   }
+}
+
+// futex_wait(2), aarch64 #455.  Reuse the existing private 32-bit
+// FUTEX_WAIT_BITSET queue: both ABIs wait for an absolute deadline and wake
+// only when the caller's bitset intersects the wake mask.
+static long do_futex_wait2(unsigned long uaddr, unsigned long val,
+                           unsigned long mask, unsigned int flags,
+                           unsigned long timeout_addr, int clockid) {
+  enum { FU2_SIZE_MASK = 3, FU2_SIZE_U32 = 2, FU2_NUMA = 4,
+         FU2_MPOL = 8, FU2_PRIVATE = 128 };
+  if (flags & ~(FU2_SIZE_MASK | FU2_NUMA | FU2_MPOL | FU2_PRIVATE)) return -LX_EINVAL;
+  if ((flags & FU2_SIZE_MASK) != FU2_SIZE_U32 ||
+      val > UINT32_MAX || mask > UINT32_MAX || !mask) return -LX_EINVAL;
+  if (uaddr & (sizeof(uint32_t) - 1)) return -LX_EINVAL;
+  if (!uaddr) return -LX_EFAULT;
+  if (!(flags & FU2_PRIVATE) || (flags & (FU2_NUMA | FU2_MPOL))) return -95; // EOPNOTSUPP
+
+  uint32_t snapshot;
+  if (gmem_guest_export_copyin(NULL, uaddr, &snapshot, sizeof snapshot) != 0)
+    return -LX_EFAULT;
+  struct linux_timespec timeout;
+  const struct linux_timespec* to = NULL;
+  if (timeout_addr) {
+    if (clockid != LX_CLOCK_MONOTONIC && clockid != LX_CLOCK_REALTIME)
+      return -LX_EINVAL;
+    if (gmem_guest_export_copyin(NULL, timeout_addr, &timeout, sizeof timeout) != 0)
+      return -LX_EFAULT;
+    if (timeout.tv_sec < 0 || timeout.tv_nsec < 0 || timeout.tv_nsec >= 1000000000L)
+      return -LX_EINVAL;
+    to = &timeout;
+  }
+  int op = FUTEX_WAIT_BITSET | FUTEX_PRIVATE_FLAG;
+  if (clockid == LX_CLOCK_REALTIME && to) op |= FUTEX_CLOCK_REALTIME;
+  return do_futex(uaddr, op, (uint32_t)val, to, 0, (uint32_t)mask);
+}
+
+// futex_waitv(2), aarch64 #449. A one-element vector is equivalent to the
+// private U32 futex2 wait above, with an all-bits wake mask and result index 0.
+// The current waiter/bucket model cannot atomically park on several addresses;
+// reject larger vectors rather than risk a lost wake.
+static long do_futex_waitv(unsigned long waiters_addr, unsigned int count,
+                           unsigned int flags, unsigned long timeout_addr,
+                           int clockid) {
+  struct fu2_waiter_arg {
+    uint64_t val, uaddr;
+    uint32_t flags, reserved;
+  } waiter;
+  if (flags || !waiters_addr || !count || count > 128) return -LX_EINVAL;
+  if (count != 1) return -95; // EOPNOTSUPP: multi-address atomic wait needs new queue state.
+  if (gmem_guest_export_copyin(NULL, waiters_addr, &waiter, sizeof waiter) != 0)
+    return -LX_EFAULT;
+  if (waiter.reserved) return -LX_EINVAL;
+  return do_futex_wait2((unsigned long)waiter.uaddr, (unsigned long)waiter.val,
+                        FU_BITS_ANY, waiter.flags, timeout_addr, clockid);
+}
+
+// futex_requeue(2), aarch64 #456. The current queue keeps a sleeping thread on
+// one bucket/condition variable, so moving it to another address would need a
+// queue redesign. nr_requeue == 0 has exact wake-only semantics and can be
+// handled under the source bucket lock, including the source-word comparison.
+static long do_futex_requeue2(unsigned long waiters_addr, unsigned int flags,
+                              int nr_wake, int nr_requeue) {
+  struct fu2_waiter_arg {
+    uint64_t val, uaddr;
+    uint32_t flags, reserved;
+  } pair[2];
+  enum { FU2_SIZE_U32 = 2, FU2_PRIVATE = 128 };
+  if (flags || !waiters_addr || nr_wake < 0 || nr_requeue < 0)
+    return -LX_EINVAL;
+  if (gmem_guest_export_copyin(NULL, waiters_addr, pair, sizeof pair) != 0)
+    return -LX_EFAULT;
+  for (int i = 0; i < 2; ++i) {
+    if (pair[i].reserved || pair[i].val > UINT32_MAX ||
+        pair[i].flags != (FU2_SIZE_U32 | FU2_PRIVATE)) return -LX_EINVAL;
+    if (pair[i].uaddr & (sizeof(uint32_t) - 1)) return -LX_EINVAL;
+    if (!pair[i].uaddr) return -LX_EFAULT;
+    uint32_t snapshot;
+    if (gmem_guest_export_copyin(NULL, pair[i].uaddr, &snapshot, sizeof snapshot) != 0)
+      return -LX_EFAULT;
+  }
+  if (nr_requeue) return -95; // EOPNOTSUPP: moving sleeping waiters is not implemented.
+
+  unsigned long source = (unsigned long)pair[0].uaddr;
+  struct fu_bucket* b = fu_bucket(source);
+  pthread_mutex_lock(&b->mu);
+  if (*(volatile uint32_t*)source != (uint32_t)pair[0].val) {
+    pthread_mutex_unlock(&b->mu);
+    return -LX_EAGAIN;
+  }
+  int woke = 0;
+  for (struct fu_waiter* w = b->head; w && woke < nr_wake; w = w->next)
+    if (w->uaddr == source && !w->woken) { w->woken = 1; ++woke; }
+  if (woke) pthread_cond_broadcast(&b->cv);
+  pthread_mutex_unlock(&b->mu);
+  return woke;
 }
 
 // ===========================================================================================
@@ -4927,8 +5043,20 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   case 98: return do_futex(a0, (int)a1, (unsigned int)a2,
                            (const struct linux_timespec*)a3, a4, (unsigned int)a5);
 
+  // ---------- 449 futex_waitv (one private U32 waiter) ----------
+  case 449: return do_futex_waitv(a0, (unsigned int)a1, (unsigned int)a2, a3, (int)a4);
+
+  // ---------- 454 futex_wake (futex2) ----------
+  case 454: return do_futex_wake2(a0, a1, (int)a2, (unsigned int)a3);
+
+  // ---------- 455 futex_wait (futex2) ----------
+  case 455: return do_futex_wait2(a0, a1, a2, (unsigned int)a3, a4, (int)a5);
+
+  // ---------- 456 futex_requeue (futex2) ----------
+  case 456: return do_futex_requeue2(a0, (unsigned int)a1, (int)a2, (int)a3);
+
   // ---------- 99 set_robust_list ----------
-  case 99: return 0;
+  case 99: return guest_set_robust_list(a0, a1);
 
   // ---------- 113 clock_gettime ----------
   case 113: {

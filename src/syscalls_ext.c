@@ -50,6 +50,7 @@ void fx_note(const char* fmt, ...);
 #include <sys/msg.h>
 #include <sys/uio.h>
 #include <sys/wait.h>
+#include <sys/event.h>
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
 #include <sys/select.h>
@@ -62,6 +63,8 @@ void fx_note(const char* fmt, ...);
 #include "signalfd_shim.h"
 #include "timerfd_shim.h"
 #include "pidfd_shim.h"
+#include "gmem.h"
+#include "inotify_watch.h"
 #include <sys/socket.h>
 #include <sys/un.h>
 
@@ -75,6 +78,7 @@ extern void rd_rtnl_dup(int oldfd, int newfd);
 #define LX_ENOENT          2
 #define LX_ESRCH           3
 #define LX_EINTR           4
+#define LX_EIO             5
 #define LX_E2BIG           7
 #define LX_EBADF           9
 #define LX_ECHILD         10
@@ -83,6 +87,7 @@ extern void rd_rtnl_dup(int oldfd, int newfd);
 #define LX_EACCES         13
 #define LX_EFAULT         14
 #define LX_EINVAL         22
+#define LX_ERANGE         34
 #define LX_ENAMETOOLONG   36
 #define LX_ENOSYS         38
 #define LX_ELOOP          40
@@ -389,6 +394,18 @@ static long resolve_at_nf(int lx_dirfd, const char* gp, char* out, size_t outsz,
   if (r < 0) return r;
   *hdirfd = AT_FDCWD;
   return 0;
+}
+
+// Snapshot a bounded guest string before handing it to a host pathname/xattr API.
+// A bad guest address must return EFAULT instead of crashing the shim process.
+static long copy_guest_cstr(uint64_t addr, char* out, size_t cap) {
+  if (!addr) return -LX_EFAULT;
+  for (size_t i = 0; i < cap; ++i) {
+    if (gmem_guest_export_copyin(NULL, addr + i, out + i, 1) != 0)
+      return -LX_EFAULT;
+    if (!out[i]) return 0;
+  }
+  return -LX_ENAMETOOLONG;
 }
 
 static int host_at_flags(int lxf) {
@@ -904,35 +921,78 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return r < 0 ? eret() : r;
   }
   case 24: return do_dup3((int)a0, (int)a1, (int)a2);          // dup3
-  // inotify: an INERT but REAL implementation. glib's GIO registers its file-monitor backend by
+  // inotify: an INERT file-change backend. glib's GIO registers its file-monitor backend by
   // calling inotify_init1() and giving up if it fails — and when no monitor backend exists it
   // reports "Unable to find default local file monitor type" and then NULL-derefs. So the fd has
-  // to be real and pollable (a pipe read end: never readable, so no spurious events) even though
-  // no watch ever fires. Apps that merely want change notification degrade to not noticing
+  // to be real and pollable (a pipe read end: normally quiet, except IN_IGNORED on removal).
+  // No filesystem-change watch ever fires. Apps that merely want notification degrade to not noticing
   // changes; apps that merely want a monitor object work.
   case 26: {                                                    // inotify_init1(flags)
+    if (a0 & ~(unsigned long)(LX_O_NONBLOCK_ | LX_O_CLOEXEC_)) return -LX_EINVAL;
     int fds[2];
     if (pipe(fds) != 0) return eret();
-    // The write end is deliberately KEPT OPEN (and never written to). Closing it would make the
+    // The write end is deliberately KEPT OPEN. Closing it would make the
     // read end instantly readable-at-EOF, and glib treats that as fatal: "inotify unexpectedly
     // hit eof". Holding it open makes the fd simply quiet forever, which is what we want. It must
     // ALSO be reserved: udevd's worker spawn (posix_spawn) does close_range(3,~0U) in the vfork'd
     // child, and an unreserved write end gets closed there, making udevd's inotify read end EOF ->
     // a spurious IN_* wake -> udevd reloads its rules dirs in a 100% CPU loop.
     fds[0] = shim_fd_reserve(fds[0]);   // read end: the vfork child's close_range() must skip it too
-    shim_fd_reserve(fds[1]);
+    fds[1] = shim_fd_reserve(fds[1]);
+    fcntl(fds[1], F_SETFL, fcntl(fds[1], F_GETFL) | O_NONBLOCK);
+    if (inotify_watch_register(fds[0], fds[1]) != 0) {
+      shim_fd_unreserve(fds[0]); shim_fd_unreserve(fds[1]);
+      close(fds[0]); close(fds[1]);
+      return -LX_ENOMEM;
+    }
     if (a0 & LX_O_NONBLOCK_) fcntl(fds[0], F_SETFL, O_NONBLOCK);
     if (a0 & LX_O_CLOEXEC_)  fcntl(fds[0], F_SETFD, FD_CLOEXEC);
     return fds[0];
   }
   case 27: {                                                    // inotify_add_watch(fd, path, mask)
-    static int wd;
-    return ++wd;                                                // a plausible descriptor; never fires
+    e = resolve_path_nf((const char*)a1, host, sizeof host,
+                        ((unsigned)a2 & 0x02000000u) != 0);     // IN_DONT_FOLLOW
+    if (e < 0) return e;
+    return inotify_watch_add((int)a0, host, (unsigned)a2);
   }
-  case 28: return 0;                                            // inotify_rm_watch
-  case 30: case 31: return 0;                                  // ioprio_set/get: no-op
+  case 28: return inotify_watch_remove((int)a0, (int)a1);       // inotify_rm_watch
+  case 30: {                                                    // ioprio_set: reset-self subset
+    // Linux stores per-task I/O priorities and its block schedulers apply
+    // them. Darwin has no equivalent guest-visible scheduler here. Only the
+    // already-unset self priority can be reset truthfully; do not acknowledge
+    // a request for RT, BE, or IDLE while ignoring its scheduling effect.
+    int which = (int)a0, who = (int)a1, prio = (int)a2;
+    int cls = (prio >> 13) & 7;
+    if (cls > 3 || (cls == 0 && (prio & 7))) return -LX_EINVAL;
+    if (which < 1 || which > 3) return -LX_EINVAL;
+    if (which != 1) return -LX_EOPNOTSUPP; // group/user fanout needs task state
+    if (who < 0 || (who && who != syscalls_guest_pid())) return -LX_ESRCH;
+    if (prio != 0) return -LX_EOPNOTSUPP;
+    return 0;
+  }
+  case 31: {                                                    // ioprio_get: raw self priority
+    // Linux returns the raw priority for IOPRIO_WHO_PROCESS. The only
+    // priority accepted by our ioprio_set subset is the unset default (0),
+    // so that value is truthful for the current guest task. Group/user
+    // queries need a task registry and effective-priority aggregation.
+    int which = (int)a0, who = (int)a1;
+    if (which < 1 || which > 3) return -LX_EINVAL;
+    if (which != 1) return -LX_EOPNOTSUPP;
+    if (who < 0 || (who && who != syscalls_guest_pid())) return -LX_ESRCH;
+    return 0;
+  }
   case 33: {                                                   // mknodat
     mode_t mode = (mode_t)a2;
+    // Linux's may_mknod() rejects invalid file types before pathname lookup.
+    // A directory has its own EPERM result; symlinks and other unsupported
+    // types return EINVAL.  Keep these failures distinct from valid device
+    // types, which this shim cannot create on the host.
+    switch (mode & S_IFMT) {
+      case 0: case S_IFREG: case S_IFIFO: case S_IFCHR:
+      case S_IFBLK: case S_IFSOCK: break;
+      case S_IFDIR: return -LX_EPERM;
+      default: return -LX_EINVAL;
+    }
     e = resolve_at_nf((int)a0, (const char*)a1, host, sizeof host, &hdirfd, 1);
     if (e < 0) return e;
     if (S_ISFIFO(mode)) {
@@ -1170,7 +1230,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return 0;
   }
   case 97: return -LX_EPERM;                                   // unshare
-  case 100: return -LX_ENOSYS;                                 // get_robust_list
+  case 100: return guest_get_robust_list((long)a0, a1, a2);    // get_robust_list
   case 101:                                                    // nanosleep (timespec matches)
     return ok0(nanosleep((const struct timespec*)a0, (struct timespec*)a1));
   case 102: {                                                  // getitimer
@@ -1695,7 +1755,27 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     }
     return total;
   }
-  case 272: return -LX_ENOSYS;                                  // kcmp
+  case 272: {                                                   // kcmp
+    // Only comparisons within this guest process have a reliable identity.
+    // Linux compares kernel object pointers; fstat(dev, ino) is not a substitute
+    // for an open-file-description identity (two independent opens can match).
+    // Do not compare a guest PID with a Darwin PID or guess about a second fd.
+    long self = syscalls_guest_pid();
+    if ((long)(int)a0 != self || (long)(int)a1 != self)
+      return -LX_EOPNOTSUPP;
+    if (a2 > 7) return -LX_EINVAL; // KCMP_FILE..KCMP_EPOLL_TFD
+    if (a2 == 0) { // KCMP_FILE: an fd always shares its own open description.
+      if (a3 > INT_MAX || a4 > INT_MAX ||
+          shim_fd_reserved((int)a3) || shim_fd_reserved((int)a4) ||
+          fcntl((int)a3, F_GETFD) < 0 || fcntl((int)a4, F_GETFD) < 0)
+        return -LX_EBADF;
+      return a3 == a4 ? 0 : -LX_EOPNOTSUPP;
+    }
+    if (a2 == 7) return -LX_EOPNOTSUPP; // KCMP_EPOLL_TFD needs epoll target identity.
+    // For one process, VM, FILES, FS, SIGHAND, IO, and SYSVSEM necessarily
+    // refer to the same object; idx1/idx2 are ignored by Linux for these types.
+    return 0;
+  }
   case 273: return -LX_EPERM;                                   // finit_module
   case 274: {                                                   // sched_setattr
     /* Darwin priority is process-wide.  Only a lone guest thread may change
@@ -1838,15 +1918,44 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (r >= 0 && a3) *(long long*)a3 = ooff;
     return r;
   }
-  case 286: {                                                   // preadv2 (flags ignored)
-    ssize_t r = preadv((int)a0, (const struct iovec*)a1, (int)a2, (off_t)a3);
+  case 286: {                                                   // preadv2
+    // Linux's six-argument ABI puts rwf_t flags in x5; x4 is pos_h and is
+    // irrelevant on a 64-bit guest.  A nonzero flag must not silently become
+    // a blocking, ordinary read (notably RWF_NOWAIT and RWF_HIPRI).
+    if ((unsigned int)a5) return -LX_EOPNOTSUPP;
+    off_t pos = (off_t)a3;
+    if (pos < -1) return -LX_EINVAL;
+    // offset -1 uses and advances the open file description's current offset.
+    ssize_t r = pos == -1 ? readv((int)a0, (const struct iovec*)a1, (int)a2)
+                          : preadv((int)a0, (const struct iovec*)a1, (int)a2, pos);
     return r < 0 ? eret() : r;
   }
-  case 287: {                                                   // pwritev2 (flags ignored)
-    ssize_t r = pwritev((int)a0, (const struct iovec*)a1, (int)a2, (off_t)a3);
+  case 287: {                                                   // pwritev2: unflagged subset
+    // On native arm64 Linux, pos_from_hilo() receives the full 64-bit offset
+    // in x3; shifting the x4 high argument twice by 32 discards it.  Offset -1
+    // means writev at the fd's current position (including pipes), whereas
+    // pwritev(-1) fails.  Never silently ignore a per-write durability,
+    // append, atomic, or nonblocking flag: the host pwritev cannot honor it.
+    if (a5) return -LX_EOPNOTSUPP;
+    uint64_t pos = (uint64_t)a3;
+    ssize_t r = (pos == UINT64_MAX)
+      ? writev((int)a0, (const struct iovec*)a1, (int)a2)
+      : pwritev((int)a0, (const struct iovec*)a1, (int)a2, (off_t)pos);
     return r < 0 ? eret() : r;
   }
-  case 288: case 289: case 290: return -LX_ENOSYS;              // pkey_* (glibc falls back)
+  case 288: {                                                   // pkey_mprotect
+    // ARM64 has no protection-key allocation in this guest. Linux's no-pkeys
+    // implementation permits the default key 0 and the legacy key -1, both
+    // of which use ordinary mprotect permissions. Never claim another key
+    // was installed: that would silently omit its access restrictions.
+    if (a0 & (16384UL - 1)) return -LX_EINVAL; // guest page size
+    if (!a1) return 0; // Linux checks zero length before key allocation
+    if ((int)a3 != 0 && (int)a3 != -1) return -LX_EINVAL;
+    if (a2 & ~(unsigned long)(PROT_READ | PROT_WRITE | PROT_EXEC))
+      return -LX_EINVAL;
+    return gmem_mprotect(a0, (size_t)a1, (int)a2);
+  }
+  case 289: case 290: return -LX_ENOSYS;                        // pkey_alloc/free
   case 258:                                                     // statx alias (see report)
   case 291: return do_statx((int)a0, (const char*)a1, (int)a2, (unsigned)a3, (void*)a4);
   case 292: return -LX_ENOSYS;                                  // io_pgetevents
@@ -1981,7 +2090,34 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     }
     return 0;
   }
-  case 438: return -LX_ENOSYS;                                  // pidfd_getfd
+  case 438: {                                                   // pidfd_getfd: self regular-file subset
+    // Linux always creates a CLOEXEC copy of the target's open file description.
+    // A guest fd is a host fd, but only a regular file beneath the guest root
+    // is safe to duplicate here: synthetic device/socket fds need their own
+    // per-fd registry handoff, and another process has a different fd table.
+    if ((unsigned int)a2) return -LX_EINVAL;
+    int pfd = (int)a0, target = (int)a1;
+    if (pfd < 0 || fcntl(pfd, F_GETFD) < 0) return -LX_EBADF;
+    pid_t pid = pidfd_shim_pid(pfd);
+    if (pid <= 0) return -LX_EBADF;
+    if (pid != getpid()) return -LX_EOPNOTSUPP;
+    // The ordinary Shimmy pidfd is a kqueue. A socket-backed pidfd can be
+    // authenticated, but its descriptor transfer needs separate coverage.
+    if (kevent(pfd, NULL, 0, NULL, 0, NULL) < 0) return -LX_EOPNOTSUPP;
+    if (target < 0 || shim_fd_reserved(target)) return -LX_EBADF;
+    struct stat st;
+    if (fstat(target, &st) < 0) return -LX_EBADF;
+    if (!S_ISREG(st.st_mode)) return -LX_EOPNOTSUPP;
+    char path[PATH_MAX];
+    const char* root = syscalls_get_root();
+    size_t rootlen = root ? strlen(root) : 0;
+    if (!rootlen || fcntl(target, F_GETPATH, path) < 0 ||
+        strncmp(path, root, rootlen) != 0 ||
+        (path[rootlen] != '/' && path[rootlen] != 0))
+      return -LX_EOPNOTSUPP;
+    int copy = fcntl(target, F_DUPFD_CLOEXEC, 0);
+    return copy < 0 ? eret() : copy;
+  }
   case 439: {                                                   // faccessat2(dfd, path, mode, flags)
     // AT_EMPTY_PATH + "" means "check the file the fd refers to". macOS faccessat() has no
     // AT_EMPTY_PATH, so resolve the fd's own path (F_GETPATH) and check that. systemd's
@@ -2012,15 +2148,182 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   case 442: return 0;                                           // mount_setattr: no-op success
   case 443: return -LX_EPERM;                                   // quotactl_fd
   case 452: {                                                   // fchmodat2(dfd, path, mode, flags)
+    // Linux fchmodat2 accepts only these two AT_* bits. Passing other Linux bits through
+    // host_at_flags silently ignores them, turning an invalid request into a chmod.
+    if (a3 & ~(unsigned long)(LX_AT_EMPTY_PATH | LX_AT_SYMLINK_NOFOLLOW))
+      return -LX_EINVAL;
+    if (!a1) return -LX_EFAULT;
     // AT_EMPTY_PATH + empty path == "chmod the dirfd itself". systemd's executor uses this while
     // setting up a service's RuntimeDirectory; the generic resolve below fails ENOENT on an empty
     // path and the executor then exits 233 (EXIT_RUNTIME_DIRECTORY), failing the unit.
-    if ((a3 & LX_AT_EMPTY_PATH) && (!a1 || !((const char*)a1)[0]))
+    if ((a3 & LX_AT_EMPTY_PATH) && !((const char*)a1)[0]) {
+      // AT_FDCWD means the guest's current directory, which need not equal the host cwd.
+      if ((int)a0 == LX_AT_FDCWD) {
+        e = resolve_at_nf(LX_AT_FDCWD, ".", host, sizeof host, &hdirfd, 0);
+        if (e < 0) return e;
+        return ok0(chmod(host, (mode_t)a2));
+      }
       return ok0(fchmod((int)a0, (mode_t)a2));
+    }
     e = resolve_at_nf((int)a0, (const char*)a1, host, sizeof host, &hdirfd,
                       ((int)a3 & LX_AT_SYMLINK_NOFOLLOW) != 0);
     if (e < 0) return e;
     return ok0(fchmodat(hdirfd, host, (mode_t)a2, host_at_flags((int)a3)));
+  }
+  case 463: {                                                   // setxattrat: pathname subset
+    // Linux uapi xattr_args: { u64 value; u32 size; u32 flags }.
+    // Keep the mutation inside the resolved guest root; fd/AT_EMPTY_PATH
+    // needs separate guest-fd provenance and is deliberately unsupported.
+    struct { uint64_t value; uint32_t size, flags; } args;
+    if (a5 < sizeof args) return -LX_EINVAL;
+    if (a5 > 16384) return -LX_E2BIG;
+    if (!a4 || gmem_guest_export_copyin(NULL, a4, &args, sizeof args) != 0)
+      return -LX_EFAULT;
+    for (size_t off = sizeof args; off < a5;) {
+      unsigned char extra[256];
+      size_t n = a5 - off < sizeof extra ? a5 - off : sizeof extra;
+      if (gmem_guest_export_copyin(NULL, a4 + off, extra, n) != 0)
+        return -LX_EFAULT;
+      for (size_t i = 0; i < n; ++i) if (extra[i]) return -LX_E2BIG;
+      off += n;
+    }
+    if (args.flags & ~3u) return -LX_EINVAL;  // Linux CREATE=1, REPLACE=2
+    if (args.flags == 3) return -LX_EINVAL;
+    if (args.size > 65536u) return -LX_E2BIG;
+    if (a2 & ~(unsigned long)(LX_AT_SYMLINK_NOFOLLOW | LX_AT_EMPTY_PATH))
+      return -LX_EINVAL;
+    if (!a1) return (a2 & LX_AT_EMPTY_PATH) ? -LX_EOPNOTSUPP : -LX_EFAULT;
+    char guest_path[PATH_MAX], guest_name[256];
+    e = copy_guest_cstr(a1, guest_path, sizeof guest_path);
+    if (e < 0) return e;
+    if (!guest_path[0])
+      return (a2 & LX_AT_EMPTY_PATH) ? -LX_EOPNOTSUPP : -LX_ENOENT;
+    e = copy_guest_cstr(a3, guest_name, sizeof guest_name);
+    if (e < 0) return e;
+    if (!guest_name[0]) return -LX_ERANGE;
+    e = resolve_at_nf((int)a0, guest_path, host, sizeof host, &hdirfd,
+                      (a2 & LX_AT_SYMLINK_NOFOLLOW) != 0);
+    if (e < 0) return e;
+    void* value = args.size ? malloc(args.size) : NULL;
+    if (args.size && !value) return -LX_ENOMEM;
+    if (args.size && gmem_guest_export_copyin(NULL, args.value, value, args.size) != 0) {
+      free(value);
+      return -LX_EFAULT;
+    }
+    int hopt = (a2 & LX_AT_SYMLINK_NOFOLLOW) ? XATTR_NOFOLLOW : 0;
+    if (args.flags & 1) hopt |= XATTR_CREATE;
+    if (args.flags & 2) hopt |= XATTR_REPLACE;
+    int result = setxattr(host, guest_name, value, args.size, 0, hopt);
+    long ret = result < 0 ? eret() : 0;
+    free(value);
+    return ret;
+  }
+  case 464: {                                                   // getxattrat: pathname subset
+    // Linux uapi struct xattr_args is { u64 value; u32 size; u32 flags }.
+    // Only the pathname route is implemented.  In particular, AT_EMPTY_PATH
+    // must not turn a shim-private host descriptor into an xattr capability.
+    struct { uint64_t value; uint32_t size, flags; } args;
+    if (a5 < sizeof args) return -LX_EINVAL;
+    if (a5 > 16384) return -LX_E2BIG;  // copy_struct_from_user page-size ceiling
+    if (!a4 || gmem_guest_export_copyin(NULL, a4, &args, sizeof args) != 0)
+      return -LX_EFAULT;
+    // A larger zero-extended argument structure is permitted by Linux.
+    for (size_t off = sizeof args; off < a5;) {
+      unsigned char extra[256];
+      size_t n = a5 - off < sizeof extra ? a5 - off : sizeof extra;
+      if (gmem_guest_export_copyin(NULL, a4 + off, extra, n) != 0)
+        return -LX_EFAULT;
+      for (size_t i = 0; i < n; ++i) if (extra[i]) return -LX_E2BIG;
+      off += n;
+    }
+    if (args.flags) return -LX_EINVAL;
+    if (a2 & ~(unsigned long)(LX_AT_SYMLINK_NOFOLLOW | LX_AT_EMPTY_PATH))
+      return -LX_EINVAL;
+    if (!a1) return (a2 & LX_AT_EMPTY_PATH) ? -LX_EOPNOTSUPP : -LX_EFAULT;
+    char guest_path[PATH_MAX], guest_name[256];
+    e = copy_guest_cstr(a1, guest_path, sizeof guest_path);
+    if (e < 0) return e;
+    if (!guest_path[0])
+      return (a2 & LX_AT_EMPTY_PATH) ? -LX_EOPNOTSUPP : -LX_ENOENT;
+    // fd/AT_EMPTY_PATH needs guest-fd ownership proof; do not use a host fd.
+    e = copy_guest_cstr(a3, guest_name, sizeof guest_name);
+    if (e < 0) return e;
+    e = resolve_at_nf((int)a0, guest_path, host, sizeof host, &hdirfd,
+                      (a2 & LX_AT_SYMLINK_NOFOLLOW) != 0);
+    if (e < 0) return e;
+    size_t cap = args.size > 65536u ? 65536u : args.size;
+    void* value = cap ? malloc(cap) : NULL;
+    if (cap && !value) return -LX_ENOMEM;
+    ssize_t got = getxattr(host, guest_name, value, cap, 0,
+                           (a2 & LX_AT_SYMLINK_NOFOLLOW) ? XATTR_NOFOLLOW : 0);
+    if (got < 0) {
+      long error = (errno == ERANGE && cap == 65536u) ? -LX_E2BIG : eret();
+      free(value);
+      return error;
+    }
+    if (cap && (size_t)got > cap) { free(value); return -LX_EIO; }
+    if (got && cap && gmem_guest_copyout_checked(args.value, value, (size_t)got) != 0) {
+      free(value); return -LX_EFAULT;
+    }
+    free(value);
+    return got;
+  }
+  case 465: {                                                   // listxattrat(dfd, path, flags, list, size)
+    // Linux fs/xattr.c accepts exactly these flags. Unlike getxattrat, this
+    // syscall has five scalar arguments and no xattr_args structure.
+    if (a2 & ~(unsigned long)(LX_AT_SYMLINK_NOFOLLOW | LX_AT_EMPTY_PATH))
+      return -LX_EINVAL;
+    const char* path = (const char*)a1;
+    size_t size = (size_t)a4;
+    if (size > 65536) size = 65536;                              // XATTR_LIST_MAX
+    ssize_t r;
+    if ((a2 & LX_AT_EMPTY_PATH) && (!path || !path[0])) {
+      int fd = (int)a0;
+      if (fd < 0 || shim_fd_reserved(fd) || fcntl(fd, F_GETFD) < 0)
+        return -LX_EBADF;
+      // An unrecognized host fd must not expose host-private xattrs. For now,
+      // support only ordinary files/directories opened beneath the guest root.
+      struct stat st;
+      char fdpath[PATH_MAX];
+      const char* root = syscalls_get_root();
+      size_t rootlen = root ? strlen(root) : 0;
+      if (fstat(fd, &st) < 0) return -LX_EBADF;
+      if ((!S_ISREG(st.st_mode) && !S_ISDIR(st.st_mode)) || !rootlen ||
+          fcntl(fd, F_GETPATH, fdpath) < 0 ||
+          strncmp(fdpath, root, rootlen) != 0 ||
+          (fdpath[rootlen] != '/' && fdpath[rootlen] != 0))
+        return -LX_EOPNOTSUPP;
+      r = flistxattr(fd, (char*)a3, size, 0);
+    } else {
+      if (!path) return -LX_EFAULT;
+      if (!path[0]) return -LX_ENOENT;
+      e = resolve_at_nf((int)a0, path, host, sizeof host, &hdirfd,
+                        (a2 & LX_AT_SYMLINK_NOFOLLOW) != 0);
+      if (e < 0) return e;
+      r = listxattr(host, (char*)a3, size,
+                    (a2 & LX_AT_SYMLINK_NOFOLLOW) ? XATTR_NOFOLLOW : 0);
+    }
+    if (r < 0 && errno == ERANGE && size >= 65536) return -LX_E2BIG;
+    return r < 0 ? eret() : r;
+  }
+  case 466: {                                                   // removexattrat(dfd, path, flags, name)
+    if (a2 & ~(unsigned long)(LX_AT_SYMLINK_NOFOLLOW | LX_AT_EMPTY_PATH))
+      return -LX_EINVAL;
+    // The fd/empty-path form needs proof that the descriptor belongs to the
+    // guest. Never hand a shim-private host descriptor to fremovexattr.
+    if (!a1) return (a2 & LX_AT_EMPTY_PATH) ? -LX_EOPNOTSUPP : -LX_EFAULT;
+    char guest_path[PATH_MAX], guest_name[256];
+    e = copy_guest_cstr(a1, guest_path, sizeof guest_path);
+    if (e < 0) return e;
+    if (!guest_path[0])
+      return (a2 & LX_AT_EMPTY_PATH) ? -LX_EOPNOTSUPP : -LX_ENOENT;
+    e = copy_guest_cstr(a3, guest_name, sizeof guest_name);
+    if (e < 0) return e;
+    e = resolve_at_nf((int)a0, guest_path, host, sizeof host, &hdirfd,
+                      (a2 & LX_AT_SYMLINK_NOFOLLOW) != 0);
+    if (e < 0) return e;
+    return ok0(removexattr(host, guest_name,
+                           (a2 & LX_AT_SYMLINK_NOFOLLOW) ? XATTR_NOFOLLOW : 0));
   }
 
   default:
