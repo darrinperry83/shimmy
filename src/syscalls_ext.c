@@ -2012,11 +2012,23 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   case 442: return 0;                                           // mount_setattr: no-op success
   case 443: return -LX_EPERM;                                   // quotactl_fd
   case 452: {                                                   // fchmodat2(dfd, path, mode, flags)
+    // Linux fchmodat2 accepts only these two AT_* bits. Passing other Linux bits through
+    // host_at_flags silently ignores them, turning an invalid request into a chmod.
+    if (a3 & ~(unsigned long)(LX_AT_EMPTY_PATH | LX_AT_SYMLINK_NOFOLLOW))
+      return -LX_EINVAL;
+    if (!a1) return -LX_EFAULT;
     // AT_EMPTY_PATH + empty path == "chmod the dirfd itself". systemd's executor uses this while
     // setting up a service's RuntimeDirectory; the generic resolve below fails ENOENT on an empty
     // path and the executor then exits 233 (EXIT_RUNTIME_DIRECTORY), failing the unit.
-    if ((a3 & LX_AT_EMPTY_PATH) && (!a1 || !((const char*)a1)[0]))
+    if ((a3 & LX_AT_EMPTY_PATH) && !((const char*)a1)[0]) {
+      // AT_FDCWD means the guest's current directory, which need not equal the host cwd.
+      if ((int)a0 == LX_AT_FDCWD) {
+        e = resolve_at_nf(LX_AT_FDCWD, ".", host, sizeof host, &hdirfd, 0);
+        if (e < 0) return e;
+        return ok0(chmod(host, (mode_t)a2));
+      }
       return ok0(fchmod((int)a0, (mode_t)a2));
+    }
     e = resolve_at_nf((int)a0, (const char*)a1, host, sizeof host, &hdirfd,
                       ((int)a3 & LX_AT_SYMLINK_NOFOLLOW) != 0);
     if (e < 0) return e;
