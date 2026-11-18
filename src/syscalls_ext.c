@@ -1411,6 +1411,29 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   case 3: return lx_io_cancel(a0, a1, a2);                      // io_cancel; inline-only AIO
   case 4: return lx_io_getevents(a0, (long)a1, (long)a2, a3, a4);
   case 5: case 6: case 7: {                                    // setxattr / lsetxattr / fsetxattr
+    if (nr == 7) {
+      // Snapshot all guest input before mutating the descriptor's xattr.
+      if (a4 & ~3ul || a4 == 3) return -LX_EINVAL;
+      if (a3 > 65536) return -LX_E2BIG; // Linux XATTR_SIZE_MAX
+      char name[256]; // Linux XATTR_NAME_MAX plus NUL
+      e = copy_guest_cstr(a1, name, sizeof name);
+      if (e < 0) return e;
+      size_t size = (size_t)a3;
+      char *value = malloc(size ? size : 1);
+      if (!value) return -LX_ENOMEM;
+      if (size && gmem_guest_export_copyin(NULL, a2, value, size) != 0) {
+        free(value);
+        return -LX_EFAULT;
+      }
+      int opt = 0;
+      if (a4 & 1) opt |= XATTR_CREATE;
+      if (a4 & 2) opt |= XATTR_REPLACE;
+      int r = fsetxattr((int)a0, name, value, size, 0, opt);
+      int saved_errno = errno;
+      free(value);
+      errno = saved_errno;
+      return ok0(r);
+    }
     if (nr == 6) {
       // Snapshot the complete value before mutating the link inode. A bad
       // later guest page must not leave a partial host xattr update.
@@ -1467,8 +1490,6 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
       return ok0(rc);
     }
     if (nr == 6) hopt |= XATTR_NOFOLLOW;
-    if (nr == 7) return ok0(fsetxattr((int)a0, (const char*)a1, (const void*)a2,
-                                      (size_t)a3, 0, hopt));
     e = resolve_path_nf((const char*)a0, host, sizeof host, nr == 6);
     if (e < 0) return e;
     return ok0(setxattr(host, (const char*)a1, (const void*)a2, (size_t)a3, 0, hopt));
