@@ -2202,7 +2202,10 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   case 77: return -LX_ENOSYS;                                  // tee
 
   // ===== 81..92: sync, timers, utimes, caps =================================
-  case 81: sync(); return 0;                                   // sync
+  // Darwin's host-wide sync neither scopes writeback to guest files nor
+  // guarantees Linux's completion semantics. Never claim it flushed the
+  // guest after initiating unrelated host filesystem writeback.
+  case 81: return -LX_ENOSYS;                                  // sync
   case 82: {                                                   // fsync
     int fd = (int)a0;
     // The guest must not flush a shim-owned host descriptor by number.

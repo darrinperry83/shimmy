@@ -4,6 +4,11 @@ This file records bounded behavior that has been implemented and tested. A dispa
 
 Current safety and refusal status is summarized in [`SAFEGUARDS.md`](SAFEGUARDS.md).
 
+The isolated #81 `sync` safeguard replaces a host-wide Darwin sync call and
+false Linux success with explicit `ENOSYS`. Its CLI build, disposable ARM64
+probe, and private Arch login/D-Bus boot gate pass. This is a safe refusal,
+not Linux durability compatibility. See [`SYNC.md`](SYNC.md).
+
 The isolated #221 `execve` follow-up snapshots its bounded guest pathname
 before host resolution. Its focused ARM64 error/self-exec probe, CLI build,
 and private Arch login/D-Bus boot gate pass. See
