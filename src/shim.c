@@ -846,7 +846,8 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
     // that cannot reach the compositor. The top-level invocation worked only because RDDRM was in
     // the launch environment; the exec'd child got a fresh environment without it.
     "RDDRM", "RDDRM_TRACE", "RDGPU_PRESENT_STATS", "RDMETAL_TRACE_DRAW",
-    "RDMETAL_TRACE_CLEAR", "RDMETAL_TRACE_TEXTURE", "QSG_INFO", "RDNATIVE_SESSION",
+    "RDMETAL_TRACE_CLEAR", "RDMETAL_TRACE_TEXTURE", "RDMETAL_TRACE_SHADER",
+    "QSG_INFO", "RDNATIVE_SESSION",
     // A systemd-started compositor is a re-exec'd host shim. The scanout and output
     // selection flags must survive that boundary or PID 1 can start in takeover while
     // the compositor silently falls back to an ordinary Mac window.
@@ -2171,7 +2172,8 @@ static char** build_guest_env(void) {
         if ((!strncmp(*e, "RD", 2) &&
              strncmp(*e, "RDMETAL_TRACE_DRAW=", 19) &&
              strncmp(*e, "RDMETAL_TRACE_CLEAR=", 20) &&
-             strncmp(*e, "RDMETAL_TRACE_TEXTURE=", 22)) ||
+             strncmp(*e, "RDMETAL_TRACE_TEXTURE=", 22) &&
+             strncmp(*e, "RDMETAL_TRACE_SHADER=", 21)) ||
             !strncmp(*e, "X11SRV_", 7) || !strncmp(*e, "WLSRV_", 6))
           continue;                            // shim controls, not the guest's environment
         out[k++] = *e;
