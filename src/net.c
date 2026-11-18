@@ -2040,13 +2040,18 @@ static long sys_epoll_pwait2(int epfd, struct lin_epoll_event* uev, int maxevent
     return -L_EOPNOTSUPP;
   }
   struct timespec ts;
+  struct lin_timespec guest_timeout;
   const struct timespec* tsp = NULL;
   double requested_ms = -1;
   if (timeout) {
-    if (timeout->tv_sec < 0 || timeout->tv_nsec < 0 || timeout->tv_nsec >= 1000000000LL)
+    if (gmem_guest_export_copyin(NULL, (uint64_t)(uintptr_t)timeout,
+                                &guest_timeout, sizeof guest_timeout) != 0)
+      return -L_EFAULT;
+    if (guest_timeout.tv_sec < 0 || guest_timeout.tv_nsec < 0 ||
+        guest_timeout.tv_nsec >= 1000000000LL)
       return -L_EINVAL;
-    ts.tv_sec = (time_t)timeout->tv_sec;
-    ts.tv_nsec = (long)timeout->tv_nsec;
+    ts.tv_sec = (time_t)guest_timeout.tv_sec;
+    ts.tv_nsec = (long)guest_timeout.tv_nsec;
     tsp = &ts;
     requested_ms = (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
   }

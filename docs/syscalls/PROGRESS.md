@@ -9,6 +9,12 @@ false Linux success with explicit `ENOSYS`. Its CLI build, disposable ARM64
 probe, and private Arch login/D-Bus boot gate pass. This is a safe refusal,
 not Linux durability compatibility. See [`SYNC.md`](SYNC.md).
 
+The isolated #441 `epoll_pwait2` follow-up copies its optional 16-byte
+timeout through checked guest memory before validation or waiting. Its
+focused ARM64 probe, existing epoll regression, CLI build, and private Arch
+login/D-Bus boot gate pass. See
+[`EPOLL-PWAIT2-TIMEOUT.md`](EPOLL-PWAIT2-TIMEOUT.md).
+
 The isolated #221 `execve` follow-up snapshots its bounded guest pathname
 before host resolution. Its focused ARM64 error/self-exec probe, CLI build,
 and private Arch login/D-Bus boot gate pass. See
