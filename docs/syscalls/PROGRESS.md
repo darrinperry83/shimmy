@@ -182,6 +182,8 @@ The third batch adds inactive mqueue fd-alias bookkeeping, private keyring membe
 
 The next keyring dependency models thread, process, and session ring subscriptions and owner-checked binding. Focused native ARM64 subscription and shared-store tests pass. The model is not connected to actual Shimmy guest credentials or fork/re-exec, and the backing store is plaintext and nontransactional. `add_key`, `request_key`, and `keyctl` remain `ENOSYS`; no real guest key material is accepted.
 
+An inactive cross-process POSIX mqueue store now supports private named queues, bounded priority-ordered messages, and unlink while a backing descriptor remains open. Its native ARM64 fork/re-exec test passes and the combined CLI build succeeds. The store is not exposed as a guest queue descriptor; poll readiness, fd inheritance, crash recovery, credentials, and notifications remain unresolved. Syscalls 180–185 remain unsupported.
+
 ## Batch integration proof
 
 At the isolated integration head, `./build.sh cli`, `tests/run-inotify-rm-watch.sh`, `python3 tests/run-get-robust-list.py`, and `python3 tests/run-fchmodat2.py --sysroot <installed-Arch-root>` all passed on 2026-11-18. These are focused tests, not a systemd/desktop regression run.
