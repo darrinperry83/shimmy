@@ -120,3 +120,11 @@ reverted. The later helper journal reported PAM session opening, followed
 `user-runtime-dir@962.service` and `user@962.service`. These observations
 identify the current session-service handoff as the next target; neither a
 working greeter nor a repaired D-Bus/varlink exchange has been demonstrated.
+
+A subsequent on-screen boot instrumented SDDM's own host `poll()` calls. Its
+Qt D-Bus thread repeatedly received `POLLIN` on both the shim eventfd (fd 5)
+and the connected system bus (fd 6). At the same time, the helper's 44-byte
+authentication message remained queued on the parent auth socket and no KWin
+process appeared. This rules out an indefinitely missed native `poll()` wake
+as the sole cause of that run's stall. The instrumented `src/net.c` code was
+reverted after the trace; this is diagnostic evidence, not a greeter fix.
