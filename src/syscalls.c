@@ -3385,6 +3385,28 @@ static int lseek_whence_l2m(int w) {
   }
 }
 
+static long readlink_guest_path(uint64_t address, char* out, size_t cap) {
+  if (!address) return -LX_EFAULT;
+  for (size_t i = 0; i < cap; ++i) {
+    if (gmem_guest_export_copyin(NULL, address + i, out + i, 1) != 0)
+      return -LX_EFAULT;
+    if (!out[i]) return 0;
+  }
+  return -LX_ENAMETOOLONG;
+}
+
+static long readlink_guest_result(uint64_t address, size_t cap,
+                                  const char* bytes, size_t length) {
+  if (length > cap) length = cap;
+  if (length && gmem_guest_copyout_checked(address, bytes, length) != 0)
+    return -LX_EFAULT;
+  return (long)length; // readlink does not append a NUL
+}
+
+static long readlink_guest_text(uint64_t address, size_t cap, const char* text) {
+  return readlink_guest_result(address, cap, text, strlen(text));
+}
+
 // ===========================================================================================
 // Synthesized /proc + /sys + /dev directory enumeration
 // ===========================================================================================
@@ -5148,23 +5170,18 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
 
   // ---------- 78 readlinkat ----------
   case 78: {
-    char* buf = (char*)a2; size_t sz = (size_t)a3;
-    if (!buf || (long)sz <= 0) return -LX_EINVAL;
-    if ((r = resolve_f((int)a0, (const char*)a1, RSV_NOFOLLOW, host, sizeof host,
+    size_t sz = (size_t)a3;
+    if (!a2 || (long)sz <= 0) return -LX_EINVAL;
+    char guest_path[GPATH_MAX];
+    r = readlink_guest_path(a1, guest_path, sizeof guest_path);
+    if (r < 0) return r;
+    if ((r = resolve_f((int)a0, guest_path, RSV_NOFOLLOW, host, sizeof host,
                        gabs, sizeof gabs)) < 0)
       return r;
-    if (strcmp(gabs, "/proc/self/exe") == 0) {
-      size_t n = strlen(g_exe);
-      if (n > sz) n = sz;
-      memcpy(buf, g_exe, n);                    // readlink does NOT NUL-terminate
-      return (long)n;
-    }
-    if (strcmp(gabs, "/proc/self/cwd") == 0) {
-      size_t n = strlen(g_cwd);
-      if (n > sz) n = sz;
-      memcpy(buf, g_cwd, n);
-      return (long)n;
-    }
+    if (strcmp(gabs, "/proc/self/exe") == 0)
+      return readlink_guest_text(a2, sz, g_exe);
+    if (strcmp(gabs, "/proc/self/cwd") == 0)
+      return readlink_guest_text(a2, sz, g_cwd);
     // /proc/self/fd/<N> and /proc/<pid>/fd/<N> — readlink of the fd-reopen magic link returns the
     // fd's target. systemd's fdset_new_fill() readlink()s every /proc/self/fd entry to learn where
     // each fd points; returning the real path (or a synthetic anon_inode target for pathless fds)
@@ -5176,10 +5193,7 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
         if (tty) {
           char t[24];
           snprintf(t, sizeof t, "/dev/tty%d", tty);
-          size_t n = strlen(t);
-          if (n > sz) n = sz;
-          memcpy(buf, t, n);
-          return (long)n;
+          return readlink_guest_text(a2, sz, t);
         }
         char hp[PATH_MAX];
         if (fcntl(pfd, F_GETPATH, hp) == 0) {
@@ -5188,68 +5202,50 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
             t = hp + g_rootlen;                    // report in guest coordinates
           else if (strncmp(hp, "/private/", 9) == 0)
             t = hp + 8;                            // macOS /tmp,/var,/etc symlink canonical form
-          size_t n = strlen(t);
-          if (n > sz) n = sz;
-          memcpy(buf, t, n);                       // readlink does NOT NUL-terminate
-          return (long)n;
+          return readlink_guest_text(a2, sz, t);
         }
         const char* t = "anon_inode:[shim]";       // socket/pipe/memfd: no path
-        size_t n = strlen(t);
-        if (n > sz) n = sz;
-        memcpy(buf, t, n);
-        return (long)n;
+        return readlink_guest_text(a2, sz, t);
       }
     }
     // /sys/dev/char/226:*/device/subsystem — libdrm's drmParseSubsystemType() readlink()s this to
     // learn the bus type; report "/pci" so the GPU is treated as a PCI device.
     if (drm_sysfs_kind(gabs) == 4) {
       const char* t = drm_sysfs_link();
-      size_t n = strlen(t);
-      if (n > sz) n = sz;
-      memcpy(buf, t, n);                          // readlink does NOT NUL-terminate
-      return (long)n;
+      return readlink_guest_text(a2, sz, t);
     }
     // /sys/class/drm/<name>/subsystem — libudev's subsystem probe for the synthetic DRM card.
     if (drm_sysfs_kind(gabs) == 11) {
       const char* t = drm_sysfs_class_link();
-      size_t n = strlen(t);
-      if (n > sz) n = sz;
-      memcpy(buf, t, n);                          // readlink does NOT NUL-terminate
-      return (long)n;
+      return readlink_guest_text(a2, sz, t);
     }
     if (drm_sysfs_kind(gabs) == 12) {
       const char* t = strstr(gabs, "226:128") ? "../../class/drm/renderD128" :
                                                     "../../class/drm/card0";
-      size_t n = strlen(t);
-      if (n > sz) n = sz;
-      memcpy(buf, t, n);
-      return (long)n;
+      return readlink_guest_text(a2, sz, t);
     }
     // /sys/class/sound/card0/subsystem — libudev's subsystem probe for the synthetic sound card.
     if (snd_sysfs_kind(gabs) == 3) {
       const char* t = snd_sysfs_link();
-      size_t n = strlen(t);
-      if (n > sz) n = sz;
-      memcpy(buf, t, n);                          // readlink does NOT NUL-terminate
-      return (long)n;
+      return readlink_guest_text(a2, sz, t);
     }
     // /sys/class/input/eventN/subsystem — libudev's subsystem probe for the synthetic input device.
     if (evdev_sysfs_kind(gabs) == 3 || evdev_sysfs_kind(gabs) == 10) {
       const char* t = evdev_sysfs_link();
-      size_t n = strlen(t);
-      if (n > sz) n = sz;
-      memcpy(buf, t, n);                          // readlink does NOT NUL-terminate
-      return (long)n;
+      return readlink_guest_text(a2, sz, t);
     }
-    ssize_t n = readlink(host, buf, sz);
+    char staged[GPATH_MAX];
+    // Read the full bounded target before applying the guest's output cap:
+    // an absolute host-root prefix may need stripping even for a tiny buffer.
+    ssize_t n = readlink(host, staged, sizeof staged);
     if (n < 0) return herrno();
     // A symlink target that points into the rootfs must be reported in guest coordinates.
-    if (g_rootlen && (size_t)n > g_rootlen && strncmp(buf, g_root, g_rootlen) == 0 &&
-        buf[g_rootlen] == '/') {
-      memmove(buf, buf + g_rootlen, (size_t)n - g_rootlen);
+    if (g_rootlen && (size_t)n > g_rootlen && strncmp(staged, g_root, g_rootlen) == 0 &&
+        staged[g_rootlen] == '/') {
+      memmove(staged, staged + g_rootlen, (size_t)n - g_rootlen);
       n -= (ssize_t)g_rootlen;
     }
-    return (long)n;
+    return readlink_guest_result(a2, sz, staged, (size_t)n);
   }
 
   // ---------- 79 newfstatat / 80 fstat ----------
