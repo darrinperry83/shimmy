@@ -13,9 +13,53 @@ struct RDMetalImage {
     RDMetalCore *core;
     IOSurfaceRef surface;
     id<MTLTexture> texture;
+    id<MTLTexture> depthTexture;
     id<MTLCommandBuffer> pending;
     uint64_t sequence;
 };
+
+static id<MTLTexture> image_depth_texture(RDMetalImage *image) {
+    if (!image) return nil;
+    if (!image->depthTexture) {
+        MTLTextureDescriptor *desc = [MTLTextureDescriptor
+            texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float_Stencil8
+            width:IOSurfaceGetWidth(image->surface)
+            height:IOSurfaceGetHeight(image->surface) mipmapped:NO];
+        desc.storageMode = MTLStorageModePrivate;
+        desc.usage = MTLTextureUsageRenderTarget;
+        image->depthTexture = [image->core->device newTextureWithDescriptor:desc];
+    }
+    return image->depthTexture;
+}
+
+void *rd_metal_image_depth_texture(RDMetalImage *image) {
+    return (__bridge void *)image_depth_texture(image);
+}
+
+uint64_t rd_metal_image_clear_depth(RDMetalImage *image, double depth,
+                                    uint32_t stencil) {
+    if (!image || image->pending || !isfinite(depth) || depth < 0 || depth > 1 ||
+        stencil > 255) return 0;
+    id<MTLTexture> texture = image_depth_texture(image);
+    if (!texture) return 0;
+    id<MTLCommandBuffer> command = [image->core->queue commandBuffer];
+    if (!command) return 0;
+    MTLRenderPassDescriptor *pass = [MTLRenderPassDescriptor renderPassDescriptor];
+    pass.depthAttachment.texture = texture;
+    pass.depthAttachment.loadAction = MTLLoadActionClear;
+    pass.depthAttachment.storeAction = MTLStoreActionStore;
+    pass.depthAttachment.clearDepth = depth;
+    pass.stencilAttachment.texture = texture;
+    pass.stencilAttachment.loadAction = MTLLoadActionClear;
+    pass.stencilAttachment.storeAction = MTLStoreActionStore;
+    pass.stencilAttachment.clearStencil = stencil;
+    id<MTLRenderCommandEncoder> encoder = [command renderCommandEncoderWithDescriptor:pass];
+    if (!encoder) return 0;
+    [encoder endEncoding];
+    image->pending = [command retain];
+    [command commit];
+    return ++image->sequence;
+}
 
 RDMetalCore *rd_metal_core_create(void) {
     RDMetalCore *core = calloc(1, sizeof *core);
@@ -123,6 +167,7 @@ void rd_metal_image_destroy(RDMetalImage *image) {
     if (!image) return;
     if (image->pending) { [image->pending waitUntilCompleted]; [image->pending release]; }
     [image->texture release];
+    [image->depthTexture release];
     if (image->surface) CFRelease(image->surface);
     free(image);
 }

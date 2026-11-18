@@ -33,3 +33,10 @@ and returns to the greeter after logout. Also verify the greeter's depth clear
 and depth-tested draws with a small focused GPU test. A nonblack frame alone
 does not prove those depth semantics or establish that all composition runs on
 the GPU.
+
+Host increment: `rdmetal_resource.m` can now allocate a private Metal
+Depth32Float/Stencil8 attachment alongside an image and submit fenced depth
+clears. `tests/test_rdmetal_depth.m` exercises allocation, invalid input,
+pending-command rejection, two clears and fence completion on the Apple GPU.
+This primitive is not yet connected to the guest driver or draw packet, so it
+does not change the black-screen outcome.
