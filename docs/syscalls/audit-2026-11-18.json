@@ -98,7 +98,7 @@
   "header_sha256": "a6277c8757890bd4fe8afaf76a8ea79274e7b0484ec147e717634c16fe54e1d9",
   "method": "installed native asm/unistd_64.h table, generic-header compat exclusion, inventory.py case-label scan, and manually reviewed source-risk flags; no guest ABI test",
   "schema_version": 1,
-  "source_commit": "892facb2adc2d192cb8e1ec54fbff0bea1316b40",
+  "source_commit": "fab41ee774999be4bbb9a44bc60243712d1bc1fe",
   "source_dirty_at_scan": false,
   "syscalls": [
     {
@@ -2692,7 +2692,7 @@
       "name": "setfsuid",
       "number": 151,
       "safeguarded_host_ipc": false,
-      "source_review_flag": "setfsuid returns current euid without changing fsuid",
+      "source_review_flag": "setfsuid has only query/same-ID behavior; guest fsuid and DAC changes are absent",
       "trap_override_requires_review": false
     },
     {
@@ -2709,7 +2709,7 @@
       "name": "setfsgid",
       "number": 152,
       "safeguarded_host_ipc": false,
-      "source_review_flag": "setfsgid returns current egid without changing fsgid",
+      "source_review_flag": "setfsgid has only query/same-ID behavior; guest fsgid and DAC changes are absent",
       "trap_override_requires_review": false
     },
     {
