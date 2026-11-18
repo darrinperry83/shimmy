@@ -19,6 +19,9 @@ This file records bounded behavior that has been implemented and tested. A dispa
 | 272 | `kcmp` | `syscall/272-kcmp` | Merged; bounded subset | Current-process self resource classes and same valid fd comparison pass a disposable ARM64 guest test. Distinct fds, cross-process comparisons, and epoll target identity remain unsupported. |
 | 286 | `preadv2` | `syscall/286-preadv2` | Merged; bounded subset | ARM64 x3 full offset, x4 ignored, current-position `-1`, and unsupported flag rejection pass a disposable guest test, including a read above 4 GiB. Nonzero RWF flags remain unsupported. |
 | 287 | `pwritev2` | `syscall/287-pwritev2` | Merged; bounded subset | ARM64 x3 full offset, x4 ignored, current-position `-1`, and no-write rejection of unsupported flags pass a disposable guest test, including a sparse write above 4 GiB. Nonzero RWF flags remain unsupported. |
+| 33 | `mknodat` | `syscall/33-mknodat` | Merged at `b390262`; partial | Regular-file and FIFO creation plus invalid-type errno distinctions pass a disposable ARM64 guest test. Device nodes and sockets remain unsupported; ownership, ACL, and path races unverified. |
+| 288 | `pkey_mprotect` | `syscall/288-pkey-mprotect` | Merged at `1de7cb2`; bounded subset | Default key 0 and legacy key -1 route through guest memory protection; invalid key, alignment, and protection checks pass. Hardware keys, allocation, and MTE remain unsupported. |
+| 438 | `pidfd_getfd` | `syscall/438-pidfd-getfd` | Merged at `f6be319`; bounded subset | A self-process kqueue pidfd can duplicate a regular guest-root file with shared offset and `CLOEXEC`; guest test passes. Cross-process, socket pidfd, synthetic and nonregular fd transfer remain unsupported. |
 
 ## Already merged before this batch
 
@@ -29,3 +32,5 @@ The development history already contains bounded implementations of `openat2`, `
 At the isolated integration head, `./build.sh cli`, `tests/run-inotify-rm-watch.sh`, `python3 tests/run-get-robust-list.py`, and `python3 tests/run-fchmodat2.py --sysroot <installed-Arch-root>` all passed on 2026-11-18. These are focused tests, not a systemd/desktop regression run.
 
 After merging the second batch, `./build.sh cli` and `python3 tests/run-kcmp.py`, `python3 tests/run-preadv2.py`, and `python3 tests/run-pwritev2.py` (each with `--sysroot <installed-Arch-root>`) passed together on 2026-11-18. The native ARM64 offset interpretation was checked against Linux `fs/read_write.c` `pos_from_hilo` and both vectored I/O tests exercise x3/x4 separately.
+
+After merging the third batch, `./build.sh cli` and `python3 tests/run-mknodat.py`, `python3 tests/run-pkey-mprotect.py`, and `python3 tests/run-pidfd-getfd.py` (each with `--sysroot <installed-Arch-root>`) passed together on 2026-11-18. No live GUI or installed rootfs was modified.
