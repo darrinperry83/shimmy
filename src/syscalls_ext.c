@@ -1824,6 +1824,10 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     long long off = 0, initial = 0;
     if (a2 && gmem_guest_export_copyin(NULL, a2, &off, sizeof off) != 0)
       return -LX_EFAULT;
+    // The offset is both input and output. Refuse a read-only guest cell
+    // before transmitting bytes, which would otherwise return a late EFAULT.
+    if (a2 && gmem_guest_range_writable(a2, sizeof off) != 0)
+      return -LX_EFAULT;
     if (a2 && off < 0) return -LX_EINVAL;
     if (in_fd < 0 || out_fd < 0 || shim_fd_reserved(in_fd) ||
         shim_fd_reserved(out_fd)) return -LX_EBADF;

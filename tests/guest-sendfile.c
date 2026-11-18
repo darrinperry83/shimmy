@@ -14,6 +14,8 @@ static long raw_sendfile(long out_fd, long in_fd, long offset, long count) {
   return x0;
 }
 
+static const int64_t readonly_offset __attribute__((section(".text"))) = 0;
+
 int main(void) {
   int in = open("/tmp/sendfile-in", O_CREAT | O_RDWR | O_TRUNC, 0600);
   int out = open("/tmp/sendfile-out", O_CREAT | O_RDWR | O_TRUNC, 0600);
@@ -28,6 +30,11 @@ int main(void) {
   if (read(out, got, 4) != 4 || memcmp(got, "cdef", 4)) return 6;
   if (lseek(out, 0, SEEK_END) != 4) return 7;
   if (raw_sendfile(out, in, 0, 2) != 2 || lseek(in, 0, SEEK_CUR) != 2) return 8;
+  off_t out_before = lseek(out, 0, SEEK_END);
+  if (out_before != 6) return 16;
+  if (raw_sendfile(out, in, (long)&readonly_offset, 1) != -14) return 17;
+  if (lseek(out, 0, SEEK_END) != out_before ||
+      lseek(in, 0, SEEK_CUR) != 2 || readonly_offset != 0) return 18;
   if (raw_sendfile(out, in, 1, 1) != -14) return 9;
   offset = -1;
   if (raw_sendfile(out, in, (long)&offset, 1) != -22) return 10;

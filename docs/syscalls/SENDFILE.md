@@ -14,6 +14,15 @@ advances the input file's current position. The output position advances in
 both cases. Bad guest pointers return `EFAULT`; invalid descriptors or access
 modes return `EBADF`; invalid offset/output modes return `EINVAL`.
 
+The offset cell is both input and output. A follow-up checks its guest
+writability before any transfer, so a readable but executable read-only cell
+returns `EFAULT` without changing the output or the input file position. The
+ARM64 test compares output size and both positions around this case. A guest
+mapping that changes after preflight can still cause a late copyout failure
+after bytes have been transmitted.
+The isolated private Arch boot reached a fresh login prompt with D-Bus broker
+and launcher settled; its exact guest and clone were cleaned.
+
 Linux [`fs/read_write.c`](https://codebrowser.dev/linux/linux/fs/read_write.c.html)
 reads and writes the optional 64-bit offset around `do_sendfile`. The
 disposable ARM64 test at `tests/run-sendfile.py` covers explicit and NULL
