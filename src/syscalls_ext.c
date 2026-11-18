@@ -2000,7 +2000,17 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return flags == 0 ? 0 : -LX_EOPNOTSUPP;
   }
   case 85: return timerfd_create_shim((int)a0, (int)a1);
-  case 86: return timerfd_settime_shim((int)a0, (int)a1, (const linux_itimerspec*)a2, (linux_itimerspec*)a3);
+  case 86: {                                                   // timerfd_settime
+    linux_itimerspec next, old;
+    if (!a2 || gmem_guest_export_copyin(NULL, a2, &next, sizeof next) != 0)
+      return -LX_EFAULT;
+    long result = timerfd_settime_shim((int)a0, (int)a1, &next, a3 ? &old : NULL);
+    if (result < 0) return result;
+    // Linux reports a failed old-value copy after the timer was updated.
+    if (a3 && gmem_guest_copyout_checked(a3, &old, sizeof old) != 0)
+      return -LX_EFAULT;
+    return result;
+  }
   case 87: return timerfd_gettime_shim((int)a0, (linux_itimerspec*)a1);
   case 88: {                                                   // utimensat(dfd, path, times, flags)
     unsigned flags = (unsigned)a3;
