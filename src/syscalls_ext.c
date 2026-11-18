@@ -2273,7 +2273,14 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return n < 0 ? eret() : n;
   }
   case 159: return g_uid0 ? 0 : ok0(setgroups((int)a0, (const gid_t*)a1));  // setgroups
-  case 161: case 162: return -LX_EPERM;                        // sethostname/setdomainname
+  case 161: {                                                  // sethostname
+    if (a1 > 64) return -LX_EINVAL;
+    char name[65] = {0};
+    if (a1 && gmem_guest_export_copyin(NULL, a0, name, (size_t)a1) != 0)
+      return -LX_EFAULT;
+    return syscalls_guest_sethostname(name, (size_t)a1);
+  }
+  case 162: return -LX_EPERM;                                  // setdomainname
   case 163: {                                                  // getrlimit
     int hr = host_rlimit((int)a0);
     struct lx_rlimit* o = (struct lx_rlimit*)a1;

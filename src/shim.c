@@ -905,7 +905,14 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
   henv[m++] = ppidenv;
   henv[m++] = signalcarry;
   henv[m++] = arg0env;
-  for (int i = 0; i < genvc; i++) henv[m++] = envp[i];
+  for (int i = 0; i < genvc; i++) {
+    // These are host-side paths, not guest environment variables. A guest
+    // must not redirect the shared UTS record or synthetic /proc backing.
+    if (!strncmp(envp[i], "RDSOCKETGROUP=", sizeof("RDSOCKETGROUP=") - 1) ||
+        !strncmp(envp[i], "RDX_MEMFD_DIR=", sizeof("RDX_MEMFD_DIR=") - 1))
+      continue;
+    henv[m++] = envp[i];
+  }
   for (int i = 0; kCarry[i]; i++) {
     const char* v = getenv(kCarry[i]);
     if (!v) continue;

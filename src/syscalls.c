@@ -971,10 +971,12 @@ long syscalls_resolve(int lx_dirfd, const char* path, int nofollow_final,
 
 // An anonymous, seekable, stat-able fd backed by a file that is unlinked immediately.
 static int mem_fd(const char* content, size_t len) {
-  // Keep virtual /proc files in the same host-private temporary directory as
-  // memfd_create when a confined launcher supplies one. TMPDIR remains the
-  // fallback for existing unconfined sessions.
+  // An explicit confined directory wins. Otherwise use the private per-boot
+  // socket group: unlike TMPDIR, RDSOCKETGROUP survives guest execve even when
+  // the guest supplies an empty envp. This keeps synthetic /proc readable in
+  // exec'd children without falling back to a sandbox-denied /var/tmp.
   const char* td = getenv("RDX_MEMFD_DIR");
+  if (!td || !*td) td = getenv("RDSOCKETGROUP");
   if (!td || !*td) td = getenv("TMPDIR");
   char tmpl[PATH_MAX];
   if (td && *td) snprintf(tmpl, sizeof tmpl, "%s%srdshim-XXXXXX", td,
@@ -1336,6 +1338,8 @@ static void sys_cpu_list(char* b, size_t cap, int offline) {
   else           snprintf(b, cap, "0-%ld\n", ncpu - 1);
 }
 
+static long guest_uts_gethostname(char name[65]);
+
 // Returns 1 if the path is a virtual /proc (or synthetic /sys leaf) file we serve; *fd is then the
 // result (or -errno).
 static int proc_open(const char* g, long* out) {
@@ -1506,7 +1510,10 @@ static int proc_open(const char* g, long* out) {
   // /proc/sys/kernel/* — systemd/journald read these at startup; the OPEN-FAIL log showed
   // osrelease/hostname/boot_id all ENOENT, and journald treats the missing hostname as fatal.
   if (strcmp(g, "/proc/sys/kernel/hostname") == 0) {
-    snprintf(buf, sizeof buf, "localhost\n");
+    char hostname[65];
+    long e = guest_uts_gethostname(hostname);
+    if (e < 0) { *out = e; return 1; }
+    snprintf(buf, sizeof buf, "%s\n", hostname);
     int fd = mem_fd(buf, strlen(buf));
     *out = fd < 0 ? herrno() : fd;
     return 1;
@@ -1719,6 +1726,84 @@ _Static_assert(sizeof(struct linux_statfs) == 120, "linux_statfs must be 120 byt
 struct linux_utsname { char sysname[65], nodename[65], release[65], version[65],
                             machine[65], domainname[65]; };
 _Static_assert(sizeof(struct linux_utsname) == 390, "utsname must be 390 bytes");
+
+/* A private socket group identifies one guest boot, including existing sibling
+ * shims and re-execed programs. The lock serializes readers and writers;
+ * rename publishes a complete record even if a writer dies during staging. */
+#define GUEST_UTS_MAGIC 0x52445554u
+struct guest_uts_record { uint32_t magic, length; char name[65]; };
+static int guest_uts_dir(void) {
+  const char *group = getenv("RDSOCKETGROUP");
+  if (!group || group[0] != '/') { errno = ENOTSUP; return -1; }
+  int dir = open(group, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+  if (dir < 0) return -1;
+  struct stat st;
+  if (fstat(dir, &st) < 0 || !S_ISDIR(st.st_mode) ||
+      st.st_uid != geteuid() || (st.st_mode & 077) != 0) {
+    close(dir); errno = EACCES; return -1;
+  }
+  return dir;
+}
+static int guest_uts_lock(int dir, int mode) {
+  int fd = openat(dir, ".rdx-uts.lock", O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
+  if (fd < 0) return -1;
+  struct stat st;
+  if (fstat(fd, &st) < 0 || !S_ISREG(st.st_mode) ||
+      st.st_uid != geteuid() || (st.st_mode & 077) != 0 || st.st_nlink != 1 ||
+      flock(fd, mode) < 0) {
+    close(fd); errno = EACCES; return -1;
+  }
+  return fd;
+}
+static long guest_uts_gethostname(char name[65]) {
+  snprintf(name, 65, "%s", "localhost");
+  if (!getenv("RDSOCKETGROUP")) return 0;
+  int dir = guest_uts_dir();
+  if (dir < 0) return herrno();
+  int lock = guest_uts_lock(dir, LOCK_SH);
+  if (lock < 0) { long e = herrno(); close(dir); return e; }
+  int fd = openat(dir, ".rdx-uts", O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+  if (fd < 0 && errno == ENOENT) { close(lock); close(dir); return 0; }
+  if (fd < 0) { long e = herrno(); close(lock); close(dir); return e; }
+  struct stat st;
+  struct guest_uts_record rec;
+  int valid = fstat(fd, &st) == 0 && S_ISREG(st.st_mode) &&
+              st.st_uid == geteuid() && (st.st_mode & 077) == 0 && st.st_nlink == 1 &&
+              st.st_size == sizeof rec && pread(fd, &rec, sizeof rec, 0) == sizeof rec &&
+              rec.magic == GUEST_UTS_MAGIC && rec.length <= 64 && rec.name[rec.length] == 0;
+  close(fd); close(lock); close(dir);
+  if (!valid) return -LX_EIO;
+  memcpy(name, rec.name, 65);
+  return 0;
+}
+long syscalls_guest_sethostname(const char *name, size_t length) {
+  if (length > 64) return -LX_EINVAL;
+  if (!getenv("RDSOCKETGROUP")) return -LX_EOPNOTSUPP;
+  if ((g_uid0 ? guest_cred_uid(1) : (unsigned)geteuid()) != 0) return -LX_EPERM;
+  int dir = guest_uts_dir();
+  if (dir < 0) return herrno();
+  int lock = guest_uts_lock(dir, LOCK_EX);
+  if (lock < 0) { long e = herrno(); close(dir); return e; }
+  struct guest_uts_record rec = { .magic = GUEST_UTS_MAGIC, .length = (uint32_t)length };
+  if (length) memcpy(rec.name, name, length);
+  char temp[64];
+  int fd = -1;
+  for (int i = 0; i < 8; ++i) {
+    snprintf(temp, sizeof temp, ".rdx-uts-%ld-%08x", (long)getpid(), arc4random());
+    fd = openat(dir, temp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+    if (fd >= 0 || errno != EEXIST) break;
+  }
+  if (fd < 0) { long e = herrno(); close(lock); close(dir); return e; }
+  ssize_t written = write(fd, &rec, sizeof rec);
+  int saved = written < 0 ? errno : (written == sizeof rec ? 0 : EIO);
+  if (!saved && fsync(fd) < 0) saved = errno;
+  if (!saved && renameat(dir, temp, dir, ".rdx-uts") < 0) saved = errno;
+  close(fd);
+  if (saved) unlinkat(dir, temp, 0);
+  close(lock); close(dir);
+  if (saved) { errno = saved; return herrno(); }
+  return 0;
+}
 
 struct linux_timespec { int64_t tv_sec, tv_nsec; };
 struct linux_timeval  { int64_t tv_sec, tv_usec; };
@@ -5283,16 +5368,16 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
 
   // ---------- 160 uname ----------
   case 160: {
-    struct linux_utsname* u = (struct linux_utsname*)a0;
-    if (!u) return -LX_EFAULT;
-    memset(u, 0, sizeof *u);
-    snprintf(u->sysname,    sizeof u->sysname,    "%s", "Linux");
-    snprintf(u->nodename,   sizeof u->nodename,   "%s", "localhost");
-    snprintf(u->release,    sizeof u->release,    "%s", "6.1.0");
-    snprintf(u->version,    sizeof u->version,    "%s", "#1 SMP PREEMPT r-drift shim");
-    snprintf(u->machine,    sizeof u->machine,    "%s", "aarch64");
-    snprintf(u->domainname, sizeof u->domainname, "%s", "(none)");
-    return 0;
+    if (!a0) return -LX_EFAULT;
+    struct linux_utsname u = {0};
+    snprintf(u.sysname,    sizeof u.sysname,    "%s", "Linux");
+    long e = guest_uts_gethostname(u.nodename);
+    if (e < 0) return e;
+    snprintf(u.release,    sizeof u.release,    "%s", "6.1.0");
+    snprintf(u.version,    sizeof u.version,    "%s", "#1 SMP PREEMPT r-drift shim");
+    snprintf(u.machine,    sizeof u.machine,    "%s", "aarch64");
+    snprintf(u.domainname, sizeof u.domainname, "%s", "(none)");
+    return gmem_guest_copyout_checked(a0, &u, sizeof u) == 0 ? 0 : -LX_EFAULT;
   }
 
   // ---------- 165 getrusage ----------
