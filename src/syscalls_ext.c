@@ -2264,12 +2264,23 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   }
   case 224: case 225: return -LX_EPERM;                        // swapon/swapoff
   case 227: {                                                  // msync (MS_SYNC value differs!)
-    int lf = (int)a2, hf = 0;
-    if (lf & LX_MS_ASYNC)      hf |= MS_ASYNC;
-    if (lf & LX_MS_INVALIDATE) hf |= MS_INVALIDATE;
-    if (lf & LX_MS_SYNC)       hf |= MS_SYNC;
-    if (!hf) hf = MS_SYNC;
-    return ok0(msync((void*)a0, (size_t)a1, hf));
+    unsigned int flags = (unsigned int)a2;
+    const unsigned long page = 16384;                          // guest AT_PAGESZ
+    if (flags & ~(LX_MS_ASYNC | LX_MS_INVALIDATE | LX_MS_SYNC)) return -LX_EINVAL;
+    if ((flags & LX_MS_ASYNC) && (flags & LX_MS_SYNC)) return -LX_EINVAL;
+    if (a0 & (page - 1)) return -LX_EINVAL;
+    if (a1 > ULONG_MAX - (page - 1)) return -LX_ENOMEM;
+    unsigned long rounded = (a1 + page - 1) & ~(page - 1);
+    if (a0 > ULONG_MAX - rounded) return -LX_ENOMEM;
+    if (!rounded) return 0;
+    if (rounded > 16ul * 1024 * 1024) return -LX_EOPNOTSUPP;
+    if (a0 < FOUR_GB || gmem_guest_range_mapped(a0, (size_t)rounded) != 0 ||
+        !host_range_mapped(a0, (size_t)rounded)) return -LX_ENOMEM;
+    // Linux MS_ASYNC and flags=0 do not initiate writeback. The host has no
+    // verified equivalent for MS_INVALIDATE's Linux locked-page checks.
+    if (flags & LX_MS_INVALIDATE) return -LX_EOPNOTSUPP;
+    if (!(flags & LX_MS_SYNC)) return 0;
+    return ok0(msync((void*)a0, (size_t)rounded, MS_SYNC));
   }
   case 228: return guest_mlock_eager(a0, a1);                   // mlock
   case 229: {                                                   // munlock
