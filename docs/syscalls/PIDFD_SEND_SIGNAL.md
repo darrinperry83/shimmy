@@ -1,0 +1,9 @@
+# `pidfd_send_signal` (ARM64 syscall 424): checked signal-0 subset
+
+The previous handler ignored `flags` and the caller's `siginfo` pointer, returned success for signal 0 without checking most pidfds, and could call `kill(host_pid, signal)` for a kqueue pidfd. A numeric PID can be reused after lookup, and host delivery does not necessarily provide Linux guest signal semantics.
+
+This increment validates zero flags, refuses non-null `siginfo`, and checks the Linux signal number. A supported signal-0 liveness query requires an issued pidfd, a live kqueue or authenticated socket, and the target's recorded process birth identity. An absent or exited target returns an error rather than optimistic success. Nonzero signaling returns `EOPNOTSUPP`; no host process is signaled by this subset. Linux signals with no host equivalent also return `EOPNOTSUPP`.
+
+This is **not full pidfd signaling**. Correct nonzero delivery needs an atomic target-owned signal path and guest signal semantics. The existing pidfd close implementation retains a host fd for waitid compatibility; the slot is now marked logically closed for this syscall, while a separately duplicated alias remains usable. Socket-backed pidfds retain their existing authenticated identity checks. The self and child liveness probe does not prove every cross-process case, and guest `dup` of a logically closed retained host fd remains a separate fd-lifecycle gap.
+
+Run `./build.sh cli` and `python3 tests/run-pidfd-send-signal.py`. The disposable ARM64 guest checks self and live-child signal 0, exited-child and invalid-fd errors, a closed fd versus its live alias, unsupported nonzero delivery, flags, payload, and signal-number validation. Existing `waitid` and `pidfd_getfd` guest regressions pass. A fresh private APFS-cloned Arch boot reached a login prompt with the D-Bus broker and launcher settled. That is a boot smoke gate, not proof of full signal delivery or pidfd lifecycle fidelity.

@@ -3456,11 +3456,14 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return r < 0 ? eret() : r;
   }
   case 424: {                                                   // pidfd_send_signal(pidfd, sig, info, flags)
-    (void)a2; (void)a3;
-    if ((int)a1 == 0 && getenv("RDPIDFD_SOCKET"))
-      return ok0(pidfd_shim_send_signal((int)a0, 0));
-    int hsig = host_signo((int)a1);
-    if (hsig <= 0) return hsig == 0 ? 0 : -LX_EINVAL;
+    if (a3) return -LX_EINVAL;
+    // The guest siginfo ABI and sender identity are not translated here.
+    // Never silently discard a requested payload.
+    if (a2) return -LX_EOPNOTSUPP;
+    if (a1 >= 64) return -LX_EINVAL;
+    int guest_sig = (int)a1;
+    int hsig = host_signo(guest_sig);
+    if (hsig < 0) return -LX_EOPNOTSUPP; // no host equivalent for this Linux signal
     return ok0(pidfd_shim_send_signal((int)a0, hsig));
   }
   case 425: case 426: case 427: return -LX_ENOSYS;              // io_uring_*

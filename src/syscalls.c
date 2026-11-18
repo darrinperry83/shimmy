@@ -4725,7 +4725,10 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     // here would let the fd number be recycled and a later waitid(P_PIDFD, fd) would resolve the
     // wrong pid. Leak it instead: the raw fd stays unique, so the registry's fd->pid mapping stays
     // correct. The leak is bounded (~1 per pidfd_open, well under the 512-slot registry).
-    if (pidfd_shim_pid((int)a0) > 0) return 0;
+    if (pidfd_shim_pid((int)a0) > 0) {
+      pidfd_shim_closed((int)a0); // retain host fd for waitid, close it logically for signaling
+      return 0;
+    }
     { int p=pty_index((int)a0); if(p>=0) g_guest_pty[p].master=0; }
     seals_set((int)a0, 0);
     if (getenv("IDLE_PIPE_TRACE") && (int)a0 == 11) {

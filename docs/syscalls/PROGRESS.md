@@ -199,6 +199,8 @@ A harmless ARM64 negative security probe confirms a guest can invoke native Darw
 The #293 `rseq` review confirms Shimmy cannot guarantee Linux's abort on every guest preemption or CPU migration. Registration remains `ENOSYS`; a four-thread ARM64 guest test confirms the storage stays untouched and a fallback path works. This is a documented boundary, not an enabled syscall.
 
 An isolated #282 userfaultfd fault/copy/wake experiment passed ARM64 guest and private Arch boot tests, but its runtime merge was withheld while private host-descriptor access remains unresolved. Default syscall 282 remains `ENOSYS`; the experiment stays on its per-syscall branch for later architecture work.
+
+`pidfd_send_signal` (#424) now has a bounded signal-zero liveness check for issued descriptors, including birth identity and logical close checks. Invalid flags and siginfo are rejected, and nonzero delivery remains unsupported rather than sending a signal to an unrelated host PID. Its ARM64 guest probe, `pidfd_getfd` and `waitid` regressions, CLI build, and isolated Arch boot with D-Bus settled passed. This is a signal-zero subset, not general pidfd signaling.
 ## Batch integration proof
 
 At the isolated integration head, `./build.sh cli`, `tests/run-inotify-rm-watch.sh`, `python3 tests/run-get-robust-list.py`, and `python3 tests/run-fchmodat2.py --sysroot <installed-Arch-root>` all passed on 2026-11-18. These are focused tests, not a systemd/desktop regression run.

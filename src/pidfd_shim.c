@@ -29,6 +29,7 @@ static struct {
   uint64_t birth_sec, birth_usec;
   char socket_name[sizeof(((struct sockaddr_un*)0)->sun_path)];
   int authenticated_socket;
+  int guest_closed;
 } slots[MAX_PIDFD];
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -305,6 +306,11 @@ long pidfd_open_shim(pid_t pid, unsigned int flags) {
   slots[slot].fd = kq;
   slots[slot].pid = pid;
   slots[slot].authenticated_socket = 0;
+  slots[slot].guest_closed = 0;
+  // A numeric host PID can be reused after this pidfd is created. Keep its
+  // birth identity for subsequent signal-0 liveness checks.
+  if (birth_of(pid, &slots[slot].birth_sec, &slots[slot].birth_usec) < 0)
+    slots[slot].birth_sec = slots[slot].birth_usec = 0;
   pthread_mutex_unlock(&lock);
   if (socket_mode) pidfd_shim_register(kq, pid);
   if (getenv("RDPIDFDDBG")) {
@@ -315,12 +321,14 @@ long pidfd_open_shim(pid_t pid, unsigned int flags) {
 }
 
 void pidfd_shim_closed(int fd) {
-  // Deliberately a no-op: systemd's pidref lifecycle closes the pidfd before waitid(P_PIDFD, fd),
-  // and if we clear the fd->pid slot here the subsequent waitid sees pid==0 and falls back to
-  // waitid(P_ALL) — reaping a RANDOM child instead of the executor, which wedges the unit's state
-  // transition ("Starting Coldplug" never finishes). Keep the mapping; pidfd_open_shim() overwrites
-  // the slot when the fd number is recycled, which is the only moment the old mapping becomes wrong.
-  (void)fd;
+  // Systemd's pidref lifecycle closes a pidfd before waitid(P_PIDFD, fd), so
+  // retain the fd->pid mapping for that compatibility path. Mark it logically
+  // closed for pidfd_send_signal: Linux would reject further signaling by this
+  // guest descriptor even though the host kqueue remains open here.
+  pthread_mutex_lock(&lock);
+  for (int i = 0; i < MAX_PIDFD; i++)
+    if (slots[i].fd == fd) { slots[i].guest_closed = 1; break; }
+  pthread_mutex_unlock(&lock);
 }
 
 void pidfd_shim_register(int fd, pid_t pid) {
@@ -334,6 +342,7 @@ void pidfd_shim_register(int fd, pid_t pid) {
                       getsockname(fd, (struct sockaddr*)&addr, &addrlen) < 0 ||
                       addr.sun_family != AF_UNIX ||
                       birth_of(pid, &sec, &usec) < 0)) return;
+  if (!socket_auth) (void)birth_of(pid, &sec, &usec);
   pthread_mutex_lock(&lock);
   // Reuse an existing slot for this fd if present, else take the next free slot.
   int slot = -1;
@@ -341,8 +350,14 @@ void pidfd_shim_register(int fd, pid_t pid) {
   if (slot < 0)
     for (int i = 0; i < MAX_PIDFD; i++) if (slots[i].fd == 0) { slot = i; break; }
   if (slot >= 0) {
+    int same_identity = slots[slot].fd == fd && slots[slot].pid == pid &&
+                        slots[slot].authenticated_socket == socket_auth &&
+                        (!socket_auth || (slots[slot].dev == st.st_dev &&
+                                          slots[slot].ino == st.st_ino));
+    if (!same_identity) slots[slot].guest_closed = 0;
     slots[slot].fd = fd; slots[slot].pid = pid;
     slots[slot].authenticated_socket = socket_auth;
+    slots[slot].birth_sec = sec; slots[slot].birth_usec = usec;
     if (socket_auth) {
       slots[slot].dev = st.st_dev; slots[slot].ino = st.st_ino;
       slots[slot].birth_sec = sec; slots[slot].birth_usec = usec;
@@ -416,8 +431,14 @@ int pidfd_shim_waitid(int fd, id_t id, siginfo_t* si, int hopt) {
 
 int pidfd_shim_send_signal(int fd, int sig) {
   pid_t pid = pidfd_shim_pid(fd);
+  if (pid <= 0) { errno = EBADF; return -1; }
+  pthread_mutex_lock(&lock);
+  int closed = 0;
+  for (int i = 0; i < MAX_PIDFD; i++)
+    if (slots[i].fd == fd) { closed = slots[i].guest_closed; break; }
+  pthread_mutex_unlock(&lock);
+  if (closed) { errno = EBADF; return -1; }
   if (socket_mode_enabled() || transferable_socket_fd(fd)) {
-    if (pid <= 0) { errno = EBADF; return -1; }
     // A host kill(pid) can address a reused PID between lookup and delivery.
     // This representation needs a target-owned signaling protocol before it
     // can promise Linux pidfd_send_signal for nonzero signals.
@@ -426,11 +447,24 @@ int pidfd_shim_send_signal(int fd, int sig) {
     if (birth_of(pid, &sec, &usec) < 0) { errno = ESRCH; return -1; }
     return kill(pid, 0);
   }
-  if (pid <= 0) {
-    // Stale/unset pidfd (systemd's fd=INT_MAX sentinel). A signal-0 existence probe is answered
-    // optimistically: the process DOES exist, we just lost the fd->pid mapping.
-    if (sig == 0) return 0;
-    errno = EBADF; return -1;
+  // Kqueue pidfds do not provide an atomic host signal-by-handle operation.
+  // A raw kill(pid, sig) can signal a reused unrelated Mac PID. Also, host
+  // delivery cannot promise the Linux guest's per-thread signal behavior.
+  if (sig != 0) { errno = ENOTSUP; return -1; }
+  if (kevent(fd, NULL, 0, NULL, 0, NULL) < 0) { errno = EBADF; return -1; }
+  uint64_t recorded_sec = 0, recorded_usec = 0;
+  pthread_mutex_lock(&lock);
+  for (int i = 0; i < MAX_PIDFD; i++)
+    if (slots[i].fd == fd && slots[i].pid == pid) {
+      recorded_sec = slots[i].birth_sec;
+      recorded_usec = slots[i].birth_usec;
+      break;
+    }
+  pthread_mutex_unlock(&lock);
+  uint64_t current_sec, current_usec;
+  if (!recorded_sec || birth_of(pid, &current_sec, &current_usec) < 0 ||
+      current_sec != recorded_sec || current_usec != recorded_usec) {
+    errno = ESRCH; return -1;
   }
-  return kill(pid, sig);
+  return kill(pid, 0);
 }

@@ -22,7 +22,8 @@ int pidfd_shim_transferable(int fd);
 void pidfd_shim_register(int fd, pid_t pid);
 // Reap the process behind a pidfd. Returns the same shape as host waitid (0 / -1 errno).
 int  pidfd_shim_waitid(int fd, id_t id, siginfo_t* si, int hopt);
-// Signal the process behind a pidfd (Linux pidfd_send_signal).
+// Checked signal-0 liveness for an issued pidfd; nonzero signals are refused
+// until an atomic target-owned guest delivery path exists.
 int  pidfd_shim_send_signal(int fd, int sig);
 
 // Linux struct pidfd_info (kernel 6.13+ PIDFD_GET_INFO), reconstructed so the shim can answer the
