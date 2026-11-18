@@ -228,6 +228,8 @@ An isolated #282 userfaultfd fault/copy/wake experiment passed ARM64 guest and p
 
 `symlinkat` (#36) now snapshots both guest strings before host mutation, while preserving the link target verbatim as guest text. Its ARM64 probe covers invalid pointers, overlong input, existing destination, and exact target text; CLI build, private Arch login/D-Bus boot, and integration probe passed.
 
+`linkat` (#37) now validates flags before path mutation, refuses unsupported `AT_EMPTY_PATH`, and uses Darwin `linkat` so zero flags link a symlink inode while `AT_SYMLINK_FOLLOW` links its target. Its ARM64 probe, CLI build, private Arch login/D-Bus boot, and combined #36/#37 integration probes passed.
+
 `tkill` (#130) now validates a positive, known guest thread ID before signal-zero success or the existing delivery path; invalid IDs return `EINVAL` or `ESRCH`. Its ARM64 guest probe, CLI build, private Arch login/D-Bus boot, and integration probe passed. This does not change `tgkill` (#131) or establish complete target-thread signal delivery.
 
 `rt_sigqueueinfo` (#138) now checks the native 128-byte guest siginfo and target, permits only current-guest signal-zero existence queries, and refuses nonzero delivery rather than signaling the host shim without preserving payload or guest handler semantics. Its ARM64 guest probe, CLI build, private Arch login/D-Bus boot, and combined #130/#138 integration probes passed. `rt_tgsigqueueinfo` (#240) remains separate.

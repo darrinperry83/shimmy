@@ -4364,12 +4364,24 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
 
   // ---------- 37 linkat ----------
   case 37: {
+    unsigned flags = (unsigned)a4;
+    // Linux accepts FOLLOW and EMPTY_PATH here. The latter names the source
+    // by fd, which the pathname resolver below cannot represent. Reject it
+    // rather than silently hard-linking a different object. Check flags
+    // before resolving either path or changing the host filesystem.
+    if (flags & ~(unsigned)(LX_AT_SYMLINK_FOLLOW | LX_AT_EMPTY_PATH))
+      return -LX_EINVAL;
+    if (flags & LX_AT_EMPTY_PATH) return -LX_EOPNOTSUPP;
     char host2[PATH_MAX];
-    int oldnf = (a4 & LX_AT_SYMLINK_FOLLOW) ? 0 : RSV_NOFOLLOW;
+    int oldnf = (flags & LX_AT_SYMLINK_FOLLOW) ? 0 : RSV_NOFOLLOW;
     if ((r = resolve_f((int)a0, (const char*)a1, oldnf, host, sizeof host, 0, 0)) < 0) return r;
     if ((r = resolve_f((int)a2, (const char*)a3, RSV_NOFOLLOW, host2, sizeof host2, 0, 0)) < 0)
       return r;
-    return herr(link(host, host2));
+    // Darwin link() follows a symbolic source even when Linux linkat(..., 0)
+    // must link the symlink inode itself. Darwin linkat() takes the follow
+    // flag explicitly, so use it after the guest-root paths are resolved.
+    return herr(linkat(AT_FDCWD, host, AT_FDCWD, host2,
+                       (flags & LX_AT_SYMLINK_FOLLOW) ? AT_SYMLINK_FOLLOW : 0));
   }
 
   // ---------- 38 renameat ----------
