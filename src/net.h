@@ -28,6 +28,11 @@ void net_note_spawned_child(int pid);
 // unlike shim-owned transport fds it belongs to the guest and may be inherited.
 #define NET_OPATH_NOT_BOUND (-4096L)
 long net_open_bound_socket_opath(const char* guest_path, int cloexec);
+// Map a guest-absolute path to its relocated host path if (and only if) it is a
+// currently-bound AF_UNIX pathname socket in the guest namespace. Returns 1 and
+// fills host_out on success, 0 if the path is not a bound socket (caller falls back
+// to the ordinary rootfs resolver). Never fabricates a mapping for a nonexistent path.
+int net_unix_socket_host_path(const char* guest_path, char* host_out, size_t host_cap);
 // Path metadata for a reference token (1=found, 0=ordinary fd).
 int net_opath_socket_stat(int fd, struct stat* out);
 int net_opath_socket_is(int fd);

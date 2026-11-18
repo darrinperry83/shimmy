@@ -4418,6 +4418,14 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
       return r;
     if ((r = resolve_f((int)a0, guest_path, RSV_NOFOLLOW, host, sizeof host, gabs, sizeof gabs)) < 0)
       return r;
+    // Unlink of a bound AF_UNIX socket path must remove the socket inode in the
+    // relocated namespace, not ENOENT in the rootfs. Landlock/cgroup still run on
+    // the guest-absolute path resolved above. rmdir (AT_REMOVEDIR) is never a socket.
+    if (!(a2 & LX_AT_REMOVEDIR) && guest_path[0] == '/') {
+      char sock_host[PATH_MAX];
+      if (net_unix_socket_host_path(guest_path, sock_host, sizeof sock_host))
+        snprintf(host, sizeof host, "%s", sock_host);
+    }
     // Landlock: rmdir needs REMOVE_DIR, unlink needs REMOVE_FILE.
     if ((r = landlock_check(gabs, (a2 & LX_AT_REMOVEDIR) ? LL_FS_REMOVE_DIR
                                                           : LL_FS_REMOVE_FILE)) < 0)
@@ -5411,6 +5419,18 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
       out->st_mode = fake_mode;
       out->st_rdev = fake_rdev;
       goto stat79_copyout;
+    }
+    // A bound AF_UNIX socket is relocated out of the rootfs; stat/lstat of its
+    // guest path must see the real socket inode, not ENOENT in the rootfs.
+    if (p[0] == '/') {
+      char sock_host[PATH_MAX];
+      if (net_unix_socket_host_path(p, sock_host, sizeof sock_host)) {
+        int sck_rc = (a3 & LX_AT_SYMLINK_NOFOLLOW) ? lstat(sock_host, &st) : stat(sock_host, &st);
+        if (sck_rc < 0) return herrno();
+        if (stat_m2l(&st, out) < 0) return herrno();
+        return gmem_guest_copyout_checked(a2, out, sizeof *out) == 0
+                   ? 0 : -LX_EFAULT;
+      }
     }
     if ((r = resolve_f((int)a0, p, (a3 & LX_AT_SYMLINK_NOFOLLOW) ? RSV_NOFOLLOW : 0,
                        host, sizeof host, gabs, sizeof gabs)) < 0) return r;

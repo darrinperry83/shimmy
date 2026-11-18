@@ -1998,6 +1998,13 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     char guest_path[PATH_MAX];
     e = copy_guest_cstr(a1, guest_path, sizeof guest_path);
     if (e < 0) return e;
+    // A bound AF_UNIX socket lives in the relocated namespace, not the rootfs;
+    // chmod on the guest path must hit the real socket file or gpg-agent's
+    // post-bind fchmodat returns ENOENT and it aborts socket setup.
+    char sock_host[PATH_MAX];
+    if (guest_path[0] == '/' &&
+        net_unix_socket_host_path(guest_path, sock_host, sizeof sock_host))
+      return ok0(fchmodat(AT_FDCWD, sock_host, (mode_t)a2, 0));
     e = resolve_at((int)a0, guest_path, host, sizeof host, &hdirfd);
     if (e < 0) return e;
     return ok0(fchmodat(hdirfd, host, (mode_t)a2, 0));
@@ -4308,6 +4315,12 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     char guest_path[PATH_MAX];
     e = copy_guest_cstr(a1, guest_path, sizeof guest_path);
     if (e < 0) return e;
+    // Same bound-socket relocation as fchmodat: operate on the real socket file
+    // in the namespace, not a nonexistent rootfs node.
+    char sock_host[PATH_MAX];
+    if (guest_path[0] == '/' &&
+        net_unix_socket_host_path(guest_path, sock_host, sizeof sock_host))
+      return ok0(fchmodat(AT_FDCWD, sock_host, (mode_t)a2, host_at_flags((int)a3)));
     // AT_EMPTY_PATH + empty path == "chmod the dirfd itself". systemd's executor uses this while
     // setting up a service's RuntimeDirectory; the generic resolve below fails ENOENT on an empty
     // path and the executor then exits 233 (EXIT_RUNTIME_DIRECTORY), failing the unit.

@@ -747,15 +747,37 @@ static long publish_guest_wayland_socket(const char* guest, const char* host) {
   return lerr();
 }
 
-// A path-only guest reference to a pathname socket in the guest namespace.
-long net_open_bound_socket_opath(const char* guest_path, int cloexec) {
-  if (!guest_path || guest_path[0] != '/') return NET_OPATH_NOT_BOUND;
+// Shared lookup used by net_open_bound_socket_opath() and net_unix_socket_host_path():
+// map a guest-absolute path through the SAME relocation bind()/connect() use and report whether
+// a live AF_UNIX pathname socket currently exists at that host location. Returns 1 and fills
+// host_out (and *path_stat, if non-NULL) on success; 0 if the path is not a bound socket or
+// cannot be mapped (host_out untouched). The lstat/S_ISSOCK is the authority, so this never
+// fabricates a mapping for a nonexistent path.
+static int unix_socket_host_path(const char* guest_path, char* host_out, size_t host_cap,
+                                 struct stat* path_stat) {
+  if (!guest_path || guest_path[0] != '/' || !host_out || !host_cap) return 0;
   char host[PATH_MAX]; int abstract = 0;
   long e = unix_path_to_host(guest_path, strlen(guest_path) + 1, 0,
                              host, sizeof host, &abstract);
-  if (e < 0 || abstract) return NET_OPATH_NOT_BOUND;
+  if (e < 0 || abstract) return 0;
+  struct stat st;
+  if (lstat(host, &st) < 0 || !S_ISSOCK(st.st_mode)) return 0;
+  if (strlen(host) + 1 > host_cap) return 0;
+  strcpy(host_out, host);
+  if (path_stat) *path_stat = st;
+  return 1;
+}
+
+int net_unix_socket_host_path(const char* guest_path, char* host_out, size_t host_cap) {
+  return unix_socket_host_path(guest_path, host_out, host_cap, NULL);
+}
+
+// A path-only guest reference to a pathname socket in the guest namespace.
+long net_open_bound_socket_opath(const char* guest_path, int cloexec) {
+  char host[PATH_MAX];
   struct stat path_stat;
-  if (lstat(host, &path_stat) < 0 || !S_ISSOCK(path_stat.st_mode)) return NET_OPATH_NOT_BOUND;
+  if (!unix_socket_host_path(guest_path, host, sizeof host, &path_stat))
+    return NET_OPATH_NOT_BOUND;
   pthread_mutex_lock(&g_lock);
   // A socket may have been bound by another guest process. The path inode is
   // the cross-process identity; the local registry is only an extra check
