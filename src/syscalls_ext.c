@@ -2153,15 +2153,25 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     struct itimerval hv, old;
     memset(&hv, 0, sizeof hv);
     if (a1) {
-      const struct lx_itimerval* n = (const struct lx_itimerval*)a1;
-      lx_tv_get(&hv.it_interval, &n->it_interval);
-      lx_tv_get(&hv.it_value, &n->it_value);
+      struct lx_itimerval guest;
+      if (gmem_guest_export_copyin(NULL, a1, &guest, sizeof guest) != 0)
+        return -LX_EFAULT;
+      if (guest.it_interval.tv_sec < 0 || guest.it_interval.tv_usec < 0 ||
+          guest.it_interval.tv_usec >= 1000000 || guest.it_value.tv_sec < 0 ||
+          guest.it_value.tv_usec < 0 || guest.it_value.tv_usec >= 1000000)
+        return -LX_EINVAL;
+      lx_tv_get(&hv.it_interval, &guest.it_interval);
+      lx_tv_get(&hv.it_value, &guest.it_value);
     }
-    if (setitimer((int)a0, a1 ? &hv : 0, &old) != 0) return eret();
+    // Linux treats a NULL new_value as a zero timer (disarm). Darwin's
+    // NULL argument is not that contract; always pass the staged value.
+    if (setitimer((int)a0, &hv, a2 ? &old : NULL) != 0) return eret();
     if (a2) {
-      struct lx_itimerval* o = (struct lx_itimerval*)a2;
-      lx_tv_put(&o->it_interval, &old.it_interval);
-      lx_tv_put(&o->it_value, &old.it_value);
+      struct lx_itimerval guest_old;
+      lx_tv_put(&guest_old.it_interval, &old.it_interval);
+      lx_tv_put(&guest_old.it_value, &old.it_value);
+      if (gmem_guest_copyout_checked(a2, &guest_old, sizeof guest_old) != 0)
+        return -LX_EFAULT;
     }
     return 0;
   }
