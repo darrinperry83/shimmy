@@ -3117,6 +3117,18 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   case 441: return -LX_ENOSYS;                                  // epoll_pwait2 (falls back)
   case 442: return 0;                                           // mount_setattr: no-op success
   case 443: return -LX_EPERM;                                   // quotactl_fd
+  case 450: {                                                   // set_mempolicy_home_node
+    // Linux only updates an existing per-VMA BIND or PREFERRED_MANY policy.
+    // This guest currently installs no per-VMA policy (mbind supports only
+    // MPOL_DEFAULT), so a nonempty range finds no policy to update.
+    const unsigned long page = 16384;                           // guest AT_PAGESZ
+    if (a0 & (page - 1)) return -LX_EINVAL;
+    if (a3 || a2 != 0) return -LX_EINVAL;                       // flags, virtual node
+    if (a1 > ULONG_MAX - (page - 1)) return -LX_EINVAL;
+    unsigned long rounded = (a1 + page - 1) & ~(page - 1);
+    if (rounded > ULONG_MAX - a0) return -LX_EINVAL;
+    return rounded ? -LX_ENOENT : 0;
+  }
   case 452: {                                                   // fchmodat2(dfd, path, mode, flags)
     // Linux fchmodat2 accepts only these two AT_* bits. Passing other Linux bits through
     // host_at_flags silently ignores them, turning an invalid request into a chmod.
