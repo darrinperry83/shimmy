@@ -2456,18 +2456,32 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return syscalls_guest_pid();
   }
   case 158: {                                                  // getgroups (gid_t is u32 on both)
-    // RDUID0=1: the host process is uid 501 and its group list is the HOST's; the guest is uid 0 and
-    // expects the root group. Report a synthetic single supplementary group (gid 0) so systemd's
-    // executor can "determine supplementary groups" for SupplementaryGroups=/Group= units.
+    int sz = (int)a0;
+    if (sz < 0) return -LX_EINVAL;
+    // Virtual-root mode must not expose the host account's group list.
+    // Retain the established synthetic singleton needed by systemd until a
+    // real guest credential/VFS model can make setgroups effective.
     if (g_uid0) {
-      int sz = (int)a0;
-      if (sz < 0) return -LX_EINVAL;
-      if (sz == 0) return 1;                 // query count
-      if (a1) ((gid_t*)a1)[0] = (gid_t)guest_cred_gid(1);
-      return 1;
+      if (sz == 0) return 1;
+      gid_t group = (gid_t)guest_cred_gid(1);
+      return gmem_guest_copyout_checked(a1, &group, sizeof group) == 0 ? 1 : -LX_EFAULT;
     }
-    int n = getgroups((int)a0, (gid_t*)a1);
-    return n < 0 ? eret() : n;
+    // Host-identity mode deliberately uses Darwin's current groups, but
+    // stages them in host memory so kernel code never receives a guest ptr.
+    int n = getgroups(0, NULL);
+    if (n < 0) return eret();
+    if (sz == 0) return n;
+    if (sz < n) return -LX_EINVAL;
+    if (!n) return 0;
+    gid_t *groups = calloc((size_t)n, sizeof *groups);
+    if (!groups) return -LX_ENOMEM;
+    int got = getgroups(n, groups);
+    if (got < 0) { long err = eret(); free(groups); return err; }
+    long result = gmem_guest_copyout_checked(a1, groups,
+                                             (size_t)got * sizeof *groups) == 0 ?
+                  got : -LX_EFAULT;
+    free(groups);
+    return result;
   }
   case 159: return g_uid0 ? 0 : ok0(setgroups((int)a0, (const gid_t*)a1));  // setgroups
   case 161: {                                                  // sethostname
