@@ -98,7 +98,7 @@
   "header_sha256": "a6277c8757890bd4fe8afaf76a8ea79274e7b0484ec147e717634c16fe54e1d9",
   "method": "installed native asm/unistd_64.h table, generic-header compat exclusion, inventory.py case-label scan, and manually reviewed source-risk flags; no guest ABI test",
   "schema_version": 1,
-  "source_commit": "7bd21565b4a76e0110810a8e27f496296310aed4",
+  "source_commit": "8dcd2bfca8655a54864ff2b3016b1503e1b17bef",
   "source_dirty_at_scan": false,
   "syscalls": [
     {
