@@ -1731,16 +1731,14 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
       default: return -LX_EINVAL;
     }
   }
-  case 126: {                                                  // sched_get_priority_min (separate task)
-    int hp;
+  case 126: {                                                  // sched_get_priority_min
+    // Linux's static priority ranges are part of its guest ABI and must not
+    // inherit Darwin's different scheduler priority ranges.
     switch ((int)a0) {
-      case 0: hp = SCHED_OTHER; break;
-      case 1: hp = SCHED_FIFO;  break;
-      case 2: hp = SCHED_RR;    break;
+      case 1: case 2: return 1;                                // FIFO, RR
+      case 0: case 3: case 5: case 6: case 7: return 0;       // normal, batch, idle, deadline, ext
       default: return -LX_EINVAL;
     }
-    int r = sched_get_priority_min(hp);
-    return r < 0 ? eret() : r;
   }
   case 127:                                                    // sched_rr_get_interval
     if (a1) { struct lx_timespec* t = (struct lx_timespec*)a1; t->tv_sec = 0; t->tv_nsec = 1000000; }
