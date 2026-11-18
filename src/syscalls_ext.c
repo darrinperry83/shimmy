@@ -94,6 +94,69 @@ extern void rd_rtnl_dup(int oldfd, int newfd);
 #define LX_ELOOP          40
 #define LX_EOPNOTSUPP     95
 
+// Prototype native-AIO context store. The handle is the mapped guest ring
+// address, as on Linux. Do not merge this alone: io_destroy/io_submit and
+// completion retrieval must use the same registry before io_setup is exposed.
+struct lx_aio_ring_header {
+  uint32_t id, nr, head, tail;
+  uint32_t magic, compat_features, incompat_features, header_length;
+};
+struct lx_aio_context {
+  uint64_t handle;
+  size_t mapping_length;
+  unsigned requested_events;
+  pid_t host_pid;
+};
+static pthread_mutex_t g_lx_aio_mu = PTHREAD_MUTEX_INITIALIZER;
+static struct lx_aio_context g_lx_aio_contexts[32];
+
+static long lx_io_setup(unsigned nr_events, uint64_t ctxp) {
+  uint64_t existing;
+  if (!ctxp || gmem_guest_export_copyin(NULL, ctxp, &existing, sizeof existing) != 0)
+    return -LX_EFAULT;
+  if (existing || !nr_events) return -LX_EINVAL;
+  // Linux's default aio-max-nr is 65536. This prototype deliberately has a
+  // smaller per-process bound until completion storage and quota are tested.
+  if (nr_events > 1024) return -LX_EAGAIN;
+
+  pthread_mutex_lock(&g_lx_aio_mu);
+  unsigned slot = 32, total = 0;
+  for (unsigned i = 0; i < 32; ++i) {
+    if (!g_lx_aio_contexts[i].handle && slot == 32) slot = i;
+    if (g_lx_aio_contexts[i].host_pid == getpid())
+      total += g_lx_aio_contexts[i].requested_events;
+  }
+  if (slot == 32 || total + nr_events > 1024) {
+    pthread_mutex_unlock(&g_lx_aio_mu);
+    return -LX_EAGAIN;
+  }
+  // One spare ring entry distinguishes full from empty. The Linux ring
+  // header is 32 bytes followed by 32-byte io_event records.
+  size_t length = sizeof(struct lx_aio_ring_header) + ((size_t)nr_events + 1) * 32;
+  long mapping = gmem_mmap(0, length, PROT_READ | PROT_WRITE, 0x01 | 0x20, -1, 0);
+  if (mapping < 0) {
+    pthread_mutex_unlock(&g_lx_aio_mu);
+    return mapping;
+  }
+  struct lx_aio_ring_header ring = {
+    .id = slot + 1, .nr = nr_events + 1,
+    .magic = 0xa10a10a1u, .compat_features = 1,
+    .header_length = sizeof(struct lx_aio_ring_header),
+  };
+  if (gmem_guest_copyout_checked((uint64_t)mapping, &ring, sizeof ring) != 0 ||
+      gmem_guest_copyout_checked(ctxp, &mapping, sizeof mapping) != 0) {
+    gmem_munmap((unsigned long)mapping, length);
+    pthread_mutex_unlock(&g_lx_aio_mu);
+    return -LX_EFAULT;
+  }
+  g_lx_aio_contexts[slot] = (struct lx_aio_context){
+    .handle = (uint64_t)mapping, .mapping_length = length,
+    .requested_events = nr_events, .host_pid = getpid(),
+  };
+  pthread_mutex_unlock(&g_lx_aio_mu);
+  return 0;
+}
+
 #define LX_AT_FDCWD              (-100)
 #define LX_AT_SYMLINK_NOFOLLOW   0x100
 #define LX_AT_EACCESS            0x200
@@ -868,7 +931,8 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   switch (nr) {
 
   // ===== 0..16: aio + extended attributes ==================================
-  case 0: case 1: case 2: case 3: case 4: return -LX_ENOSYS;   // io_setup..io_getevents (aio)
+  case 0: return lx_io_setup((unsigned)a0, a1);                 // io_setup; family gate pending
+  case 1: case 2: case 3: case 4: return -LX_ENOSYS;           // aio family pending
   case 5: case 6: case 7: {                                    // setxattr / lsetxattr / fsetxattr
     int hopt = 0;                                              // Linux XATTR_CREATE=1 REPLACE=2
     if ((int)a4 & 1) hopt |= XATTR_CREATE;
