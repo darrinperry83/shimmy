@@ -23,3 +23,19 @@ Proof: `./build.sh cli` and `python3 tests/run-adjtimex.py` passed on
 2026-11-18. The ARM64 probe checks null/bad pointers, a rejected write request
 without guest-buffer mutation, a plausible nonzero timestamp, units, and
 virtual tick. It does not test active clock adjustments or all NTP states.
+
+## Follow-up ABI audit
+
+The separate `tests/guest-adjtimex-uapi.c` probe compiles against the installed
+Arch ARM64 `<sys/timex.h>` instead of repeating Shimmy's private structure. It
+checks the 208-byte size and the offsets of `time`, `tick`, and `tai`, then
+exercises the real guest query and rejection of `ADJ_OFFSET`. Run it with
+`python3 tests/run-adjtimex-uapi.py --sysroot <Arch rootfs>`. The CLI build,
+this UAPI probe, and the original raw-ABI probe pass. No runtime code change is
+justified by this audit.
+
+Adjustment modes remain blocked: forwarding them to `ntp_adjtime` would alter
+the Mac's shared clock and would not provide an isolated Linux guest clock.
+Read-only `modes=0` describes the host clock, not a guest namespace. Do not
+count #171 as clock-discipline compatibility or infer that a successful query
+supports adjustment.

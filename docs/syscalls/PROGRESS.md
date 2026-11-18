@@ -310,3 +310,5 @@ The merged head through #147 passed the combined CLI build and focused probes fo
 The merged head through #152 passed CLI build and the focused probes for #39, #151, and #152. Its fresh private Arch boot reached login with D-Bus broker and launcher settled. The harness stopped its exact guest and the disposable clone was removed. This remains a boot smoke test, not full mount or credential compatibility.
 
 After rebasing this batch onto concurrent `0d920f2` (`drmasahi.c` and SDDM documentation), the CLI rebuild, three focused probes, and a second fresh private Arch login/D-Bus boot passed. The exact rebased test guest and clone were cleaned before publication.
+
+An independent Arch ARM64 `<sys/timex.h>` probe for `adjtimex` (#171) now confirms the 208-byte UAPI layout and bounded read-only query/refusal. The existing and new probes and integration CLI build passed. No runtime change was needed; adjustment of the shared host clock remains unsupported and is recorded in the safeguards ledger.
