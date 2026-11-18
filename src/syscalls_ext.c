@@ -2768,12 +2768,11 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   // may reach host msgctl until all message syscalls use guest-scoped IDs.
   case 187: return -LX_ENOSYS;                                   // msgctl
 
-  // SysV shared memory and semaphores are FORWARDED to the host. macOS implements both natively
-  // (verified: semget -> 131083, shmget -> 131073, shmat -> 0x1008b4000), so stubbing these to
-  // -ENOSYS was leaving a whole class of app dead for no reason. Qt's QSharedMemory and
-  // QSystemSemaphore sit on them, which means SingleApplication does too -- kate issued exactly
-  // semget(190) then shmget(194) and quit rc=0 before opening a window, with no diagnostic
-  // (found by R5).
+  // SysV shared memory is still forwarded to the host. macOS implements it natively, and Qt's
+  // QSharedMemory has used that path. SysV semaphores are different: guest keys and raw IDs
+  // would address the host-global IPC namespace. semget is refused below until the semaphore
+  // family has an instance-scoped key/ID/permission model. The ID-taking companion calls still
+  // need their own safeguards.
   //
   // Forwarding is safe here in a way it would not be under a VM: guest pointers ARE host
   // pointers, so an address returned by the host shmat() is directly usable by the guest.
@@ -2816,8 +2815,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return -LX_ENOSYS;                          // IPC_SET and the SHM_* extensions: nothing asks
   }
 
-  case 190:                                                    // semget(key, nsems, flag)
-    { int r = semget((key_t)a0, (int)a1, (int)a2); return r < 0 ? eret() : r; }
+  case 190: return -LX_ENOSYS;                                 // semget: no private guest IPC namespace
   case 193: {                                                  // semop(semid, sops, nsops)
     // struct sembuf is {unsigned short sem_num; short sem_op; short sem_flg;} on BOTH, so the
     // guest's array is passed through unchanged. Checked rather than assumed.

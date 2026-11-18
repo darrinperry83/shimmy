@@ -128,7 +128,7 @@ Current safety and refusal status is summarized in [`SAFEGUARDS.md`](SAFEGUARDS.
 | 179 | `sysinfo` | `syscall/179-sysinfo-blocker` | Blocked; runtime refusal withheld | Current route invents free RAM, swap, process count and writes directly to guest memory. Truthful `EOPNOTSUPP` refusal caused Arch init to abort before login. Guest resource accounting and a boot-compatible policy are needed; no runtime change merged. |
 | 186 | `msgget` | `syscall/186-msgget-refuse` | Squash merged safeguard | Guest key lookup and creation return `ENOSYS` before host-global Darwin queue access. ARM64 probe and private Arch boot passed. This is not compatible message queues. |
 | 189 | `msgsnd` | `syscall/189-msgsnd-host-id-guard` | Squash merged safeguard | Arbitrary guest queue IDs and buffers return `ENOSYS` before host access. ARM64 probe and private Arch boot passed. This is not compatible message queues. |
-| 190 | `semget` | `syscall/190-semget-audit` | Blocked; documentation only | Guest key reaches host-global Darwin semaphores; companion semctl/semop/semtimedop use raw host IDs. Private ID/permission/lifecycle model is required. No runtime change merged. |
+| 190 | `semget` | `syscall/190-semget-20261118` | Squash merged safeguard | Guest keys now return `ENOSYS` before host-global Darwin semaphore access. ARM64 probe and private Arch boot passed; companion #191–193 still accept raw host IDs. |
 | 194 | `shmget` | `syscall/194-shmget` | Blocked; documentation only | Guest key reaches host-global Darwin shared memory; companion shmctl/shmat/shmdt use raw host IDs, including destructive removal risk. Private ID/attachment/cleanup model is required. No runtime change merged. |
 
 ## Already merged before this batch
@@ -329,3 +329,5 @@ The merged head through #186 passed a fresh private Arch login prompt with D-Bus
 `msgrcv` (#188) now refuses raw host queue IDs before touching the guest buffer. Its ARM64 refusal/no-mutation probe, CLI build, and private Arch login/D-Bus boot passed in isolation; the integration CLI build and #186–188 probes passed after resolving the adjacent #187 merge. #189 still needs its own gate.
 
 `msgsnd` (#189) now refuses raw host queue IDs and guest buffers before Darwin `msgsnd`. Its ARM64 refusal probe, CLI build, and private Arch login/D-Bus boot passed in isolation. Together with #186–188, the published message-queue family no longer forwards guest keys or IDs to Darwin, but has no working private queue implementation.
+
+`semget` (#190) now refuses guest keys before Darwin's host-global SysV semaphore namespace. Its ARM64 refusal probe, CLI build, and private Arch login/D-Bus boot passed in isolation; the merged CLI build and #186–190 focused probes passed. Companion #191–193 remain host-ID risks and Qt semaphore users may now receive `ENOSYS`; this is a safeguard, not compatible semaphores.

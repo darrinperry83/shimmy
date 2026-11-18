@@ -13,8 +13,10 @@ cleanup after a shim dies.
 There is no safe `semget`-only runtime patch: key translation without a
 private ID registry leaves companion calls able to address arbitrary host
 IDs, and translating only returned IDs would strand `semctl` and `semop`.
-The existing host-forwarding path is retained for now because Qt applications
-have used it, but it must not be counted as isolated Linux syscall parity.
+Syscall 190 now returns `ENOSYS` before touching host IPC. This may make Qt
+programs requiring `QSystemSemaphore` unavailable until a private backend
+exists; it does not count as Linux-compatible semaphore support. The ID-taking
+companion calls still accept raw host IDs, so this is only a narrow safeguard.
 The present `semtimedop` case also calls blocking host `semop` for a finite
 timeout, so its deadline contract is separately unimplemented.
 
@@ -27,5 +29,9 @@ process, verify key and guessed-ID collision refusal, operation/permission
 semantics, timed wait expiry, and crash cleanup. Then run the private Arch
 login/D-Bus boot gate and an actual Qt semaphore consumer.
 
-This branch changes documentation only; it makes no runtime compatibility
-claim and does not run a boot test.
+The focused ARM64 probe uses `IPC_PRIVATE` and a named key without creating
+any host semaphore. `./build.sh cli` and `python3 tests/run-semget-refusal.py`
+verify this bounded refusal. A private Arch clone reached a fresh login prompt
+with the D-Bus broker and launcher settled. Its scoped guest and exact clone
+were cleaned afterward. The boot smoke does not prove Qt behavior or provide
+guest-private semaphore compatibility.
