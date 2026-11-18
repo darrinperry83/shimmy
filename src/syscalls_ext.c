@@ -1666,7 +1666,17 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   }
   case 117: return -LX_EPERM;                                  // ptrace
   case 118: case 119: return 0;                                // sched_setparam/setscheduler
-  case 120: return 0;                                          // sched_getscheduler -> SCHED_OTHER
+  case 120: {                                                  // sched_getscheduler: current thread
+    // The guest exposes SCHED_OTHER for the current thread. A Linux PID here
+    // names a thread, not an arbitrary Darwin process. Do not report a policy
+    // for a nonexistent guest ID or guess another thread's scheduling state.
+    long target = (long)(int)a0;
+    if (target < 0) return -LX_EINVAL;
+    if (target == 0 || target == guest_tid() ||
+        (target == syscalls_guest_pid() && guest_tid() == 1))
+      return 0;
+    return guest_tid_known((int)target) ? -LX_EOPNOTSUPP : -LX_ESRCH;
+  }
   case 121:                                                    // sched_getparam
     if (a1) *(int*)a1 = 0;
     return 0;
