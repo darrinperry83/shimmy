@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""Refresh a static ARM64 dispatch/risk snapshot; never assert ABI conformance.
+
+Usage: python3 docs/syscalls/audit_snapshot.py /path/to/asm-generic/unistd.h
+The header is input only. This script does not build or run a guest.
+"""
+import hashlib
+import json
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+
+repo = Path(__file__).resolve().parents[2]
+header = Path(sys.argv[1]).resolve(strict=True)
+with tempfile.TemporaryDirectory(prefix="shimmy-syscall-audit-") as tmp:
+    raw = Path(tmp) / "dispatch.json"
+    subprocess.run([sys.executable, str(repo / "docs/syscalls/inventory.py"),
+                    str(repo), str(header), str(raw)], check=True,
+                   stdout=subprocess.DEVNULL)
+    ledger = json.loads(raw.read_text())
+
+# These are source-review queues, not proofs of a bug in every supported form.
+review = {
+    22: "epoll_pwait ignores guest sigmask arguments a4/a5",
+    39: "umount2 returns unconditional success without unmounting",
+    40: "mount accepts broad no-op success after a narrow /run/user exception",
+    72: "pselect6 ignores guest sigmask argument a5",
+    73: "ppoll route omits guest sigmask arguments a3/a4",
+    140: "setpriority passes guest selector/id to Darwin setpriority",
+    141: "getpriority passes guest selector/id to Darwin getpriority",
+    151: "setfsuid returns current euid without changing fsuid",
+    152: "setfsgid returns current egid without changing fsgid",
+    154: "setpgid passes guest pids directly to host process groups",
+    155: "getpgid passes guest pid directly to Darwin",
+    156: "getsid passes guest pid directly to Darwin",
+    168: "getcpu reports CPU/node zero; check virtual topology consistency",
+    171: "adjtimex reports TIME_OK with zeroed state",
+    186: "SysV msgget uses host-global IPC namespace and guest key",
+    187: "SysV msgctl uses host-global IPC identifier",
+    188: "SysV msgrcv uses host-global IPC identifier",
+    189: "SysV msgsnd uses host-global IPC identifier",
+    190: "SysV semget uses host-global IPC namespace and guest key",
+    191: "SysV semctl uses host-global IPC identifier",
+    193: "SysV semop uses host-global IPC identifier",
+    194: "SysV shmget uses host-global IPC namespace and guest key",
+    195: "SysV shmctl uses host-global IPC identifier",
+    196: "SysV shmat maps host-global IPC segment",
+    197: "SysV shmdt detaches host-global IPC segment",
+    428: "open_tree returns /tmp directory fd, not detached mount",
+    429: "move_mount returns unconditional success without move",
+    430: "fsopen returns unconnected host datagram socket, not fs context",
+    431: "fsconfig returns unconditional success without configuration",
+    432: "fsmount returns /tmp directory fd, not mount",
+    433: "fspick returns unconnected host datagram socket, not fs context",
+    442: "mount_setattr returns unconditional success without attribute change",
+}
+
+rows = []
+for entry in ledger["syscalls"]:
+    n = entry["number"]
+    locations = entry["dispatch_locations"]
+    rows.append({
+        "number": n, "name": entry["name"],
+        "dispatch": "case_label" if locations else "none",
+        "locations": locations,
+        "trap_override_requires_review": entry["trap_override"],
+        "duplicate_cases": len(locations) > 1,
+        "source_review_flag": review.get(n),
+        "compatibility": "unverified",
+    })
+
+snapshot = {
+    "schema_version": 1,
+    "architecture": "aarch64-linux",
+    "source_commit": ledger["source_commit"],
+    "source_dirty_at_scan": bool(subprocess.check_output(
+        ["git", "-C", str(repo), "status", "--porcelain", "--", "src"], text=True).strip()),
+    "header_sha256": hashlib.sha256(header.read_bytes()).hexdigest(),
+    "header_basename": str(header).split("/usr/include/", 1)[-1],
+    "method": "inventory.py case-label scan plus manually reviewed source-risk flags; no guest ABI test",
+    "warning": "A dispatch case, test filename, or documented subset is not full Linux compatibility.",
+    "counts": {
+        "header_entries": len(rows),
+        "case_labels": sum(row["dispatch"] == "case_label" for row in rows),
+        "no_case_label": sum(row["dispatch"] == "none" for row in rows),
+        "duplicate_case_numbers": sum(row["duplicate_cases"] for row in rows),
+        "source_review_flags": sum(row["source_review_flag"] is not None for row in rows),
+        "verified_full_compatibility": 0,
+    },
+    "syscalls": rows,
+}
+out = repo / "docs/syscalls/audit-2026-11-18.json"
+out.write_text(json.dumps(snapshot, sort_keys=True, indent=2) + "\n")
+print(out)

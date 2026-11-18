@@ -1,0 +1,5251 @@
+{
+  "architecture": "aarch64-linux",
+  "counts": {
+    "case_labels": 306,
+    "duplicate_case_numbers": 5,
+    "header_entries": 337,
+    "no_case_label": 31,
+    "source_review_flags": 32,
+    "verified_full_compatibility": 0
+  },
+  "header_basename": "asm-generic/unistd.h",
+  "header_sha256": "9ec1faddab5c363614b166ee7eed3f7723529e3a32312aad14fc6d0df5204354",
+  "method": "inventory.py case-label scan plus manually reviewed source-risk flags; no guest ABI test",
+  "schema_version": 1,
+  "source_commit": "1528e3702a0c16d987ef60028c2722a0fcc0b796",
+  "source_dirty_at_scan": false,
+  "syscalls": [
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1446,
+          "tier": "extended"
+        }
+      ],
+      "name": "io_setup",
+      "number": 0,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1447,
+          "tier": "extended"
+        }
+      ],
+      "name": "io_destroy",
+      "number": 1,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1448,
+          "tier": "extended"
+        }
+      ],
+      "name": "io_submit",
+      "number": 2,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1449,
+          "tier": "extended"
+        }
+      ],
+      "name": "io_cancel",
+      "number": 3,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1450,
+          "tier": "extended"
+        }
+      ],
+      "name": "io_getevents",
+      "number": 4,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1451,
+          "tier": "extended"
+        }
+      ],
+      "name": "setxattr",
+      "number": 5,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1451,
+          "tier": "extended"
+        }
+      ],
+      "name": "lsetxattr",
+      "number": 6,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1451,
+          "tier": "extended"
+        }
+      ],
+      "name": "fsetxattr",
+      "number": 7,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1462,
+          "tier": "extended"
+        }
+      ],
+      "name": "getxattr",
+      "number": 8,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1462,
+          "tier": "extended"
+        }
+      ],
+      "name": "lgetxattr",
+      "number": 9,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1462,
+          "tier": "extended"
+        }
+      ],
+      "name": "fgetxattr",
+      "number": 10,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1473,
+          "tier": "extended"
+        }
+      ],
+      "name": "listxattr",
+      "number": 11,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1473,
+          "tier": "extended"
+        }
+      ],
+      "name": "llistxattr",
+      "number": 12,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1473,
+          "tier": "extended"
+        }
+      ],
+      "name": "flistxattr",
+      "number": 13,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1483,
+          "tier": "extended"
+        }
+      ],
+      "name": "removexattr",
+      "number": 14,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1483,
+          "tier": "extended"
+        }
+      ],
+      "name": "lremovexattr",
+      "number": 15,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1483,
+          "tier": "extended"
+        }
+      ],
+      "name": "fremovexattr",
+      "number": 16,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4239,
+          "tier": "main"
+        }
+      ],
+      "name": "getcwd",
+      "number": 17,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1491,
+          "tier": "extended"
+        }
+      ],
+      "name": "lookup_dcookie",
+      "number": 18,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/net.c",
+          "line": 3017,
+          "tier": "network"
+        }
+      ],
+      "name": "eventfd2",
+      "number": 19,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/net.c",
+          "line": 3020,
+          "tier": "network"
+        }
+      ],
+      "name": "epoll_create1",
+      "number": 20,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/net.c",
+          "line": 3022,
+          "tier": "network"
+        }
+      ],
+      "name": "epoll_ctl",
+      "number": 21,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/net.c",
+          "line": 3025,
+          "tier": "network"
+        }
+      ],
+      "name": "epoll_pwait",
+      "number": 22,
+      "source_review_flag": "epoll_pwait ignores guest sigmask arguments a4/a5",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1492,
+          "tier": "extended"
+        }
+      ],
+      "name": "dup",
+      "number": 23,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1503,
+          "tier": "extended"
+        }
+      ],
+      "name": "dup3",
+      "number": 24,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1510,
+          "tier": "extended"
+        }
+      ],
+      "name": "inotify_init1",
+      "number": 26,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1532,
+          "tier": "extended"
+        }
+      ],
+      "name": "inotify_add_watch",
+      "number": 27,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1538,
+          "tier": "extended"
+        }
+      ],
+      "name": "inotify_rm_watch",
+      "number": 28,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4252,
+          "tier": "main"
+        }
+      ],
+      "name": "ioctl",
+      "number": 29,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1539,
+          "tier": "extended"
+        }
+      ],
+      "name": "ioprio_set",
+      "number": 30,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1553,
+          "tier": "extended"
+        }
+      ],
+      "name": "ioprio_get",
+      "number": 31,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4270,
+          "tier": "main"
+        }
+      ],
+      "name": "flock",
+      "number": 32,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1564,
+          "tier": "extended"
+        }
+      ],
+      "name": "mknodat",
+      "number": 33,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4273,
+          "tier": "main"
+        }
+      ],
+      "name": "mkdirat",
+      "number": 34,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4309,
+          "tier": "main"
+        }
+      ],
+      "name": "unlinkat",
+      "number": 35,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1592,
+          "tier": "extended"
+        }
+      ],
+      "name": "symlinkat",
+      "number": 36,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4333,
+          "tier": "main"
+        }
+      ],
+      "name": "linkat",
+      "number": 37,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4343,
+          "tier": "main"
+        }
+      ],
+      "name": "renameat",
+      "number": 38,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1599,
+          "tier": "extended"
+        }
+      ],
+      "name": "umount2",
+      "number": 39,
+      "source_review_flag": "umount2 returns unconditional success without unmounting",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1607,
+          "tier": "extended"
+        }
+      ],
+      "name": "mount",
+      "number": 40,
+      "source_review_flag": "mount accepts broad no-op success after a narrow /run/user exception",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1648,
+          "tier": "extended"
+        }
+      ],
+      "name": "pivot_root",
+      "number": 41,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1649,
+          "tier": "extended"
+        }
+      ],
+      "name": "nfsservctl",
+      "number": 42,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1654,
+          "tier": "extended"
+        }
+      ],
+      "name": "fallocate",
+      "number": 47,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4419,
+          "tier": "main"
+        }
+      ],
+      "name": "faccessat",
+      "number": 48,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4449,
+          "tier": "main"
+        }
+      ],
+      "name": "chdir",
+      "number": 49,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1655,
+          "tier": "extended"
+        }
+      ],
+      "name": "fchdir",
+      "number": 50,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1656,
+          "tier": "extended"
+        }
+      ],
+      "name": "chroot",
+      "number": 51,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1657,
+          "tier": "extended"
+        }
+      ],
+      "name": "fchmod",
+      "number": 52,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1658,
+          "tier": "extended"
+        }
+      ],
+      "name": "fchmodat",
+      "number": 53,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1664,
+          "tier": "extended"
+        }
+      ],
+      "name": "fchownat",
+      "number": 54,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1685,
+          "tier": "extended"
+        }
+      ],
+      "name": "fchown",
+      "number": 55,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4480,
+          "tier": "main"
+        }
+      ],
+      "name": "openat",
+      "number": 56,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4679,
+          "tier": "main"
+        }
+      ],
+      "name": "close",
+      "number": 57,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1691,
+          "tier": "extended"
+        }
+      ],
+      "name": "vhangup",
+      "number": 58,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": true,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1692,
+          "tier": "extended"
+        },
+        {
+          "file": "src/net.c",
+          "line": 3033,
+          "tier": "network"
+        }
+      ],
+      "name": "pipe2",
+      "number": 59,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1693,
+          "tier": "extended"
+        }
+      ],
+      "name": "quotactl",
+      "number": 60,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4728,
+          "tier": "main"
+        }
+      ],
+      "name": "getdents64",
+      "number": 61,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4739,
+          "tier": "main"
+        }
+      ],
+      "name": "read",
+      "number": 63,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4780,
+          "tier": "main"
+        }
+      ],
+      "name": "write",
+      "number": 64,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4816,
+          "tier": "main"
+        }
+      ],
+      "name": "readv",
+      "number": 65,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4817,
+          "tier": "main"
+        }
+      ],
+      "name": "writev",
+      "number": 66,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4840,
+          "tier": "main"
+        }
+      ],
+      "name": "pread64",
+      "number": 67,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4841,
+          "tier": "main"
+        }
+      ],
+      "name": "pwrite64",
+      "number": 68,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1696,
+          "tier": "extended"
+        }
+      ],
+      "name": "preadv",
+      "number": 69,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1739,
+          "tier": "extended"
+        }
+      ],
+      "name": "pwritev",
+      "number": 70,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/net.c",
+          "line": 3036,
+          "tier": "network"
+        }
+      ],
+      "name": "pselect6",
+      "number": 72,
+      "source_review_flag": "pselect6 ignores guest sigmask argument a5",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/net.c",
+          "line": 3039,
+          "tier": "network"
+        }
+      ],
+      "name": "ppoll",
+      "number": 73,
+      "source_review_flag": "ppoll route omits guest sigmask arguments a3/a4",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1818,
+          "tier": "extended"
+        }
+      ],
+      "name": "signalfd4",
+      "number": 74,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1819,
+          "tier": "extended"
+        }
+      ],
+      "name": "vmsplice",
+      "number": 75,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1869,
+          "tier": "extended"
+        }
+      ],
+      "name": "splice",
+      "number": 76,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1878,
+          "tier": "extended"
+        }
+      ],
+      "name": "tee",
+      "number": 77,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4844,
+          "tier": "main"
+        }
+      ],
+      "name": "readlinkat",
+      "number": 78,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1881,
+          "tier": "extended"
+        }
+      ],
+      "name": "sync",
+      "number": 81,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1882,
+          "tier": "extended"
+        }
+      ],
+      "name": "fsync",
+      "number": 82,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1883,
+          "tier": "extended"
+        }
+      ],
+      "name": "fdatasync",
+      "number": 83,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1887,
+          "tier": "extended"
+        }
+      ],
+      "name": "sync_file_range2",
+      "number": 84,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1903,
+          "tier": "extended"
+        }
+      ],
+      "name": "timerfd_create",
+      "number": 85,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1904,
+          "tier": "extended"
+        }
+      ],
+      "name": "timerfd_settime",
+      "number": 86,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1905,
+          "tier": "extended"
+        }
+      ],
+      "name": "timerfd_gettime",
+      "number": 87,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1906,
+          "tier": "extended"
+        }
+      ],
+      "name": "utimensat",
+      "number": 88,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1914,
+          "tier": "extended"
+        }
+      ],
+      "name": "acct",
+      "number": 89,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1915,
+          "tier": "extended"
+        }
+      ],
+      "name": "capget",
+      "number": 90,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1932,
+          "tier": "extended"
+        }
+      ],
+      "name": "capset",
+      "number": 91,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1933,
+          "tier": "extended"
+        }
+      ],
+      "name": "personality",
+      "number": 92,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5091,
+          "tier": "main"
+        }
+      ],
+      "name": "exit",
+      "number": 93,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5105,
+          "tier": "main"
+        }
+      ],
+      "name": "exit_group",
+      "number": 94,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1945,
+          "tier": "extended"
+        }
+      ],
+      "name": "waitid",
+      "number": 95,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5126,
+          "tier": "main"
+        }
+      ],
+      "name": "set_tid_address",
+      "number": 96,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 1999,
+          "tier": "extended"
+        }
+      ],
+      "name": "unshare",
+      "number": 97,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5129,
+          "tier": "main"
+        }
+      ],
+      "name": "futex",
+      "number": 98,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5145,
+          "tier": "main"
+        }
+      ],
+      "name": "set_robust_list",
+      "number": 99,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2000,
+          "tier": "extended"
+        }
+      ],
+      "name": "get_robust_list",
+      "number": 100,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2001,
+          "tier": "extended"
+        }
+      ],
+      "name": "nanosleep",
+      "number": 101,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2003,
+          "tier": "extended"
+        }
+      ],
+      "name": "getitimer",
+      "number": 102,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2013,
+          "tier": "extended"
+        }
+      ],
+      "name": "setitimer",
+      "number": 103,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2029,
+          "tier": "extended"
+        }
+      ],
+      "name": "kexec_load",
+      "number": 104,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2029,
+          "tier": "extended"
+        }
+      ],
+      "name": "init_module",
+      "number": 105,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2029,
+          "tier": "extended"
+        }
+      ],
+      "name": "delete_module",
+      "number": 106,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2030,
+          "tier": "extended"
+        }
+      ],
+      "name": "timer_create",
+      "number": 107,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2031,
+          "tier": "extended"
+        }
+      ],
+      "name": "timer_gettime",
+      "number": 108,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2032,
+          "tier": "extended"
+        }
+      ],
+      "name": "timer_getoverrun",
+      "number": 109,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2033,
+          "tier": "extended"
+        }
+      ],
+      "name": "timer_settime",
+      "number": 110,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2034,
+          "tier": "extended"
+        }
+      ],
+      "name": "timer_delete",
+      "number": 111,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2037,
+          "tier": "extended"
+        }
+      ],
+      "name": "clock_settime",
+      "number": 112,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5148,
+          "tier": "main"
+        }
+      ],
+      "name": "clock_gettime",
+      "number": 113,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5160,
+          "tier": "main"
+        }
+      ],
+      "name": "clock_getres",
+      "number": 114,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5173,
+          "tier": "main"
+        }
+      ],
+      "name": "clock_nanosleep",
+      "number": 115,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2038,
+          "tier": "extended"
+        }
+      ],
+      "name": "syslog",
+      "number": 116,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2049,
+          "tier": "extended"
+        }
+      ],
+      "name": "ptrace",
+      "number": 117,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2050,
+          "tier": "extended"
+        }
+      ],
+      "name": "sched_setparam",
+      "number": 118,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2063,
+          "tier": "extended"
+        }
+      ],
+      "name": "sched_setscheduler",
+      "number": 119,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2082,
+          "tier": "extended"
+        }
+      ],
+      "name": "sched_getscheduler",
+      "number": 120,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2092,
+          "tier": "extended"
+        }
+      ],
+      "name": "sched_getparam",
+      "number": 121,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5200,
+          "tier": "main"
+        }
+      ],
+      "name": "sched_setaffinity",
+      "number": 122,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5221,
+          "tier": "main"
+        }
+      ],
+      "name": "sched_getaffinity",
+      "number": 123,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2103,
+          "tier": "extended"
+        }
+      ],
+      "name": "sched_yield",
+      "number": 124,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2104,
+          "tier": "extended"
+        }
+      ],
+      "name": "sched_get_priority_max",
+      "number": 125,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2112,
+          "tier": "extended"
+        }
+      ],
+      "name": "sched_get_priority_min",
+      "number": 126,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2121,
+          "tier": "extended"
+        }
+      ],
+      "name": "sched_rr_get_interval",
+      "number": 127,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2135,
+          "tier": "extended"
+        }
+      ],
+      "name": "restart_syscall",
+      "number": 128,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5257,
+          "tier": "main"
+        }
+      ],
+      "name": "kill",
+      "number": 129,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2144,
+          "tier": "extended"
+        }
+      ],
+      "name": "tkill",
+      "number": 130,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2144,
+          "tier": "extended"
+        }
+      ],
+      "name": "tgkill",
+      "number": 131,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2167,
+          "tier": "extended"
+        }
+      ],
+      "name": "sigaltstack",
+      "number": 132,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2168,
+          "tier": "extended"
+        }
+      ],
+      "name": "rt_sigsuspend",
+      "number": 133,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5273,
+          "tier": "main"
+        }
+      ],
+      "name": "rt_sigaction",
+      "number": 134,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5290,
+          "tier": "main"
+        }
+      ],
+      "name": "rt_sigprocmask",
+      "number": 135,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2171,
+          "tier": "extended"
+        }
+      ],
+      "name": "rt_sigpending",
+      "number": 136,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": true,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5310,
+          "tier": "main"
+        },
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2179,
+          "tier": "extended"
+        }
+      ],
+      "name": "rt_sigtimedwait",
+      "number": 137,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2180,
+          "tier": "extended"
+        }
+      ],
+      "name": "rt_sigqueueinfo",
+      "number": 138,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5348,
+          "tier": "main"
+        }
+      ],
+      "name": "rt_sigreturn",
+      "number": 139,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2190,
+          "tier": "extended"
+        }
+      ],
+      "name": "setpriority",
+      "number": 140,
+      "source_review_flag": "setpriority passes guest selector/id to Darwin setpriority",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2193,
+          "tier": "extended"
+        }
+      ],
+      "name": "getpriority",
+      "number": 141,
+      "source_review_flag": "getpriority passes guest selector/id to Darwin getpriority",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2199,
+          "tier": "extended"
+        }
+      ],
+      "name": "reboot",
+      "number": 142,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2202,
+          "tier": "extended"
+        }
+      ],
+      "name": "setregid",
+      "number": 143,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2203,
+          "tier": "extended"
+        }
+      ],
+      "name": "setgid",
+      "number": 144,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2204,
+          "tier": "extended"
+        }
+      ],
+      "name": "setreuid",
+      "number": 145,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2205,
+          "tier": "extended"
+        }
+      ],
+      "name": "setuid",
+      "number": 146,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2206,
+          "tier": "extended"
+        }
+      ],
+      "name": "setresuid",
+      "number": 147,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2213,
+          "tier": "extended"
+        }
+      ],
+      "name": "getresuid",
+      "number": 148,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2220,
+          "tier": "extended"
+        }
+      ],
+      "name": "setresgid",
+      "number": 149,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2227,
+          "tier": "extended"
+        }
+      ],
+      "name": "getresgid",
+      "number": 150,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2232,
+          "tier": "extended"
+        }
+      ],
+      "name": "setfsuid",
+      "number": 151,
+      "source_review_flag": "setfsuid returns current euid without changing fsuid",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2233,
+          "tier": "extended"
+        }
+      ],
+      "name": "setfsgid",
+      "number": 152,
+      "source_review_flag": "setfsgid returns current egid without changing fsgid",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": true,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5351,
+          "tier": "main"
+        },
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2234,
+          "tier": "extended"
+        }
+      ],
+      "name": "times",
+      "number": 153,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2251,
+          "tier": "extended"
+        }
+      ],
+      "name": "setpgid",
+      "number": 154,
+      "source_review_flag": "setpgid passes guest pids directly to host process groups",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2252,
+          "tier": "extended"
+        }
+      ],
+      "name": "getpgid",
+      "number": 155,
+      "source_review_flag": "getpgid passes guest pid directly to Darwin",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2255,
+          "tier": "extended"
+        }
+      ],
+      "name": "getsid",
+      "number": 156,
+      "source_review_flag": "getsid passes guest pid directly to Darwin",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2258,
+          "tier": "extended"
+        }
+      ],
+      "name": "setsid",
+      "number": 157,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2261,
+          "tier": "extended"
+        }
+      ],
+      "name": "getgroups",
+      "number": 158,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2275,
+          "tier": "extended"
+        }
+      ],
+      "name": "setgroups",
+      "number": 159,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5370,
+          "tier": "main"
+        }
+      ],
+      "name": "uname",
+      "number": 160,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2276,
+          "tier": "extended"
+        }
+      ],
+      "name": "sethostname",
+      "number": 161,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2283,
+          "tier": "extended"
+        }
+      ],
+      "name": "setdomainname",
+      "number": 162,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2284,
+          "tier": "extended"
+        }
+      ],
+      "name": "getrlimit",
+      "number": 163,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2294,
+          "tier": "extended"
+        }
+      ],
+      "name": "setrlimit",
+      "number": 164,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5384,
+          "tier": "main"
+        }
+      ],
+      "name": "getrusage",
+      "number": 165,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2303,
+          "tier": "extended"
+        }
+      ],
+      "name": "umask",
+      "number": 166,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2304,
+          "tier": "extended"
+        }
+      ],
+      "name": "prctl",
+      "number": 167,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2305,
+          "tier": "extended"
+        }
+      ],
+      "name": "getcpu",
+      "number": 168,
+      "source_review_flag": "getcpu reports CPU/node zero; check virtual topology consistency",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2309,
+          "tier": "extended"
+        }
+      ],
+      "name": "gettimeofday",
+      "number": 169,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2316,
+          "tier": "extended"
+        }
+      ],
+      "name": "settimeofday",
+      "number": 170,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2317,
+          "tier": "extended"
+        }
+      ],
+      "name": "adjtimex",
+      "number": 171,
+      "source_review_flag": "adjtimex reports TIME_OK with zeroed state",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5401,
+          "tier": "main"
+        }
+      ],
+      "name": "getpid",
+      "number": 172,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5402,
+          "tier": "main"
+        }
+      ],
+      "name": "getppid",
+      "number": 173,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5411,
+          "tier": "main"
+        }
+      ],
+      "name": "getuid",
+      "number": 174,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5412,
+          "tier": "main"
+        }
+      ],
+      "name": "geteuid",
+      "number": 175,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5413,
+          "tier": "main"
+        }
+      ],
+      "name": "getgid",
+      "number": 176,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5414,
+          "tier": "main"
+        }
+      ],
+      "name": "getegid",
+      "number": 177,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5427,
+          "tier": "main"
+        }
+      ],
+      "name": "gettid",
+      "number": 178,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5430,
+          "tier": "main"
+        }
+      ],
+      "name": "sysinfo",
+      "number": 179,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2326,
+          "tier": "extended"
+        }
+      ],
+      "name": "mq_open",
+      "number": 180,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2326,
+          "tier": "extended"
+        }
+      ],
+      "name": "mq_unlink",
+      "number": 181,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2326,
+          "tier": "extended"
+        }
+      ],
+      "name": "mq_timedsend",
+      "number": 182,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2326,
+          "tier": "extended"
+        }
+      ],
+      "name": "mq_timedreceive",
+      "number": 183,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2326,
+          "tier": "extended"
+        }
+      ],
+      "name": "mq_notify",
+      "number": 184,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2326,
+          "tier": "extended"
+        }
+      ],
+      "name": "mq_getsetattr",
+      "number": 185,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2333,
+          "tier": "extended"
+        }
+      ],
+      "name": "msgget",
+      "number": 186,
+      "source_review_flag": "SysV msgget uses host-global IPC namespace and guest key",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2338,
+          "tier": "extended"
+        }
+      ],
+      "name": "msgctl",
+      "number": 187,
+      "source_review_flag": "SysV msgctl uses host-global IPC identifier",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2336,
+          "tier": "extended"
+        }
+      ],
+      "name": "msgrcv",
+      "number": 188,
+      "source_review_flag": "SysV msgrcv uses host-global IPC identifier",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2334,
+          "tier": "extended"
+        }
+      ],
+      "name": "msgsnd",
+      "number": 189,
+      "source_review_flag": "SysV msgsnd uses host-global IPC identifier",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2409,
+          "tier": "extended"
+        }
+      ],
+      "name": "semget",
+      "number": 190,
+      "source_review_flag": "SysV semget uses host-global IPC namespace and guest key",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2416,
+          "tier": "extended"
+        }
+      ],
+      "name": "semctl",
+      "number": 191,
+      "source_review_flag": "SysV semctl uses host-global IPC identifier",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2445,
+          "tier": "extended"
+        }
+      ],
+      "name": "semtimedop",
+      "number": 192,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2411,
+          "tier": "extended"
+        }
+      ],
+      "name": "semop",
+      "number": 193,
+      "source_review_flag": "SysV semop uses host-global IPC identifier",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2370,
+          "tier": "extended"
+        }
+      ],
+      "name": "shmget",
+      "number": 194,
+      "source_review_flag": "SysV shmget uses host-global IPC namespace and guest key",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2378,
+          "tier": "extended"
+        }
+      ],
+      "name": "shmctl",
+      "number": 195,
+      "source_review_flag": "SysV shmctl uses host-global IPC identifier",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2372,
+          "tier": "extended"
+        }
+      ],
+      "name": "shmat",
+      "number": 196,
+      "source_review_flag": "SysV shmat maps host-global IPC segment",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2376,
+          "tier": "extended"
+        }
+      ],
+      "name": "shmdt",
+      "number": 197,
+      "source_review_flag": "SysV shmdt detaches host-global IPC segment",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/net.c",
+          "line": 3042,
+          "tier": "network"
+        }
+      ],
+      "name": "socket",
+      "number": 198,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/net.c",
+          "line": 3044,
+          "tier": "network"
+        }
+      ],
+      "name": "socketpair",
+      "number": 199,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/net.c",
+          "line": 3046,
+          "tier": "network"
+        }
+      ],
+      "name": "bind",
+      "number": 200,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/net.c",
+          "line": 3048,
+          "tier": "network"
+        }
+      ],
+      "name": "listen",
+      "number": 201,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/net.c",
+          "line": 3058,
+          "tier": "network"
+        }
+      ],
+      "name": "accept",
+      "number": 202,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/net.c",
+          "line": 3062,
+          "tier": "network"
+        }
+      ],
+      "name": "connect",
+      "number": 203,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/net.c",
+          "line": 3064,
+          "tier": "network"
+        }
+      ],
+      "name": "getsockname",
+      "number": 204,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/net.c",
+          "line": 3066,
+          "tier": "network"
+        }
+      ],
+      "name": "getpeername",
+      "number": 205,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/net.c",
+          "line": 3068,
+          "tier": "network"
+        }
+      ],
+      "name": "sendto",
+      "number": 206,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/net.c",
+          "line": 3071,
+          "tier": "network"
+        }
+      ],
+      "name": "recvfrom",
+      "number": 207,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/net.c",
+          "line": 3073,
+          "tier": "network"
+        }
+      ],
+      "name": "setsockopt",
+      "number": 208,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/net.c",
+          "line": 3076,
+          "tier": "network"
+        }
+      ],
+      "name": "getsockopt",
+      "number": 209,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/net.c",
+          "line": 3079,
+          "tier": "network"
+        }
+      ],
+      "name": "shutdown",
+      "number": 210,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/net.c",
+          "line": 3081,
+          "tier": "network"
+        }
+      ],
+      "name": "sendmsg",
+      "number": 211,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/net.c",
+          "line": 3083,
+          "tier": "network"
+        }
+      ],
+      "name": "recvmsg",
+      "number": 212,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2455,
+          "tier": "extended"
+        }
+      ],
+      "name": "readahead",
+      "number": 213,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5454,
+          "tier": "main"
+        }
+      ],
+      "name": "brk",
+      "number": 214,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5457,
+          "tier": "main"
+        }
+      ],
+      "name": "munmap",
+      "number": 215,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5460,
+          "tier": "main"
+        }
+      ],
+      "name": "mremap",
+      "number": 216,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2478,
+          "tier": "extended"
+        }
+      ],
+      "name": "add_key",
+      "number": 217,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2478,
+          "tier": "extended"
+        }
+      ],
+      "name": "request_key",
+      "number": 218,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2478,
+          "tier": "extended"
+        }
+      ],
+      "name": "keyctl",
+      "number": 219,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2479,
+          "tier": "extended"
+        }
+      ],
+      "name": "clone",
+      "number": 220,
+      "source_review_flag": null,
+      "trap_override_requires_review": true
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2480,
+          "tier": "extended"
+        }
+      ],
+      "name": "execve",
+      "number": 221,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2507,
+          "tier": "extended"
+        }
+      ],
+      "name": "swapon",
+      "number": 224,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2507,
+          "tier": "extended"
+        }
+      ],
+      "name": "swapoff",
+      "number": 225,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5518,
+          "tier": "main"
+        }
+      ],
+      "name": "mprotect",
+      "number": 226,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2508,
+          "tier": "extended"
+        }
+      ],
+      "name": "msync",
+      "number": 227,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2527,
+          "tier": "extended"
+        }
+      ],
+      "name": "mlock",
+      "number": 228,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2528,
+          "tier": "extended"
+        }
+      ],
+      "name": "munlock",
+      "number": 229,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2535,
+          "tier": "extended"
+        }
+      ],
+      "name": "mlockall",
+      "number": 230,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2536,
+          "tier": "extended"
+        }
+      ],
+      "name": "munlockall",
+      "number": 231,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2541,
+          "tier": "extended"
+        }
+      ],
+      "name": "mincore",
+      "number": 232,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5521,
+          "tier": "main"
+        }
+      ],
+      "name": "madvise",
+      "number": 233,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2560,
+          "tier": "extended"
+        }
+      ],
+      "name": "remap_file_pages",
+      "number": 234,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2561,
+          "tier": "extended"
+        }
+      ],
+      "name": "mbind",
+      "number": 235,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2594,
+          "tier": "extended"
+        }
+      ],
+      "name": "get_mempolicy",
+      "number": 236,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2626,
+          "tier": "extended"
+        }
+      ],
+      "name": "set_mempolicy",
+      "number": 237,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2656,
+          "tier": "extended"
+        }
+      ],
+      "name": "migrate_pages",
+      "number": 238,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2682,
+          "tier": "extended"
+        }
+      ],
+      "name": "move_pages",
+      "number": 239,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2180,
+          "tier": "extended"
+        }
+      ],
+      "name": "rt_tgsigqueueinfo",
+      "number": 240,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2718,
+          "tier": "extended"
+        }
+      ],
+      "name": "perf_event_open",
+      "number": 241,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/net.c",
+          "line": 3060,
+          "tier": "network"
+        }
+      ],
+      "name": "accept4",
+      "number": 242,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/net.c",
+          "line": 3085,
+          "tier": "network"
+        }
+      ],
+      "name": "recvmmsg",
+      "number": 243,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "arch_specific_syscall",
+      "number": 244,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": true,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5551,
+          "tier": "main"
+        },
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2724,
+          "tier": "extended"
+        }
+      ],
+      "name": "wait4",
+      "number": 260,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5567,
+          "tier": "main"
+        }
+      ],
+      "name": "prlimit64",
+      "number": 261,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2738,
+          "tier": "extended"
+        }
+      ],
+      "name": "fanotify_init",
+      "number": 262,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2738,
+          "tier": "extended"
+        }
+      ],
+      "name": "fanotify_mark",
+      "number": 263,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2739,
+          "tier": "extended"
+        }
+      ],
+      "name": "name_to_handle_at",
+      "number": 264,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2758,
+          "tier": "extended"
+        }
+      ],
+      "name": "open_by_handle_at",
+      "number": 265,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2759,
+          "tier": "extended"
+        }
+      ],
+      "name": "clock_adjtime",
+      "number": 266,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2760,
+          "tier": "extended"
+        }
+      ],
+      "name": "syncfs",
+      "number": 267,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2767,
+          "tier": "extended"
+        }
+      ],
+      "name": "setns",
+      "number": 268,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/net.c",
+          "line": 3088,
+          "tier": "network"
+        }
+      ],
+      "name": "sendmmsg",
+      "number": 269,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2772,
+          "tier": "extended"
+        }
+      ],
+      "name": "process_vm_readv",
+      "number": 270,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2773,
+          "tier": "extended"
+        }
+      ],
+      "name": "process_vm_writev",
+      "number": 271,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2774,
+          "tier": "extended"
+        }
+      ],
+      "name": "kcmp",
+      "number": 272,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2795,
+          "tier": "extended"
+        }
+      ],
+      "name": "finit_module",
+      "number": 273,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2796,
+          "tier": "extended"
+        }
+      ],
+      "name": "sched_setattr",
+      "number": 274,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2833,
+          "tier": "extended"
+        }
+      ],
+      "name": "sched_getattr",
+      "number": 275,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2861,
+          "tier": "extended"
+        }
+      ],
+      "name": "renameat2",
+      "number": 276,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2878,
+          "tier": "extended"
+        }
+      ],
+      "name": "seccomp",
+      "number": 277,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5609,
+          "tier": "main"
+        }
+      ],
+      "name": "getrandom",
+      "number": 278,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2879,
+          "tier": "extended"
+        }
+      ],
+      "name": "memfd_create",
+      "number": 279,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2880,
+          "tier": "extended"
+        }
+      ],
+      "name": "bpf",
+      "number": 280,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2881,
+          "tier": "extended"
+        }
+      ],
+      "name": "execveat",
+      "number": 281,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2919,
+          "tier": "extended"
+        }
+      ],
+      "name": "userfaultfd",
+      "number": 282,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2920,
+          "tier": "extended"
+        }
+      ],
+      "name": "membarrier",
+      "number": 283,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2929,
+          "tier": "extended"
+        }
+      ],
+      "name": "mlock2",
+      "number": 284,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 2939,
+          "tier": "extended"
+        }
+      ],
+      "name": "copy_file_range",
+      "number": 285,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3010,
+          "tier": "extended"
+        }
+      ],
+      "name": "preadv2",
+      "number": 286,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3022,
+          "tier": "extended"
+        }
+      ],
+      "name": "pwritev2",
+      "number": 287,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3035,
+          "tier": "extended"
+        }
+      ],
+      "name": "pkey_mprotect",
+      "number": 288,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3047,
+          "tier": "extended"
+        }
+      ],
+      "name": "pkey_alloc",
+      "number": 289,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3047,
+          "tier": "extended"
+        }
+      ],
+      "name": "pkey_free",
+      "number": 290,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3049,
+          "tier": "extended"
+        }
+      ],
+      "name": "statx",
+      "number": 291,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3050,
+          "tier": "extended"
+        }
+      ],
+      "name": "io_pgetevents",
+      "number": 292,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5630,
+          "tier": "main"
+        }
+      ],
+      "name": "rseq",
+      "number": 293,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3051,
+          "tier": "extended"
+        }
+      ],
+      "name": "kexec_file_load",
+      "number": 294,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3056,
+          "tier": "extended"
+        }
+      ],
+      "name": "clock_gettime64",
+      "number": 403,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "clock_settime64",
+      "number": 404,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "clock_adjtime64",
+      "number": 405,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3059,
+          "tier": "extended"
+        }
+      ],
+      "name": "clock_getres_time64",
+      "number": 406,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3061,
+          "tier": "extended"
+        }
+      ],
+      "name": "clock_nanosleep_time64",
+      "number": 407,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "timer_gettime64",
+      "number": 408,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "timer_settime64",
+      "number": 409,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "timerfd_gettime64",
+      "number": 410,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "timerfd_settime64",
+      "number": 411,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3078,
+          "tier": "extended"
+        }
+      ],
+      "name": "utimensat_time64",
+      "number": 412,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3086,
+          "tier": "extended"
+        }
+      ],
+      "name": "pselect6_time64",
+      "number": 413,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3091,
+          "tier": "extended"
+        }
+      ],
+      "name": "ppoll_time64",
+      "number": 414,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "io_pgetevents_time64",
+      "number": 416,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "recvmmsg_time64",
+      "number": 417,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "mq_timedsend_time64",
+      "number": 418,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "mq_timedreceive_time64",
+      "number": 419,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "semtimedop_time64",
+      "number": 420,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "rt_sigtimedwait_time64",
+      "number": 421,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "futex_time64",
+      "number": 422,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "sched_rr_get_interval_time64",
+      "number": 423,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3097,
+          "tier": "extended"
+        }
+      ],
+      "name": "pidfd_send_signal",
+      "number": 424,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3105,
+          "tier": "extended"
+        }
+      ],
+      "name": "io_uring_setup",
+      "number": 425,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3105,
+          "tier": "extended"
+        }
+      ],
+      "name": "io_uring_enter",
+      "number": 426,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3105,
+          "tier": "extended"
+        }
+      ],
+      "name": "io_uring_register",
+      "number": 427,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3106,
+          "tier": "extended"
+        }
+      ],
+      "name": "open_tree",
+      "number": 428,
+      "source_review_flag": "open_tree returns /tmp directory fd, not detached mount",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3122,
+          "tier": "extended"
+        }
+      ],
+      "name": "move_mount",
+      "number": 429,
+      "source_review_flag": "move_mount returns unconditional success without move",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3112,
+          "tier": "extended"
+        }
+      ],
+      "name": "fsopen",
+      "number": 430,
+      "source_review_flag": "fsopen returns unconnected host datagram socket, not fs context",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3123,
+          "tier": "extended"
+        }
+      ],
+      "name": "fsconfig",
+      "number": 431,
+      "source_review_flag": "fsconfig returns unconditional success without configuration",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3106,
+          "tier": "extended"
+        }
+      ],
+      "name": "fsmount",
+      "number": 432,
+      "source_review_flag": "fsmount returns /tmp directory fd, not mount",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3112,
+          "tier": "extended"
+        }
+      ],
+      "name": "fspick",
+      "number": 433,
+      "source_review_flag": "fspick returns unconnected host datagram socket, not fs context",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3124,
+          "tier": "extended"
+        }
+      ],
+      "name": "pidfd_open",
+      "number": 434,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3125,
+          "tier": "extended"
+        }
+      ],
+      "name": "clone3",
+      "number": 435,
+      "source_review_flag": null,
+      "trap_override_requires_review": true
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3140,
+          "tier": "extended"
+        }
+      ],
+      "name": "close_range",
+      "number": 436,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 4473,
+          "tier": "main"
+        }
+      ],
+      "name": "openat2",
+      "number": 437,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3182,
+          "tier": "extended"
+        }
+      ],
+      "name": "pidfd_getfd",
+      "number": 438,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3210,
+          "tier": "extended"
+        }
+      ],
+      "name": "faccessat2",
+      "number": 439,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3235,
+          "tier": "extended"
+        }
+      ],
+      "name": "process_madvise",
+      "number": 440,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": true,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3265,
+          "tier": "extended"
+        },
+        {
+          "file": "src/net.c",
+          "line": 3028,
+          "tier": "network"
+        }
+      ],
+      "name": "epoll_pwait2",
+      "number": 441,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3266,
+          "tier": "extended"
+        }
+      ],
+      "name": "mount_setattr",
+      "number": 442,
+      "source_review_flag": "mount_setattr returns unconditional success without attribute change",
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3267,
+          "tier": "extended"
+        }
+      ],
+      "name": "quotactl_fd",
+      "number": 443,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "landlock_create_ruleset",
+      "number": 444,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "landlock_add_rule",
+      "number": 445,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "landlock_restrict_self",
+      "number": 446,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "memfd_secret",
+      "number": 447,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "process_mrelease",
+      "number": 448,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5133,
+          "tier": "main"
+        }
+      ],
+      "name": "futex_waitv",
+      "number": 449,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3268,
+          "tier": "extended"
+        }
+      ],
+      "name": "set_mempolicy_home_node",
+      "number": 450,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "cachestat",
+      "number": 451,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3315,
+          "tier": "extended"
+        }
+      ],
+      "name": "fchmodat2",
+      "number": 452,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "map_shadow_stack",
+      "number": 453,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5136,
+          "tier": "main"
+        }
+      ],
+      "name": "futex_wake",
+      "number": 454,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5139,
+          "tier": "main"
+        }
+      ],
+      "name": "futex_wait",
+      "number": 455,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls.c",
+          "line": 5142,
+          "tier": "main"
+        }
+      ],
+      "name": "futex_requeue",
+      "number": 456,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "statmount",
+      "number": 457,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "listmount",
+      "number": 458,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3280,
+          "tier": "extended"
+        }
+      ],
+      "name": "lsm_get_self_attr",
+      "number": 459,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "lsm_set_self_attr",
+      "number": 460,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3301,
+          "tier": "extended"
+        }
+      ],
+      "name": "lsm_list_modules",
+      "number": 461,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "mseal",
+      "number": 462,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3338,
+          "tier": "extended"
+        }
+      ],
+      "name": "setxattrat",
+      "number": 463,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3386,
+          "tier": "extended"
+        }
+      ],
+      "name": "getxattrat",
+      "number": 464,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3436,
+          "tier": "extended"
+        }
+      ],
+      "name": "listxattrat",
+      "number": 465,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "case_label",
+      "duplicate_cases": false,
+      "locations": [
+        {
+          "file": "src/syscalls_ext.c",
+          "line": 3474,
+          "tier": "extended"
+        }
+      ],
+      "name": "removexattrat",
+      "number": 466,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "open_tree_attr",
+      "number": 467,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "file_getattr",
+      "number": 468,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "file_setattr",
+      "number": 469,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "listns",
+      "number": 470,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    },
+    {
+      "compatibility": "unverified",
+      "dispatch": "none",
+      "duplicate_cases": false,
+      "locations": [],
+      "name": "rseq_slice_yield",
+      "number": 471,
+      "source_review_flag": null,
+      "trap_override_requires_review": false
+    }
+  ],
+  "warning": "A dispatch case, test filename, or documented subset is not full Linux compatibility."
+}
