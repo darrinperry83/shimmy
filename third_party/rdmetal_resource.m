@@ -18,6 +18,73 @@ struct RDMetalImage {
     uint64_t sequence;
 };
 
+struct RDMetalDepth {
+    RDMetalCore *core;
+    id<MTLTexture> texture;
+    id<MTLCommandBuffer> pending;
+    uint32_t width,height;
+    uint64_t sequence;
+};
+
+RDMetalDepth *rd_metal_depth_create(RDMetalCore *core,uint32_t width,uint32_t height) {
+    if(!core||!width||!height||width>4096||height>4096||
+       (uint64_t)width*height*8>64u*1024u*1024u)return NULL;
+    MTLTextureDescriptor *desc=[MTLTextureDescriptor
+        texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float_Stencil8
+        width:width height:height mipmapped:NO];
+    desc.storageMode=MTLStorageModePrivate;
+    desc.usage=MTLTextureUsageRenderTarget;
+    id<MTLTexture> texture=[core->device newTextureWithDescriptor:desc];
+    if(!texture)return NULL;
+    RDMetalDepth *depth=calloc(1,sizeof *depth);
+    if(!depth){[texture release];return NULL;}
+    depth->core=core;depth->texture=texture;
+    depth->width=width;depth->height=height;
+    return depth;
+}
+
+void *rd_metal_depth_texture(RDMetalDepth *depth) {
+    return depth?(__bridge void *)depth->texture:NULL;
+}
+
+uint64_t rd_metal_depth_clear(RDMetalDepth *depth,double value,
+                              uint32_t stencil,uint32_t mask) {
+    if(!depth||depth->pending||!isfinite(value)||value<0||value>1||
+       stencil>255||!mask||(mask&~3u))return 0;
+    id<MTLCommandBuffer> command=[depth->core->queue commandBuffer];
+    if(!command)return 0;
+    MTLRenderPassDescriptor *pass=[MTLRenderPassDescriptor renderPassDescriptor];
+    pass.depthAttachment.texture=depth->texture;
+    pass.depthAttachment.loadAction=(mask&1u)?MTLLoadActionClear:MTLLoadActionLoad;
+    pass.depthAttachment.storeAction=MTLStoreActionStore;
+    pass.depthAttachment.clearDepth=value;
+    pass.stencilAttachment.texture=depth->texture;
+    pass.stencilAttachment.loadAction=(mask&2u)?MTLLoadActionClear:MTLLoadActionLoad;
+    pass.stencilAttachment.storeAction=MTLStoreActionStore;
+    pass.stencilAttachment.clearStencil=stencil;
+    id<MTLRenderCommandEncoder> encoder=[command renderCommandEncoderWithDescriptor:pass];
+    if(!encoder)return 0;
+    [encoder endEncoding];
+    depth->pending=[command retain];[command commit];
+    return ++depth->sequence;
+}
+
+int rd_metal_depth_poll(RDMetalDepth *depth,uint64_t sequence) {
+    if(!depth||!depth->pending||!sequence||sequence!=depth->sequence)return -1;
+    MTLCommandBufferStatus status=depth->pending.status;
+    if(status<MTLCommandBufferStatusCompleted&&status!=MTLCommandBufferStatusError)
+        return 0;
+    bool okay=status==MTLCommandBufferStatusCompleted;
+    [depth->pending release];depth->pending=nil;
+    return okay?1:-1;
+}
+
+void rd_metal_depth_destroy(RDMetalDepth *depth) {
+    if(!depth)return;
+    if(depth->pending){[depth->pending waitUntilCompleted];[depth->pending release];}
+    [depth->texture release];free(depth);
+}
+
 static id<MTLTexture> image_depth_texture(RDMetalImage *image) {
     if (!image) return nil;
     if (!image->depthTexture) {

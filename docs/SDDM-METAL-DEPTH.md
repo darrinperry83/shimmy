@@ -48,3 +48,12 @@ wire data, clears the host attachment and returns a fence polled by the
 existing WAIT operation. Native tests cover valid, malformed and pending
 requests. Mesa still does not submit this command, and its draw packets still
 lack depth compare/write state, so the greeter remains black.
+
+Resource correction: Linux depth attachments are independent resources and
+may be attached to more than one color target. A per-color depth texture would
+silently violate that behavior. `RDMetalDepth` now allocates a separate host
+Metal texture with its own lifetime and fence. The native Apple GPU test
+verifies two distinct resources and pending clear/poll behavior. The next
+broker change must allocate and identify these separate depth resources, then
+Mesa must attach the exact one in each draw. The existing color-image depth
+primitive is not sufficient for the greeter and is not used by Mesa.

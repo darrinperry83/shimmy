@@ -21,6 +21,24 @@ int main(void) {
     uint64_t second = rd_metal_image_clear_depth(image, 0.75, 0);
     assert(second > first && rd_metal_image_wait(image, second));
 
+    RDMetalDepth *shared=rd_metal_depth_create(core,16,16);
+    RDMetalDepth *other=rd_metal_depth_create(core,16,16);
+    assert(shared && other);
+    assert(rd_metal_depth_texture(shared) &&
+           rd_metal_depth_texture(shared)!=rd_metal_depth_texture(other));
+    assert(!rd_metal_depth_clear(shared,0.5,0,0));
+    uint64_t depth_fence=rd_metal_depth_clear(shared,0.25,7,3);
+    assert(depth_fence && !rd_metal_depth_clear(shared,0.75,0,1));
+    int depth_result;
+    do {
+        depth_result=rd_metal_depth_poll(shared,depth_fence);
+        if(depth_result==0)usleep(1000);
+    } while(depth_result==0);
+    assert(depth_result==1);
+    assert(rd_metal_depth_clear(other,1.0,0,1));
+    rd_metal_depth_destroy(other);
+    rd_metal_depth_destroy(shared);
+
     RDGPUSession *session = rdgpu_local_session_create();
     assert(session);
     RDGPURequest request = {.magic=RDGPU_WIRE_MAGIC,
