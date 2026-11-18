@@ -12,12 +12,15 @@
 static const char sample[] = "synthetic disposable payload";
 
 int main(int argc, char **argv) {
-  if (argc == 4 && !strcmp(argv[1], "child")) {
+  if (argc == 5 && !strcmp(argv[1], "child")) {
     gks_namespace *ns = gks_open(argv[2]);
     assert(ns);
     long id = strtol(argv[3], NULL, 10);
+    long ring = strtol(argv[4], NULL, 10);
     char out[sizeof sample] = {0};
     assert(gks_find_user(ns, 1000, "sample") == id);
+    assert(gks_ring_search_user(ns, 1000, (int32_t)ring, "sample") == id);
+    assert(gks_ring_search_user(ns, 1001, (int32_t)ring, "sample") == -EACCES);
     assert(gks_read(ns, 1000, (int32_t)id, out, sizeof out) == sizeof sample);
     assert(!memcmp(out, sample, sizeof out));
     assert(gks_read(ns, 1001, (int32_t)id, out, sizeof out) == -EACCES);
@@ -33,6 +36,13 @@ int main(int argc, char **argv) {
   assert(ns);
   long id = gks_insert_user(ns, 1000, "sample", sample, sizeof sample);
   assert(id > 0);
+  long ring = gks_ring_create(ns, 1000);
+  assert(ring > 0 && ring != id);
+  assert(gks_ring_search_user(ns, 1000, (int32_t)ring, "sample") == -ENOENT);
+  assert(gks_ring_link(ns, 1001, (int32_t)ring, (int32_t)id) == -EACCES);
+  assert(gks_ring_link(ns, 1000, (int32_t)ring, (int32_t)id) == 0);
+  assert(gks_ring_link(ns, 1000, (int32_t)ring, (int32_t)id) == 0);
+  assert(gks_ring_search_user(ns, 1000, (int32_t)ring, "sample") == id);
   assert(gks_find_user(ns, 1000, "sample") == id);
   assert(gks_find_user(ns, 1001, "sample") == -ENOENT);
   assert(gks_insert_user(ns, 1000, "oversize", sample, GKS_MAX_PAYLOAD + 1) == -EINVAL);
@@ -40,15 +50,19 @@ int main(int argc, char **argv) {
   pid_t child = fork();
   assert(child >= 0);
   if (!child) {
-    char serial[32];
+    char serial[32], ring_arg[32];
     snprintf(serial, sizeof serial, "%ld", id);
-    execl(argv[0], argv[0], "child", dir, serial, (char *)NULL);
+    snprintf(ring_arg, sizeof ring_arg, "%ld", ring);
+    execl(argv[0], argv[0], "child", dir, serial, ring_arg, (char *)NULL);
     _exit(111);
   }
   int status;
   assert(waitpid(child, &status, 0) == child);
   assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
   assert(gks_find_user(ns, 1000, "sample") == -ENOENT);
+  assert(gks_ring_search_user(ns, 1000, (int32_t)ring, "sample") == -ENOENT);
+  assert(gks_ring_link(ns, 1000, (int32_t)ring, (int32_t)id) == -ENOENT);
+  assert(gks_ring_unlink(ns, 1000, (int32_t)ring, (int32_t)id) == 0);
   char out[sizeof sample];
   assert(gks_read(ns, 1000, (int32_t)id, out, sizeof out) == -ENOENT);
 
