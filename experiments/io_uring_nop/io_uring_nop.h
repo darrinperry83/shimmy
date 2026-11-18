@@ -2,6 +2,7 @@
 #define SHIMMY_IO_URING_NOP_H
 
 #include <stdint.h>
+#include <stddef.h>
 
 /* Linux aarch64 UAPI layout. This backend is not wired to guest syscalls yet. */
 struct iu_sq_offsets {
@@ -30,6 +31,13 @@ int iu_nop_setup(uint32_t entries, struct iu_params *params);
 int iu_nop_enter(int fd, uint32_t submit, uint32_t min_complete, uint32_t flags);
 /* Only one operation is supported: IORING_OP_NOP (0). */
 int iu_nop_probe(int fd, uint8_t *supported, uint32_t count);
+/* Prototype fd hooks. Guest dup/close/close_range must call these when wired. */
+int iu_nop_dup(int fd, int cloexec);
+int iu_nop_close(int fd);
+/* Enforces the three Linux mmap offsets/lengths and shared, non-exec access. */
+void *iu_nop_mmap(int fd, uint64_t off, size_t len, int prot, int flags);
+/* CQ readiness for a future poll/epoll interceptor; no host fd poll claim. */
+short iu_nop_poll_revents(int fd, short requested);
 void iu_nop_forget(int fd);
 
 #endif
