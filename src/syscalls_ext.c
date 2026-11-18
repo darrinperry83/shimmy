@@ -1710,9 +1710,18 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
       return 0;
     return guest_tid_known((int)target) ? -LX_EOPNOTSUPP : -LX_ESRCH;
   }
-  case 121:                                                    // sched_getparam
-    if (a1) *(int*)a1 = 0;
-    return 0;
+  case 121: {                                                  // sched_getparam
+    long target = (long)(int)a0;
+    if (target < 0 || !a1) return -LX_EINVAL;
+    if (target && target != guest_tid() &&
+        !(target == syscalls_guest_pid() && guest_tid() == 1))
+      return guest_tid_known((int)target) ? -LX_EOPNOTSUPP : -LX_ESRCH;
+    // Only the caller's SCHED_OTHER policy is modeled. Its Linux RT
+    // priority is zero regardless of its separate nice value.
+    const int32_t priority = 0;
+    return gmem_guest_copyout_checked(a1, &priority, sizeof priority) == 0
+               ? 0 : -LX_EFAULT;
+  }
   case 124: sched_yield(); return 0;                           // sched_yield
   case 125: case 126: {                                        // sched_get_priority_max/min
     int hp;                                                    // Linux policy -> macOS policy
