@@ -4512,7 +4512,19 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
 
   // ---------- 49 chdir ----------
   case 49: {
-    if ((r = resolve(LX_AT_FDCWD, (const char*)a0, host, sizeof host, gabs, sizeof gabs)) < 0)
+    // The resolver consumes a C string and dereferences its first byte.
+    // Snapshot a bounded guest path so an unmapped pointer returns EFAULT
+    // instead of faulting the host shim while changing guest cwd.
+    if (!a0) return -LX_EFAULT;
+    char guest_path[PATH_MAX];
+    size_t i;
+    for (i = 0; i < sizeof guest_path; ++i) {
+      if (gmem_guest_export_copyin(NULL, a0 + i, &guest_path[i], 1) != 0)
+        return -LX_EFAULT;
+      if (!guest_path[i]) break;
+    }
+    if (i == sizeof guest_path) return -LX_ENAMETOOLONG;
+    if ((r = resolve(LX_AT_FDCWD, guest_path, host, sizeof host, gabs, sizeof gabs)) < 0)
       return r;
     struct stat st;
     if (stat(host, &st) < 0) return herrno();
