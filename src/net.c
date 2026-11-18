@@ -1571,7 +1571,7 @@ static size_t cmsg_h2l(int fd, struct msghdr* hm, uint8_t* lc, size_t lcap, int 
 // ---------------------------------------------------------------------------
 // epoll on kqueue
 // ---------------------------------------------------------------------------
-struct epent { int fd; uint32_t events; uint64_t data; };
+struct epent { int fd; uint32_t events; uint64_t data; int unix_read; };
 struct epinst {
   struct epinst* next;
   int kq;
@@ -1611,7 +1611,7 @@ static struct epent* ep_add(struct epinst* e, int fd) {
     e->v = nv; e->cap = nc;
   }
   struct epent* p = &e->v[e->n++];
-  p->fd = fd; p->events = 0; p->data = 0;
+  p->fd = fd; p->events = 0; p->data = 0; p->unix_read = 0;
   return p;
 }
 static void ep_del(struct epinst* e, int fd) {
@@ -1621,6 +1621,14 @@ static void ep_del(struct epinst* e, int fd) {
 
 #define EP_WANT_READ  (L_EPOLLIN | L_EPOLLPRI | L_EPOLLRDNORM | L_EPOLLRDBAND | L_EPOLLRDHUP)
 #define EP_WANT_WRITE (L_EPOLLOUT | L_EPOLLWRNORM | L_EPOLLWRBAND)
+
+static int ep_unix_read(int fd, uint32_t events) {
+  if (!(events & EP_WANT_READ)) return 0;
+  struct sockaddr_storage addr;
+  socklen_t len = sizeof addr;
+  return getsockname(fd, (struct sockaddr *)&addr, &len) == 0 &&
+         addr.ss_family == AF_UNIX;
+}
 
 static long ep_apply(int kq, int fd, uint32_t events) {
   if (notifyfd_is(fd))
@@ -1716,12 +1724,14 @@ static long sys_epoll_ctl(int epfd, int op, int fd, struct lin_epoll_event* uev)
       r = ep_apply(epfd, fd, ev.events);
       if (r < 0) { ep_del(e, fd); break; }
       p->events = ev.events; p->data = ev.data;
+      p->unix_read = ep_unix_read(fd, ev.events);
       break;
     case L_EPOLL_CTL_MOD:
       if (!p) { r = -L_ENOENT; break; }
       r = ep_apply(epfd, fd, ev.events);
       if (r < 0) break;
       p->events = ev.events; p->data = ev.data;
+      p->unix_read = ep_unix_read(fd, ev.events);
       break;
     case L_EPOLL_CTL_DEL:
       if (!p) { r = -L_ENOENT; break; }
@@ -1754,7 +1764,42 @@ static long sys_epoll_wait_ts(int epfd, struct lin_epoll_event* uev, int maxeven
     static int nepd;
     if (nepd < 40) { nepd++; notifydbg("pid=%d EPOLL_WAIT epfd=%d maxev=%d\n", (int)getpid(), epfd, maxevents); }
   }
-  int n = kevent(epfd, NULL, 0, kv, maxevents, tsp);
+  // A queued AF_UNIX message can be missed by Darwin's kqueue notification.
+  // Bound the host wait only for epolls watching AF_UNIX reads, then inspect
+  // the actual receive queues below. This must not return a synthetic timeout
+  // to the guest, or wake unrelated epolls periodically.
+  int recovery_ms = 0;
+  pthread_mutex_lock(&g_lock);
+  struct epinst *recover_ep = ep_find(epfd);
+  if (recover_ep)
+    for (int i = 0; i < recover_ep->n; i++)
+      if (recover_ep->v[i].unix_read) { recovery_ms = 250; break; }
+  pthread_mutex_unlock(&g_lock);
+  const char *recovery_opt = getenv("RDEPOLL_RECOVER_MS");
+  if (recovery_opt) {
+    char *end = NULL;
+    long requested = strtol(recovery_opt, &end, 10);
+    if (end && *end == 0 && requested == 0)
+      recovery_ms = 0;
+    else if (recovery_ms && end && *end == 0 && requested >= 10 && requested <= 1000)
+      recovery_ms = (int)requested;
+  }
+  double deadline = recovery_ms && tsp ? now_ms() +
+      (double)tsp->tv_sec * 1000.0 + (double)tsp->tv_nsec / 1000000.0 : 0;
+  int n;
+epoll_retry:
+  {
+    struct timespec bounded;
+    const struct timespec *wait = tsp;
+    if (recovery_ms) {
+      double remaining = tsp ? deadline - now_ms() : recovery_ms;
+      int ms = remaining <= 0 ? 0 :
+          (remaining < recovery_ms ? (int)remaining + 1 : recovery_ms);
+      bounded = (struct timespec){ ms / 1000, (ms % 1000) * 1000000L };
+      wait = &bounded;
+    }
+    n = kevent(epfd, NULL, 0, kv, maxevents, wait);
+  }
   if (notifydbg_on()) {
     static int nret;
     if (nret < 30 && n > 0) {
@@ -1818,6 +1863,9 @@ static long sys_epoll_wait_ts(int epfd, struct lin_epoll_event* uev, int maxeven
         if (has_data) {
           notifydbg("pid=%d EPOLL_RECOVER fd=%d (pending, absent from kevent result)\n",
                     (int)getpid(), rfd);
+          if (getenv("RDEPOLL_RECOVER_TRACE"))
+            fprintf(stderr, "[epoll-recover] pid=%d epfd=%d fd=%d pending read\n",
+                    (int)getpid(), epfd, rfd);
           ep_apply(epfd, rfd, e->v[i].events);   // re-register so the kqueue reports it going forward
           EV_SET(&kv[n], (uintptr_t)rfd, EVFILT_READ, 0, 0, 1, NULL);
           n++;
@@ -1826,6 +1874,9 @@ static long sys_epoll_wait_ts(int epfd, struct lin_epoll_event* uev, int maxeven
     }
     pthread_mutex_unlock(&g_lock);
   }
+
+  if (n == 0 && recovery_ms && (!tsp || now_ms() < deadline))
+    goto epoll_retry;
 
   int out = 0;
   for (int i = 0; i < n; i++) {

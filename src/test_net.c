@@ -16,6 +16,7 @@
 #include <poll.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
+#include <sys/event.h>
 #include <sys/wait.h>
 #include <sys/proc_info.h>
 #include <libproc.h>
@@ -465,6 +466,27 @@ static void t_epoll(void) {
   r = SC4(N_epoll_pwait, ep, out, 4, 0);
   CHECK(r == 0, "after DEL, pwait -> %ld (want 0)", r);
   OK("ADD/MOD/DEL bookkeeping matches epoll error semantics");
+  close((int)ep); close(sv[0]); close(sv[1]);
+
+  // Simulate Darwin losing a kqueue read notification while the AF_UNIX
+  // receive queue remains populated. The shim must rescan it without a flag.
+  ep = SC1(N_epoll_create1, 0);
+  CHECK(ep >= 0, "recovery epoll_create1 -> %ld", ep);
+  CHECK(SC4(N_socketpair, LAF_UNIX, LSOCK_STREAM, 0, sv) == 0,
+        "recovery socketpair failed");
+  ev = (struct lin_epoll_event){ LEPOLLIN, 0, MAGIC };
+  CHECK(SC4(N_epoll_ctl, ep, LEPOLL_CTL_ADD, sv[1], &ev) == 0,
+        "recovery ADD failed");
+  struct kevent lost;
+  EV_SET(&lost, sv[1], EVFILT_READ, EV_DELETE, 0, 0, NULL);
+  CHECK(kevent((int)ep, &lost, 1, NULL, 0, NULL) == 0,
+        "could not simulate missing read notification");
+  CHECK(SC6(N_sendto, sv[0], "q", 1, 0, 0, 0) == 1,
+        "recovery send failed");
+  r = SC4(N_epoll_pwait, ep, out, 4, 1000);
+  CHECK(r == 1 && out[0].data == MAGIC && (out[0].events & LEPOLLIN),
+        "missed AF_UNIX wake not recovered: r=%ld events=%#x", r, out[0].events);
+  OK("AF_UNIX queued data recovered after lost native kqueue notification");
   close((int)ep); close(sv[0]); close(sv[1]);
 }
 
