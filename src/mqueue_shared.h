@@ -14,6 +14,9 @@ int mq_shared_receive(int fd, void* data, size_t capacity,
                       size_t* length, unsigned* priority);
 int mq_shared_status(int fd, unsigned* count, unsigned* max_messages,
                      unsigned* message_size, int* readable, int* writable);
+// Serialize close with this process's queue operations. A guest fd adapter
+// must use this instead of raw close for backing queue descriptors.
+int mq_shared_close(int fd);
 
 enum { MQ_SHARED_READABLE = 1, MQ_SHARED_WRITABLE = 2 };
 // Backend readiness wait. timeout_ms is relative, or -1 for no deadline.

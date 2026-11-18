@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -14,6 +15,16 @@
 enum { MQS_MAGIC = 0x534d5131u, MQS_VERSION = 1,
        MQS_MAX_MESSAGES = 32, MQS_MAX_MSG_SIZE = 8192,
        MQS_MAX_PRIORITY = 32767 };
+
+static pthread_mutex_t g_mqs_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_once_t g_mqs_once = PTHREAD_ONCE_INIT;
+
+static void mqs_fork_prepare(void) { pthread_mutex_lock(&g_mqs_mu); }
+static void mqs_fork_parent(void) { pthread_mutex_unlock(&g_mqs_mu); }
+static void mqs_fork_child(void) { pthread_mutex_unlock(&g_mqs_mu); }
+static void mqs_atfork_init(void) {
+  pthread_atfork(mqs_fork_prepare, mqs_fork_parent, mqs_fork_child);
+}
 
 struct mqs_header {
   uint32_t magic, version, max_messages, message_size;
@@ -168,10 +179,27 @@ int mq_shared_unlink(const char* dir, const char* name) {
 }
 
 static int mqs_lock(int fd, struct mqs_header* h) {
-  if (flock(fd, LOCK_EX) < 0) return errno;
+  pthread_once(&g_mqs_once, mqs_atfork_init);
+  pthread_mutex_lock(&g_mqs_mu);
+  // POSIX record locks belong to the process, not the open-file description.
+  // A forked child therefore contends even when it inherited the same fd.
+  struct flock lock = { .l_type = F_WRLCK, .l_whence = SEEK_SET };
+  if (fcntl(fd, F_SETLKW, &lock) < 0) {
+    int err = errno; pthread_mutex_unlock(&g_mqs_mu); return err;
+  }
   int err = mqs_header_read(fd, h);
-  if (err) flock(fd, LOCK_UN);
+  if (err) {
+    lock.l_type = F_UNLCK;
+    fcntl(fd, F_SETLK, &lock);
+    pthread_mutex_unlock(&g_mqs_mu);
+  }
   return err;
+}
+
+static void mqs_unlock(int fd) {
+  struct flock lock = { .l_type = F_UNLCK, .l_whence = SEEK_SET };
+  fcntl(fd, F_SETLK, &lock);
+  pthread_mutex_unlock(&g_mqs_mu);
 }
 
 int mq_shared_send(int fd, const void* data, size_t length, unsigned priority) {
@@ -203,7 +231,7 @@ int mq_shared_send(int fd, const void* data, size_t length, unsigned priority) {
     }
     if (!err && !found) err = EIO;
   }
-  flock(fd, LOCK_UN);
+  mqs_unlock(fd);
   return err;
 }
 
@@ -254,7 +282,7 @@ int mq_shared_receive(int fd, void* data, size_t capacity,
       }
     }
   }
-  flock(fd, LOCK_UN);
+  mqs_unlock(fd);
   return err;
 }
 
@@ -269,8 +297,18 @@ int mq_shared_status(int fd, unsigned* count, unsigned* max_messages,
   if (message_size) *message_size = h.message_size;
   if (readable) *readable = h.count != 0;
   if (writable) *writable = h.count < h.max_messages;
-  flock(fd, LOCK_UN);
+  mqs_unlock(fd);
   return 0;
+}
+
+int mq_shared_close(int fd) {
+  if (fd < 0) return EBADF;
+  pthread_once(&g_mqs_once, mqs_atfork_init);
+  pthread_mutex_lock(&g_mqs_mu);
+  int result = close(fd);
+  int err = result < 0 ? errno : 0;
+  pthread_mutex_unlock(&g_mqs_mu);
+  return err;
 }
 
 static int64_t mqs_now_ns(void) {
