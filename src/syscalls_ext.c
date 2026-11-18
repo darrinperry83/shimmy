@@ -2349,7 +2349,19 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     clock_gettime(CLOCK_MONOTONIC, &now);
     return (long)(now.tv_sec * LX_USER_HZ + now.tv_nsec / (1000000000/LX_USER_HZ));
   }
-  case 154: return ok0(setpgid((pid_t)a0, (pid_t)a1));         // setpgid
+  case 154: {                                                  // setpgid
+    // A guest PID is not a host PID (init is guest PID 1). Never let a guest
+    // selector reassign an unrelated macOS process or join a host group.
+    int pid = (int)a0, pgid = (int)a1;
+    int self = (int)syscalls_guest_pid();
+    if (pgid < 0) return -LX_EINVAL;
+    if (pid && pid != self)
+      return guest_child_known(pid) ? -LX_EOPNOTSUPP : -LX_ESRCH;
+    if (pgid && pgid != self) return -LX_EOPNOTSUPP;
+    // Linux's (0, 0), (self, 0), and (self, self) all create the
+    // caller's group. Host zeroes restrict both operands to this process.
+    return ok0(setpgid(0, 0));
+  }
   case 155: {                                                  // getpgid
     pid_t r = getpgid((pid_t)a0); return r < 0 ? eret() : r;
   }
