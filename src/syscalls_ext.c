@@ -1104,15 +1104,17 @@ static long do_dup3(int oldfd, int newfd, int flags) {
   if (getenv("IDLE_PIPE_TRACE") && (oldfd == 11 || newfd == 11))
     fprintf(stderr, "[idle-socket] pid=%d op=dup3 old=%d new=%d flags=%d\n",
             getpid(), oldfd, newfd, flags);
-  if (drm_owns_fd(oldfd) && newfd >= 0) drm_register_fd_copy(newfd, oldfd);
-  if (snd_owns_fd(oldfd) && newfd >= 0) snd_dup_fd(oldfd, newfd);
-  if (evdev_owns_fd(oldfd) && newfd >= 0) evdev_register_fd(newfd, evdev_device_of_fd(oldfd));
   if (oldfd == newfd) return -LX_EINVAL;         // this is the whole point of dup3 vs dup2
   if (flags & ~LX_O_CLOEXEC) return -LX_EINVAL;
   if (fcntl(oldfd, F_GETFD) < 0) return eret();  // validate before clobbering newfd
   int allowed = inotify_watch_can_dup(oldfd, newfd);
   if (allowed < 0) return allowed;
   if (dup2(oldfd, newfd) < 0) return eret();
+  // Device identity belongs to the duplicated descriptor, not to a failed
+  // attempt. Register only after dup2 has actually replaced the target fd.
+  if (drm_owns_fd(oldfd)) drm_register_fd_copy(newfd, oldfd);
+  if (snd_owns_fd(oldfd)) snd_dup_fd(oldfd, newfd);
+  if (evdev_owns_fd(oldfd)) evdev_register_fd(newfd, evdev_device_of_fd(oldfd));
   inotify_watch_dup(oldfd, newfd);
   rd_rtnl_dup(oldfd, newfd);
   if (pidfd_shim_pid(oldfd) > 0) pidfd_shim_register(newfd, pidfd_shim_pid(oldfd));
