@@ -4423,26 +4423,25 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     return gmem_guest_copyout_checked(a1, &out, sizeof out) == 0 ? 0 : -LX_EFAULT;
   }
   case 44: {
+    struct linux_statfs out = {0};
     // Virtual pidfds are kqueues on Darwin, where fstatfs(kqueue) fails with EINVAL.
     // Linux pidfds predating pidfs live on anon_inodefs. Report that filesystem,
     // rather than inventing pidfs inode identity that this shim cannot provide.
     if (pidfd_shim_pid((int)a0) > 0) {
       if (!a1) return -LX_EFAULT;
-      struct linux_statfs* out = (struct linux_statfs*)a1;
-      memset(out, 0, sizeof *out);
-      out->f_type = 0x09041934; // ANON_INODE_FS_MAGIC
-      out->f_bsize = 4096;
-      out->f_namelen = 255;
-      out->f_frsize = 4096;
-      return 0;
+      out.f_type = 0x09041934; // ANON_INODE_FS_MAGIC
+      out.f_bsize = 4096;
+      out.f_namelen = 255;
+      out.f_frsize = 4096;
+      return gmem_guest_copyout_checked(a1, &out, sizeof out) == 0 ? 0 : -LX_EFAULT;
     }
     struct statfs s;
     if (fstatfs((int)a0, &s) < 0) return herrno();
     if (!a1) return -LX_EFAULT;
     char gpath[PATH_MAX]; gpath[0] = 0;
     if (guest_path_of_fd((int)a0, gpath, sizeof gpath) < 0) gpath[0] = 0;
-    statfs_m2l(&s, (struct linux_statfs*)a1, gpath);
-    return 0;
+    statfs_m2l(&s, &out, gpath);
+    return gmem_guest_copyout_checked(a1, &out, sizeof out) == 0 ? 0 : -LX_EFAULT;
   }
 
   // ---------- 46 ftruncate ----------
