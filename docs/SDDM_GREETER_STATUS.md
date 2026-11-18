@@ -263,3 +263,26 @@ protocol error. The nearby mixed-framebuffer warning may be another issue,
 but does not prove why this specific import failed. A cross-process broker
 identity and IOSurface import path is required; the current local reuse path
 must not be treated as a cross-process implementation.
+
+### Native SDDM handoff recovered with bounded eventfd polling
+
+An SDDM-only trace of the override-free boot identified its stuck Qt D-Bus
+thread in a two-fd `ppoll` (shim eventfd and system bus). The SDDM main thread
+successfully wrote eight bytes to that eventfd after the poll began, but the
+poll never returned; the main thread then remained parked on its futex with no
+wake. Scoping the existing 250 ms eventfd repoll diagnostic to SDDM alone let
+the unmodified display manager launch its helper, logind greeter session, KWin
+and `sddm-greeter-qt6`. The earlier global diagnostic also affected PID 1 and
+did not give a valid SDDM comparison.
+
+The production `sys_ppoll` now bounds only the common two-fd, read-only wait
+containing a shim eventfd to 250 ms. Larger or mixed waits retain their prior
+behavior; `IDLE_REPOLL_EVENTFD_MS=0` can disable the recovery for diagnostics.
+After pulling development and rebuilding the GUI, a second isolated on-screen
+boot with neither the SDDM registration bypass nor the repoll environment
+setting created logind greeter session `c1`, submitted Metal-backed KWin
+frames, and loaded `qrc:/theme/Main.qml`. The native network regression suite
+passed 219 checks. The greeter then hit the separate cross-process carrier
+import failure (`RDMESA_MOCK_FD_IMPORT_DENY` in KWin, Wayland error 7) and
+exited. This establishes a normal SDDM-to-compositor handoff, not a fully
+visible or usable login screen.

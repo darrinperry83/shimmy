@@ -2192,15 +2192,23 @@ static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_
     return total;
   }
   double t0 = polllog_on() ? now_ms() : 0;
-  // Diagnostic opt-in for an observed Darwin poll wake loss on the shim's
-  // self-connected datagram eventfd. Restrict it to small, read-only sets
-  // containing that eventfd; all other ppoll calls keep their original path.
+  // Darwin can miss a poll wake when another thread writes to the shim's
+  // self-connected datagram eventfd. A two-fd read wait (eventfd plus the
+  // watched socket) is the common event-loop form: periodically recheck it
+  // so a queued wake cannot strand the guest indefinitely. Leave larger or
+  // mixed-event sets on their original path. The diagnostic override remains
+  // available for experiments and can disable recovery with value 0.
   int slice = 0;
+  if (nfds == 2 && hf[0].fd >= 0 && hf[1].fd >= 0 &&
+      hf[0].events == POLLIN && hf[1].events == POLLIN &&
+      poll_has_shim_eventfd(hf, nfds))
+    slice = 250;
   const char* slice_opt = getenv("IDLE_REPOLL_EVENTFD_MS");
   if (slice_opt && nfds <= 24) {
     char* end = NULL;
     long requested = strtol(slice_opt, &end, 10);
-    if (end && *end == 0 && requested >= 10 && requested <= 1000) {
+    if (end && *end == 0 && requested == 0) slice = 0;
+    else if (end && *end == 0 && requested >= 10 && requested <= 1000) {
       int eligible = 1;
       for (unsigned long i = 0; i < nfds; i++)
         if (hf[i].fd < 0 || hf[i].events != POLLIN) eligible = 0;
