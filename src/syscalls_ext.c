@@ -956,7 +956,21 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return inotify_watch_add((int)a0, host, (unsigned)a2);
   }
   case 28: return inotify_watch_remove((int)a0, (int)a1);       // inotify_rm_watch
-  case 30: case 31: return 0;                                  // ioprio_set/get: no-op
+  case 30: {                                                    // ioprio_set: reset-self subset
+    // Linux stores per-task I/O priorities and its block schedulers apply
+    // them. Darwin has no equivalent guest-visible scheduler here. Only the
+    // already-unset self priority can be reset truthfully; do not acknowledge
+    // a request for RT, BE, or IDLE while ignoring its scheduling effect.
+    int which = (int)a0, who = (int)a1, prio = (int)a2;
+    int cls = (prio >> 13) & 7;
+    if (cls > 3 || (cls == 0 && (prio & 7))) return -LX_EINVAL;
+    if (which < 1 || which > 3) return -LX_EINVAL;
+    if (which != 1) return -LX_EOPNOTSUPP; // group/user fanout needs task state
+    if (who < 0 || (who && who != syscalls_guest_pid())) return -LX_ESRCH;
+    if (prio != 0) return -LX_EOPNOTSUPP;
+    return 0;
+  }
+  case 31: return 0;                                           // ioprio_get: legacy no-op, separate work
   case 33: {                                                   // mknodat
     mode_t mode = (mode_t)a2;
     // Linux's may_mknod() rejects invalid file types before pathname lookup.
