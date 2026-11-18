@@ -2273,7 +2273,16 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return -LX_ESRCH;
   }
   case 140: {                                                  // setpriority
-    return ok0(setpriority((int)a0, (id_t)a1, (int)a2));
+    // Guest PIDs, process groups and users are not host namespaces. Never
+    // forward a guest selector that could renice another macOS process.
+    int which = (int)a0, who = (int)a1, niceval = (int)a2;
+    if (which < PRIO_PROCESS || which > PRIO_USER) return -LX_EINVAL;
+    if (which != PRIO_PROCESS) return -LX_EOPNOTSUPP;
+    if (who && who != (int)syscalls_guest_pid())
+      return guest_child_known(who) ? -LX_EOPNOTSUPP : -LX_ESRCH;
+    if (niceval < -20) niceval = -20;
+    if (niceval > 19) niceval = 19;
+    return ok0(setpriority(PRIO_PROCESS, 0, niceval));
   }
   case 141: {                                                  // getpriority
     errno = 0;
