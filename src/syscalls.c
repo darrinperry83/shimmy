@@ -5191,9 +5191,8 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     if (!a1) return -LX_EFAULT;
     struct timespec t;
     if (clock_gettime((clockid_t)mc, &t) < 0) return herrno();
-    struct linux_timespec* lt = (struct linux_timespec*)a1;
-    lt->tv_sec = t.tv_sec; lt->tv_nsec = t.tv_nsec;
-    return 0;
+    struct linux_timespec lt = {.tv_sec=t.tv_sec, .tv_nsec=t.tv_nsec};
+    return gmem_guest_copyout_checked(a1, &lt, sizeof lt) == 0 ? 0 : -LX_EFAULT;
   }
 
   // ---------- 114 clock_getres ----------
