@@ -216,6 +216,8 @@ An isolated #282 userfaultfd fault/copy/wake experiment passed ARM64 guest and p
 
 `getitimer` (#102) now writes through checked guest copyout and returns `EFAULT` for a null or invalid output pointer. The invalid selector remains `EINVAL` before memory access. Its ARM64 guest probe, CLI build, private Arch login/D-Bus boot, and integration build/probe passed. The neighboring `setitimer` and wider timer/signal behavior were not changed.
 
+`nanosleep` (#101) now checks the guest request, validates Linux timespec fields, and copies a remainder to guest memory only after an interrupted host sleep. Its ARM64 guest probe, CLI build, private Arch login/D-Bus boot, and integration build/probe passed. Guest signal interruption and handler delivery remain unproven.
+
 The combined integration head also passed a fresh private Arch login/D-Bus boot after the #424 merge; the exact clone and guest were cleaned. The `prlimit64` v2 branch remains withheld because its separate controlled Arch boot reached login without D-Bus settling, while a fresh baseline settled normally. The #425 io_uring and #77 tee opt-in branches remain isolated pending private descriptor and performance reviews.
 ## Batch integration proof
 

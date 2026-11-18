@@ -2120,8 +2120,25 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   }
   case 97: return -LX_EPERM;                                   // unshare
   case 100: return guest_get_robust_list((long)a0, a1, a2);    // get_robust_list
-  case 101:                                                    // nanosleep (timespec matches)
-    return ok0(nanosleep((const struct timespec*)a0, (struct timespec*)a1));
+  case 101: {                                                  // nanosleep
+    struct lx_timespec requested;
+    if (!a0 || gmem_guest_export_copyin(NULL, a0, &requested, sizeof requested) != 0)
+      return -LX_EFAULT;
+    if (requested.tv_sec < 0 || requested.tv_nsec < 0 ||
+        requested.tv_nsec >= 1000000000LL) return -LX_EINVAL;
+    struct timespec host_request = {.tv_sec=(time_t)requested.tv_sec,
+                                    .tv_nsec=(long)requested.tv_nsec};
+    struct timespec host_remaining = {0};
+    if (nanosleep(&host_request, &host_remaining) == 0) return 0;
+    int saved = errno;
+    if (saved == EINTR && a1) {
+      struct lx_timespec remaining = {.tv_sec=host_remaining.tv_sec,
+                                      .tv_nsec=host_remaining.tv_nsec};
+      if (gmem_guest_copyout_checked(a1, &remaining, sizeof remaining) != 0)
+        return -LX_EFAULT;
+    }
+    return -linux_errno_from_host(saved);
+  }
   case 102: {                                                  // getitimer
     struct itimerval hv;
     if (getitimer((int)a0, &hv) != 0) return eret();
