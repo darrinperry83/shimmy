@@ -1136,6 +1136,11 @@ static long do_dup3(int oldfd, int newfd, int flags) {
 static long do_fallocate(int fd, int mode, long long off, long long len) {
   if (len <= 0 || off < 0) return -LX_EINVAL;
   if ((uint64_t)off + (uint64_t)len > INT64_MAX) return -LX_EOVERFLOW;
+  // Linux permits hole punching only with KEEP_SIZE, and no other mode bits.
+  // Validate before Darwin F_PUNCHHOLE can mutate the host file.
+  if ((mode & LX_FALLOC_PUNCH_HOLE) &&
+      mode != (LX_FALLOC_PUNCH_HOLE | LX_FALLOC_KEEP_SIZE))
+    return -LX_EOPNOTSUPP;
   if (mode & LX_FALLOC_ZERO_RANGE) {
     // Darwin has no unwritten-extent equivalent. For a small range wholly
     // inside a regular file, positioned zero writes reproduce the observable
