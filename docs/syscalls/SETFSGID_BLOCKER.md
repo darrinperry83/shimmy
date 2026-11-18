@@ -1,10 +1,14 @@
 # `setfsgid` (ARM64 syscall 152): credential-model blocker
 
-The current route in `src/syscalls_ext.c` returns the effective guest GID
-without using the requested GID. This happens to describe a no-op call when
-the filesystem GID already equals the effective GID, but does not implement a
-change of filesystem GID. A caller can ask for a different GID, receive the
-old one, and later observe that the requested value never took effect.
+The previous route in `src/syscalls_ext.c` returned the effective guest GID
+without using the requested GID. A caller could ask for a different GID,
+receive the old one, and later observe that the requested value never took
+effect. The bounded route now returns that value only for the `gid_t` value
+`-1` (query) or a request equal to the current effective GID (no change).
+A different request returns `EOPNOTSUPP` without changing host or guest
+credentials. Linux normally returns the previous fsgid even for a denied
+request, so this explicit refusal is a compatibility limit, not a complete
+implementation.
 
 `src/syscalls.c` stores only real, effective and saved guest GIDs, exports
 those six UID/GID values through the shim's exec environment, and publishes
@@ -26,5 +30,11 @@ Implement #152 alongside a guest credential and filesystem-permission model:
    and after the transition using a disposable ARM64 root. Then run the
    private Arch login and D-Bus boot gate.
 
-This branch changes no runtime behavior. It must not be counted as a working
-syscall or merged merely to raise the dispatch coverage count.
+The ARM64 guest probe checks query/no-change, refused changes, and a virtual
+`setgid` transition under `RDUID0`; no host credential change is attempted.
+The isolated CLI build and probe passed. A private Arch boot reached a fresh
+login prompt with the D-Bus broker and launcher settled; the harness stopped
+its scoped guest and the exact clone was removed. The fixture copy emitted
+protected-path permission warnings, so this is a boot smoke test. Do not
+count the bounded subset as full `setfsgid` compatibility or an effective
+filesystem-permission switch.

@@ -2544,7 +2544,16 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (requested == UINT32_MAX || requested == current) return current;
     return -LX_EOPNOTSUPP;
   }
-  case 152: return g_uid0 ? (long)guest_cred_gid(1) : (long)getegid(); // setfsgid -> previous fsgid
+  case 152: {                                                  // setfsgid: no-change subset
+    // The guest has no separate fsgid or filesystem DAC enforcement. Linux
+    // returns the previous fsgid even for a denied change, so returning egid
+    // for every request would falsely imply a successful switch. The guest's
+    // existing invariant is fsgid == egid while no override has succeeded.
+    uint32_t current = g_uid0 ? guest_cred_gid(1) : (uint32_t)getegid();
+    uint32_t requested = (uint32_t)a0;                         // Linux gid_t
+    if (requested == UINT32_MAX || requested == current) return current;
+    return -LX_EOPNOTSUPP;
+  }
   case 153: {                                                  // times (core normally owns this)
     struct rusage ru;
     if (getrusage(RUSAGE_SELF, &ru) != 0) return eret();
