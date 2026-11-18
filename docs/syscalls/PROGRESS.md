@@ -49,6 +49,12 @@ This file records bounded behavior that has been implemented and tested. A dispa
 | 109 | `timer_getoverrun` | `syscall/109-timer-getoverrun` | Squash merged at `014c12a`; bounded subset | Returns zero delivered-signal overruns for valid `SIGEV_NONE` timers; other notification modes remain unsupported. |
 | 110 | `timer_settime` | `syscall/110-timer-settime` | Squash merged at `85f190a`; bounded subset | Relative/absolute arm, disarm, interval, and old-value readback with the guest clock timebase pass disposable ARM64 tests. |
 | 111 | `timer_delete` | `syscall/111-timer-delete` | Squash merged at `e611632`; bounded subset | Owned timer IDs can be removed; stale IDs and fork-child access are rejected. |
+| 116 | `syslog` | `syscall/116-syslog` | Squash merged at `8d933e4`; honest errors | Removes unconditional success. Privileged actions return `EPERM`; unprivileged read-all/size-buffer actions return `ENOSYS` until a Linux printk ring exists. ARM64 guest test passes. |
+| 92 | `personality` | `syscall/92-personality` | Squash merged at `7910fa6`; bounded subset | Query and reset of default `PER_LINUX` are supported; alternate domains and flags are rejected. ARM64 guest test passes. |
+| 235 | `mbind` | `syscall/235-mbind` | Squash merged at `d9d99e8`; bounded subset | Default policy on a validated guest mapping only; placement, migration and broad ranges remain unsupported. ARM64 guest test passes. |
+| 236 | `get_mempolicy` | `syscall/236-get-mempolicy` | Squash merged at `6c089d2`; bounded subset | Checked default-policy and one-node allowed-mask queries; VMA/address policies remain unsupported. ARM64 guest test passes. |
+| 237 | `set_mempolicy` | `syscall/237-set-mempolicy` | Squash merged at `60c1ba2`; bounded subset | Default-policy reset with a valid empty mask; nondefault placement requests are rejected. ARM64 guest test passes. |
+| 440 | `process_madvise` | `syscall/440-process-madvise` | Squash merged at `1a61f87`; bounded subset | Self-pidfd, one mapped iovec, `MADV_NORMAL` only; returns the advised byte count. Remote processes and other advice remain unsupported. ARM64 guest test passes. |
 
 ## Already merged before this batch
 
@@ -57,6 +63,8 @@ The development history already contains bounded implementations of `openat2`, `
 ## Integrated family proof
 
 The CLI build and all eleven disposable ARM64 guest tests for native AIO (0–4, 292) and `SIGEV_NONE` POSIX timers (107–111) passed together on 2026-11-18 after squash merges. The installed Arch root was used only as read-only compiler input. Neither family has a live systemd or desktop regression result, and their bounded behavior must not be described as full Linux compatibility.
+
+The next six squash merges (`syslog`, `personality`, `mbind`, `get_mempolicy`, `set_mempolicy`, `process_madvise`) passed a combined CLI build and all six disposable ARM64 guest tests on 2026-11-18. Their individual docs identify the supported subset and unsupported Linux semantics. No live desktop or production rootfs was changed or tested by this batch.
 
 ## Batch integration proof
 
