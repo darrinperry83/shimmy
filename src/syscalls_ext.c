@@ -1628,10 +1628,16 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   // ===== 36..59: filesystem =================================================
   case 36: {                                                   // symlinkat(target, dfd, linkpath)
     // The target is stored verbatim (it is guest-namespace text, not a host path).
-    if (!a0) return -LX_EFAULT;
-    e = resolve_at_nf((int)a1, (const char*)a2, host, sizeof host, &hdirfd, 1);
+    // Snapshot both guest strings before touching the host filesystem. The
+    // target is data for the symlink, so resolving it would change its meaning.
+    char guest_target[PATH_MAX], guest_link[PATH_MAX];
+    e = copy_guest_cstr(a0, guest_target, sizeof guest_target);
     if (e < 0) return e;
-    return ok0(symlinkat((const char*)a0, hdirfd, host));
+    e = copy_guest_cstr(a2, guest_link, sizeof guest_link);
+    if (e < 0) return e;
+    e = resolve_at_nf((int)a1, guest_link, host, sizeof host, &hdirfd, 1);
+    if (e < 0) return e;
+    return ok0(symlinkat(guest_target, hdirfd, host));
   }
   case 39: return 0;                                            // umount2: nothing is ever really mounted
   // mount(): early API filesystems are synthesized in-process, so systemd's
