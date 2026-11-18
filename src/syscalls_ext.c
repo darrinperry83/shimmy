@@ -2823,35 +2823,11 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     // guest's array is passed through unchanged. Checked rather than assumed.
     { int r = semop((int)a0, (struct sembuf*)a1, (size_t)a2); return r < 0 ? eret() : 0; }
   }
-  case 191: {                                                  // semctl(semid, num, cmd, arg)
-    // THE COMMAND NUMBERS DIFFER, which is the one thing that would silently corrupt state if
-    // passed through: Linux GETVAL=12/SETVAL=16/GETALL=13/SETALL=17/GETPID=11/GETNCNT=14/
-    // GETZCNT=15, macOS GETVAL=5/SETVAL=8/GETALL=6/SETALL=9/GETPID=4/GETNCNT=3/GETZCNT=7.
-    // A raw forward would turn SETVAL into something else entirely.
-    int lcmd = (int)a2, mcmd;
-    switch (lcmd) {
-      case 0:  mcmd = IPC_RMID; break;
-      case 11: mcmd = GETPID;   break;
-      case 12: mcmd = GETVAL;   break;
-      case 13: mcmd = GETALL;   break;
-      case 14: mcmd = GETNCNT;  break;
-      case 15: mcmd = GETZCNT;  break;
-      case 16: mcmd = SETVAL;   break;
-      case 17: mcmd = SETALL;   break;
-      default: return -LX_ENOSYS;              // IPC_STAT/IPC_SET: struct layout differs, refuse
-    }
-    if (mcmd == SETVAL) {
-      union semun { int val; struct semid_ds* buf; unsigned short* array; } su;
-      su.val = (int)a3;
-      { int r = semctl((int)a0, (int)a1, mcmd, su); return r < 0 ? eret() : r; }
-    }
-    if (mcmd == GETALL || mcmd == SETALL) {
-      union semun { int val; struct semid_ds* buf; unsigned short* array; } su;
-      su.array = (unsigned short*)a3;
-      { int r = semctl((int)a0, (int)a1, mcmd, su); return r < 0 ? eret() : r; }
-    }
-    { int r = semctl((int)a0, (int)a1, mcmd); return r < 0 ? eret() : r; }
-  }
+  // Darwin semaphore IDs are host-global. Disabling semget does not prevent
+  // a guest from guessing a host ID and using IPC_RMID, SETVAL or SETALL.
+  // Refuse every command until the four semaphore calls share guest-scoped
+  // IDs and ownership checks. No host IPC or guest pointer is touched here.
+  case 191: return -LX_ENOSYS;                                 // semctl
   case 192: {                                                  // semtimedop -> semop
     // macOS has no semtimedop. The timeout is only a real-time upper bound; mapping to a plain
     // blocking semop is exact for a NULL or effectively-infinite timeout (the common case) and

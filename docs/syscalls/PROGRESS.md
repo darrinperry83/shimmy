@@ -337,3 +337,5 @@ The merged head through #186 passed a fresh private Arch login prompt with D-Bus
 The merged head through #194 passed a fresh private Arch login prompt with the D-Bus broker and launcher settled. The harness stopped its exact guest and the disposable rootfs clone was removed. The full SysV IPC families remain incomplete; this gate proves only that this Arch boot path survived the safeguards.
 
 After rebasing onto concurrent `725b605` and `45f46d9` graphics/session commits, the CLI rebuild, six focused IPC probes, and a second fresh private Arch login/D-Bus boot passed. The rebased guest and clone were cleaned before publication.
+
+`semctl` (#191) now refuses every command before a raw host semaphore ID or guest array reaches Darwin, including destructive commands. Its ARM64 refusal probe, CLI build, and private Arch login/D-Bus boot passed in isolation; the merged CLI build and #190/#191 probes passed. #192–193 remain separate host-ID exposures until their own gates pass.
