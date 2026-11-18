@@ -62,6 +62,7 @@ void fx_note(const char* fmt, ...);
 #include "signalfd_shim.h"
 #include "timerfd_shim.h"
 #include "pidfd_shim.h"
+#include "inotify_watch.h"
 #include <sys/socket.h>
 #include <sys/un.h>
 
@@ -904,32 +905,41 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return r < 0 ? eret() : r;
   }
   case 24: return do_dup3((int)a0, (int)a1, (int)a2);          // dup3
-  // inotify: an INERT but REAL implementation. glib's GIO registers its file-monitor backend by
+  // inotify: an INERT file-change backend. glib's GIO registers its file-monitor backend by
   // calling inotify_init1() and giving up if it fails — and when no monitor backend exists it
   // reports "Unable to find default local file monitor type" and then NULL-derefs. So the fd has
-  // to be real and pollable (a pipe read end: never readable, so no spurious events) even though
-  // no watch ever fires. Apps that merely want change notification degrade to not noticing
+  // to be real and pollable (a pipe read end: normally quiet, except IN_IGNORED on removal).
+  // No filesystem-change watch ever fires. Apps that merely want notification degrade to not noticing
   // changes; apps that merely want a monitor object work.
   case 26: {                                                    // inotify_init1(flags)
+    if (a0 & ~(unsigned long)(LX_O_NONBLOCK_ | LX_O_CLOEXEC_)) return -LX_EINVAL;
     int fds[2];
     if (pipe(fds) != 0) return eret();
-    // The write end is deliberately KEPT OPEN (and never written to). Closing it would make the
+    // The write end is deliberately KEPT OPEN. Closing it would make the
     // read end instantly readable-at-EOF, and glib treats that as fatal: "inotify unexpectedly
     // hit eof". Holding it open makes the fd simply quiet forever, which is what we want. It must
     // ALSO be reserved: udevd's worker spawn (posix_spawn) does close_range(3,~0U) in the vfork'd
     // child, and an unreserved write end gets closed there, making udevd's inotify read end EOF ->
     // a spurious IN_* wake -> udevd reloads its rules dirs in a 100% CPU loop.
     fds[0] = shim_fd_reserve(fds[0]);   // read end: the vfork child's close_range() must skip it too
-    shim_fd_reserve(fds[1]);
+    fds[1] = shim_fd_reserve(fds[1]);
+    fcntl(fds[1], F_SETFL, fcntl(fds[1], F_GETFL) | O_NONBLOCK);
+    if (inotify_watch_register(fds[0], fds[1]) != 0) {
+      shim_fd_unreserve(fds[0]); shim_fd_unreserve(fds[1]);
+      close(fds[0]); close(fds[1]);
+      return -LX_ENOMEM;
+    }
     if (a0 & LX_O_NONBLOCK_) fcntl(fds[0], F_SETFL, O_NONBLOCK);
     if (a0 & LX_O_CLOEXEC_)  fcntl(fds[0], F_SETFD, FD_CLOEXEC);
     return fds[0];
   }
   case 27: {                                                    // inotify_add_watch(fd, path, mask)
-    static int wd;
-    return ++wd;                                                // a plausible descriptor; never fires
+    e = resolve_path_nf((const char*)a1, host, sizeof host,
+                        ((unsigned)a2 & 0x02000000u) != 0);     // IN_DONT_FOLLOW
+    if (e < 0) return e;
+    return inotify_watch_add((int)a0, host, (unsigned)a2);
   }
-  case 28: return 0;                                            // inotify_rm_watch
+  case 28: return inotify_watch_remove((int)a0, (int)a1);       // inotify_rm_watch
   case 30: case 31: return 0;                                  // ioprio_set/get: no-op
   case 33: {                                                   // mknodat
     mode_t mode = (mode_t)a2;
