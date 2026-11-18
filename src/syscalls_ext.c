@@ -1705,7 +1705,27 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     }
     return total;
   }
-  case 272: return -LX_ENOSYS;                                  // kcmp
+  case 272: {                                                   // kcmp
+    // Only comparisons within this guest process have a reliable identity.
+    // Linux compares kernel object pointers; fstat(dev, ino) is not a substitute
+    // for an open-file-description identity (two independent opens can match).
+    // Do not compare a guest PID with a Darwin PID or guess about a second fd.
+    long self = syscalls_guest_pid();
+    if ((long)(int)a0 != self || (long)(int)a1 != self)
+      return -LX_EOPNOTSUPP;
+    if (a2 > 7) return -LX_EINVAL; // KCMP_FILE..KCMP_EPOLL_TFD
+    if (a2 == 0) { // KCMP_FILE: an fd always shares its own open description.
+      if (a3 > INT_MAX || a4 > INT_MAX ||
+          shim_fd_reserved((int)a3) || shim_fd_reserved((int)a4) ||
+          fcntl((int)a3, F_GETFD) < 0 || fcntl((int)a4, F_GETFD) < 0)
+        return -LX_EBADF;
+      return a3 == a4 ? 0 : -LX_EOPNOTSUPP;
+    }
+    if (a2 == 7) return -LX_EOPNOTSUPP; // KCMP_EPOLL_TFD needs epoll target identity.
+    // For one process, VM, FILES, FS, SIGHAND, IO, and SYSVSEM necessarily
+    // refer to the same object; idx1/idx2 are ignored by Linux for these types.
+    return 0;
+  }
   case 273: return -LX_EPERM;                                   // finit_module
   case 274: {                                                   // sched_setattr
     /* Darwin priority is process-wide.  Only a lone guest thread may change
