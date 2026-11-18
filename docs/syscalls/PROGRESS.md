@@ -186,6 +186,8 @@ An inactive cross-process POSIX mqueue store now supports private named queues, 
 
 The inactive mqueue store now has a cross-process readiness wait using a vnode notification registered before checking queue state. Its ARM64 sender/receiver transition and timeout test passes. Guest poll/epoll, fd inheritance, and crash behavior are still unresolved; syscall 180–185 dispatch remains unchanged.
 
+An isolated, inactive virtual-pipe buffer core now tests non-consuming `tee` behavior across duplicate opens, fork/re-exec, ring wrap and capacity limits. Actual guest pipes still use Darwin descriptors, and this file-backed prototype is not connected to pipe I/O, fd transfer or readiness. Syscall 77 remains `ENOSYS` pending a coherent guest virtual-pipe path and ARM64 guest ABI proof.
+
 A harmless ARM64 negative security probe confirms a guest can invoke native Darwin `getpid` with `svc #0x80` outside `route_syscall()`. A dispatcher-only seccomp filter could therefore be bypassed; #277 filter installation remains disabled. The probe passed against the isolated CLI build. This finding also requires a broader guest isolation review before making security claims about the in-process runtime.
 
 ## Batch integration proof
