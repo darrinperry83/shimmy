@@ -3793,7 +3793,7 @@
       "verified_compatible": false
     },
     {
-      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "classification_reason": "safeguarded: raw Darwin SysV queue IDs refused with ENOSYS; Linux semantics unsupported",
       "dispatch_locations": [
         {
           "file": "src/syscalls_ext.c",
@@ -3803,12 +3803,12 @@
       ],
       "dispatch_state": "case",
       "name": "msgrcv",
-      "notes": "",
+      "notes": "Safeguarded against raw host SysV queue IDs; ENOSYS until instance-scoped queue IDs and checked guest buffers exist. See docs/syscalls/188-msgrcv-safeguard.md.",
       "number": 188,
       "priority": "P1_common",
       "runtime_evidence": [],
-      "semantic_status": "unknown",
-      "test_evidence": [],
+      "semantic_status": "unsupported",
+      "test_evidence": ["tests/run-msgrcv-refuse.py"],
       "trap_override": false,
       "verified_compatible": false
     },

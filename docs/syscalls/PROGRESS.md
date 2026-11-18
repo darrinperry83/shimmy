@@ -324,3 +324,5 @@ An independent Arch ARM64 `<sys/timex.h>` probe for `adjtimex` (#171) now confir
 The merged head through #186 passed a fresh private Arch login prompt with D-Bus broker and launcher settled. The harness stopped the exact guest and the disposable rootfs clone was removed. This is a systemd boot smoke test, not full syscall, IPC, or GUI compatibility.
 
 `msgctl` (#187) now refuses every command before a raw host SysV queue ID can reach Darwin, including destructive `IPC_RMID` and `IPC_SET`. Its ARM64 command/refusal probe, CLI build, and private Arch login/D-Bus boot passed in isolation; the integration CLI build and #186/#187 probes passed after merge. #188–189 remain separate host-ID exposures until their own gates pass.
+
+`msgrcv` (#188) now refuses raw host queue IDs before touching the guest buffer. Its ARM64 refusal/no-mutation probe, CLI build, and private Arch login/D-Bus boot passed in isolation; the integration CLI build and #186–188 probes passed after resolving the adjacent #187 merge. #189 still needs its own gate.

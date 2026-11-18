@@ -2757,8 +2757,9 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   case 186: return -LX_ENOSYS;                                   // msgget
   case 189: { int r = msgsnd((int)a0, (const void*)a1, (size_t)a2, (int)a3);     // msgsnd
               return r < 0 ? eret() : 0; }
-  case 188: { ssize_t r = msgrcv((int)a0, (void*)a1, (size_t)a2, (long)a3, (int)a4);  // msgrcv
-              return r < 0 ? eret() : (long)r; }
+  // A guest-supplied msqid is a raw Darwin ID here. Refuse before touching that queue or the
+  // guest buffer until a shared instance-scoped SysV message-queue registry is implemented.
+  case 188: return -LX_ENOSYS;                                   // msgrcv
   // Darwin message queue IDs are host-global numbers. A guest can supply any
   // host ID here even though msgget is disabled. In particular IPC_RMID and
   // IPC_SET could delete or alter another macOS process's queue. No command
