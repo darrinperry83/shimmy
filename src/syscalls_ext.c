@@ -2485,13 +2485,23 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return syscalls_guest_setdomainname(name, (size_t)a1);
   }
   case 163: {                                                  // getrlimit
-    int hr = host_rlimit((int)a0);
-    struct lx_rlimit* o = (struct lx_rlimit*)a1;
-    if (!o) return -LX_EFAULT;
-    if (hr < 0) { o->rlim_cur = o->rlim_max = LX_RLIM_INFINITY; return 0; }
+    int resource = (int)a0;
+    if (resource < 0 || resource > 15) return -LX_EINVAL;
+    // Darwin aliases RLIMIT_RSS to RLIMIT_AS; exposing that as an independent
+    // Linux limit would be false. The remaining unmapped limits likewise have
+    // no guest model, so do not invent an unlimited value.
+    if (resource == 5) return -LX_EOPNOTSUPP;
+    int hr = host_rlimit(resource);
+    if (hr < 0) return -LX_EOPNOTSUPP;
+    if (!a1) return -LX_EFAULT;
     struct rlimit rl;
     if (getrlimit(hr, &rl) != 0) return eret();
-    o->rlim_cur = lx_rlim(rl.rlim_cur); o->rlim_max = lx_rlim(rl.rlim_max);
+    // Match prlimit64's guest-visible NOFILE soft cap. This avoids a million
+    // guest close() traps before exec when the Darwin limit is very large.
+    if (resource == 7 && rl.rlim_cur > 4096) rl.rlim_cur = 4096;
+    struct lx_rlimit out = {lx_rlim(rl.rlim_cur), lx_rlim(rl.rlim_max)};
+    if (gmem_guest_copyout_checked(a1, &out, sizeof out) != 0)
+      return -LX_EFAULT;
     return 0;
   }
   case 164: {                                                  // setrlimit
