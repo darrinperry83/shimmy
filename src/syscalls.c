@@ -2452,6 +2452,47 @@ static long do_futex_wait2(unsigned long uaddr, unsigned long val,
   return do_futex(uaddr, op, (uint32_t)val, to, 0, (uint32_t)mask);
 }
 
+// futex_requeue(2), aarch64 #456. The current queue keeps a sleeping thread on
+// one bucket/condition variable, so moving it to another address would need a
+// queue redesign. nr_requeue == 0 has exact wake-only semantics and can be
+// handled under the source bucket lock, including the source-word comparison.
+static long do_futex_requeue2(unsigned long waiters_addr, unsigned int flags,
+                              int nr_wake, int nr_requeue) {
+  struct fu2_waiter_arg {
+    uint64_t val, uaddr;
+    uint32_t flags, reserved;
+  } pair[2];
+  enum { FU2_SIZE_U32 = 2, FU2_PRIVATE = 128 };
+  if (flags || !waiters_addr || nr_wake < 0 || nr_requeue < 0)
+    return -LX_EINVAL;
+  if (gmem_guest_export_copyin(NULL, waiters_addr, pair, sizeof pair) != 0)
+    return -LX_EFAULT;
+  for (int i = 0; i < 2; ++i) {
+    if (pair[i].reserved || pair[i].val > UINT32_MAX ||
+        pair[i].flags != (FU2_SIZE_U32 | FU2_PRIVATE)) return -LX_EINVAL;
+    if (pair[i].uaddr & (sizeof(uint32_t) - 1)) return -LX_EINVAL;
+    if (!pair[i].uaddr) return -LX_EFAULT;
+    uint32_t snapshot;
+    if (gmem_guest_export_copyin(NULL, pair[i].uaddr, &snapshot, sizeof snapshot) != 0)
+      return -LX_EFAULT;
+  }
+  if (nr_requeue) return -95; // EOPNOTSUPP: moving sleeping waiters is not implemented.
+
+  unsigned long source = (unsigned long)pair[0].uaddr;
+  struct fu_bucket* b = fu_bucket(source);
+  pthread_mutex_lock(&b->mu);
+  if (*(volatile uint32_t*)source != (uint32_t)pair[0].val) {
+    pthread_mutex_unlock(&b->mu);
+    return -LX_EAGAIN;
+  }
+  int woke = 0;
+  for (struct fu_waiter* w = b->head; w && woke < nr_wake; w = w->next)
+    if (w->uaddr == source && !w->woken) { w->woken = 1; ++woke; }
+  if (woke) pthread_cond_broadcast(&b->cv);
+  pthread_mutex_unlock(&b->mu);
+  return woke;
+}
+
 // ===========================================================================================
 // Virtual standard signals. Linux signal masks are still process-wide in this shim;
 // real per-thread delivery and realtime queues need separate work. A blocked self-signal
@@ -4987,6 +5028,9 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
 
   // ---------- 455 futex_wait (futex2) ----------
   case 455: return do_futex_wait2(a0, a1, a2, (unsigned int)a3, a4, (int)a5);
+
+  // ---------- 456 futex_requeue (futex2) ----------
+  case 456: return do_futex_requeue2(a0, (unsigned int)a1, (int)a2, (int)a3);
 
   // ---------- 99 set_robust_list ----------
   case 99: return guest_set_robust_list(a0, a1);
