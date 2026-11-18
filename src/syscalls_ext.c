@@ -2055,17 +2055,21 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     // libcap-ng initializes with version 0 and expects EINVAL plus the current
     // version written back; a bare success leaves its state uninitialized.
     if (!a0) return -LX_EFAULT;
-    uint32_t* header = (uint32_t*)a0;
+    uint32_t header[2];
+    if (gmem_guest_export_copyin(NULL, a0, header, sizeof header) != 0)
+      return -LX_EFAULT;
     const uint32_t current = 0x20080522U; // _LINUX_CAPABILITY_VERSION_3
     uint32_t nwords = (header[0] == 0x19980330U) ? 1 : 2;
     if (header[0] != current && header[0] != 0x20071026U &&
         header[0] != 0x19980330U) {
-      header[0] = current;
+      if (gmem_guest_copyout_checked(a0, &current, sizeof current) != 0)
+        return -LX_EFAULT;
       return -LX_EINVAL;
     }
     if (!a1) return 0;
-    memset((void*)a1, 0, nwords * 12); // __user_cap_data_struct entries
-    return 0;
+    uint32_t empty_data[6] = {0}; // two __user_cap_data_struct entries
+    return gmem_guest_copyout_checked(a1, empty_data, nwords * 12) == 0
+             ? 0 : -LX_EFAULT;
   }
   case 91: return g_uid0 ? 0 : -LX_EPERM;                       // capset: no-op under RDUID0
   case 92: {                                                    // personality: native Linux ABI subset

@@ -230,6 +230,8 @@ An isolated #282 userfaultfd fault/copy/wake experiment passed ARM64 guest and p
 
 `unshare` (#97) now accepts only the truthful zero-flags no-op. Namespace-changing requests retain their existing refusal. Its ARM64 state-continuity probe, CLI build, private Arch login/D-Bus boot, and integration probe passed.
 
+`capget` (#90) now checks its guest header and uses bounded guest copyout for capability-version negotiation and the existing zero-capability result. Its ARM64 v1/v3 and bad-pointer probe, CLI build, private Arch login/D-Bus boot, and integration probe passed. The capability policy itself was not changed.
+
 `statfs` (#43) now stages the translated 120-byte result and uses checked guest copyout. Its ARM64 probe covers a valid path, invalid guest output, missing path, and output bounds; CLI build, private Arch login/D-Bus boot, and integration probe passed. The existing filesystem metric translation remains unchanged.
 
 `fstatfs` (#44) now stages both ordinary-fd and synthetic-pidfd results and uses checked guest copyout. Its ARM64 probe covers valid fds, invalid output, `EBADF` ordering, and 120-byte bounds; CLI build, private Arch login/D-Bus boot, and combined #43/#44 integration probes passed. The existing filesystem metric translation remains unchanged.
