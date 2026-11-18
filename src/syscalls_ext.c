@@ -1950,12 +1950,51 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   case 86: return timerfd_settime_shim((int)a0, (int)a1, (const linux_itimerspec*)a2, (linux_itimerspec*)a3);
   case 87: return timerfd_gettime_shim((int)a0, (linux_itimerspec*)a1);
   case 88: {                                                   // utimensat(dfd, path, times, flags)
-    const struct timespec* ts = (const struct timespec*)a2;    // layout matches macOS on arm64
-    if (!a1) return ok0(futimens((int)a0, ts));                // NULL path == "the dirfd itself"
-    e = resolve_at_nf((int)a0, (const char*)a1, host, sizeof host, &hdirfd,
-                      ((int)a3 & LX_AT_SYMLINK_NOFOLLOW) != 0);
+    unsigned flags = (unsigned)a3;
+    if (flags & ~(LX_AT_SYMLINK_NOFOLLOW | LX_AT_EMPTY_PATH)) return -LX_EINVAL;
+    // The timespec layout matches, but Linux's UTIME_NOW/OMIT values do not.
+    struct timespec times[2];
+    const struct timespec *ts = NULL;
+    if (a2) {
+      if (gmem_guest_export_copyin(NULL, a2, times, sizeof times) != 0)
+        return -LX_EFAULT;
+      for (int i = 0; i < 2; ++i) {
+        long ns = times[i].tv_nsec;
+        if (ns == 0x3fffffffL) times[i].tv_nsec = UTIME_NOW;
+        else if (ns == 0x3ffffffeL) times[i].tv_nsec = UTIME_OMIT;
+        else if (ns < 0 || ns >= 1000000000L) return -LX_EINVAL;
+      }
+      ts = times;
+    }
+    if (!a1) {
+      if (flags & LX_AT_SYMLINK_NOFOLLOW) return -LX_EINVAL;
+      if ((int)a0 == LX_AT_FDCWD) return -LX_EFAULT;
+      if ((int)a0 < 0 || shim_fd_reserved((int)a0) ||
+          fcntl((int)a0, F_GETFD) < 0) return -LX_EBADF;
+      return ok0(futimens((int)a0, ts)); // Linux permits NULL path on fd
+    }
+    // Copy a bounded guest string before passing it to host path machinery.
+    char guest_path[PATH_MAX];
+    e = copy_guest_cstr(a1, guest_path, sizeof guest_path);
     if (e < 0) return e;
-    return ok0(utimensat(hdirfd, host, ts, host_at_flags((int)a3)));
+    if (!guest_path[0]) {
+      if (!(flags & LX_AT_EMPTY_PATH)) return -LX_ENOENT;
+      if (flags & LX_AT_SYMLINK_NOFOLLOW) return -LX_EOPNOTSUPP;
+      if ((int)a0 == LX_AT_FDCWD) {
+        e = resolve_at_nf(LX_AT_FDCWD, ".", host, sizeof host, &hdirfd, 0);
+        if (e < 0) return e;
+        return ok0(utimensat(hdirfd, host, ts, 0));
+      }
+      if ((int)a0 < 0 || shim_fd_reserved((int)a0) ||
+          fcntl((int)a0, F_GETFD) < 0) return -LX_EBADF;
+      // Darwin's O_SYMLINK descriptor accepts futimens on the link inode,
+      // matching Linux O_PATH|O_NOFOLLOW with AT_EMPTY_PATH.
+      return ok0(futimens((int)a0, ts));
+    }
+    e = resolve_at_nf((int)a0, guest_path, host, sizeof host, &hdirfd,
+                      (flags & LX_AT_SYMLINK_NOFOLLOW) != 0);
+    if (e < 0) return e;
+    return ok0(utimensat(hdirfd, host, ts, host_at_flags((int)flags)));
   }
   case 89: return -LX_EPERM;                                   // acct
   case 90: {                                                   // capget: report "no capabilities"
