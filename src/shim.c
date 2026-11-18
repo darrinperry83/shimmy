@@ -47,6 +47,7 @@
 #include "timerfd_shim.h"
 #include "syscalls.h"
 #include "syscalls_ext.h"
+#include "landlock.h"
 #include "seccomp_runtime.h"
 #include "net.h"
 #include "bootstrap.h"
@@ -793,7 +794,20 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
   if (proc_fd_exec_path(guest_path, fdpath, sizeof fdpath) > 0)
     exec_guest_path = fdpath;           // /proc/self/fd/N -> the fd's real binary path
   exec_dbg("exec-resolve", guest_path, exec_guest_path);
-  guest_host_path(g_rootfs_path, exec_guest_path, host, sizeof host);
+  char exec_gabs[2048];
+  if (syscalls_resolve(-100 /*AT_FDCWD*/, exec_guest_path, 0,
+                       host, sizeof host, exec_gabs, sizeof exec_gabs) < 0) {
+    if (getenv("RDEXECDBG"))
+      fprintf(stderr, "[exec-fail] '%s' could not be resolved\n", guest_path);
+    return -2;                      // -ENOENT
+  }
+  // Landlock: executing a program requires EXECUTE on its resolved path. This is
+  // a no-op unless the active domain handles EXECUTE, which pacman's download
+  // worker does not — but a caller that does handle it gets the real check.
+  {
+    long lr = landlock_check(exec_gabs, LL_FS_EXECUTE);
+    if (lr < 0) return lr;
+  }
   if (access(host, X_OK) != 0) {
     if (getenv("RDEXECDBG"))
       fprintf(stderr, "[exec-fail] '%s' -> '%s': %s\n", guest_path, host, strerror(errno));
@@ -933,7 +947,7 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
   if (!arg0env) { free(hargv); return -12; }
   snprintf(arg0env, arg0env_size, "RDGUESTARGV0=%s", guest_arg0);
 
-  char** henv = (char**)calloc((size_t)genvc + ncarry + 7, sizeof *henv);
+  char** henv = (char**)calloc((size_t)genvc + ncarry + 8, sizeof *henv);
   if (!henv) { free(arg0env); free(hargv); return -12; }
   int seccomp_fd = -1;
   char seccomp_env[48];
@@ -950,9 +964,26 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
     }
     snprintf(seccomp_env, sizeof seccomp_env, "RDSECCOMP_FD=%d", seccomp_fd);
   }
+  // The Landlock domain persists across execve (it is a process property), so a
+  // re-exec'ing shim must carry it to its replacement — the same host-owned-fd
+  // pattern the seccomp state already uses.
+  int landlock_fd = -1;
+  char landlock_env[48];
+  if (landlock_domain_active()) {
+    landlock_fd = landlock_domain_export_fd();
+    if (landlock_fd < 0) { free(henv); free(arg0env); free(hargv); return -12; }
+    landlock_fd = shim_fd_reserve(landlock_fd);
+    if (landlock_fd < 0 || !shim_fd_reserved(landlock_fd) ||
+        fcntl(landlock_fd, F_SETFD, 0) < 0) {
+      if (landlock_fd >= 0) { shim_fd_unreserve(landlock_fd); close(landlock_fd); }
+      free(henv); free(arg0env); free(hargv); return -12;
+    }
+    snprintf(landlock_env, sizeof landlock_env, "RDLANDLOCK_FD=%d", landlock_fd);
+  }
   int m = 0;
   henv[m++] = (char*)"RDGUESTENV=1";
   if (seccomp_fd >= 0) henv[m++] = seccomp_env; // host-owned capability precedes guest env
+  if (landlock_fd >= 0) henv[m++] = landlock_env;
   henv[m++] = cwdenv;
   henv[m++] = ppidenv;
   henv[m++] = signalcarry;
@@ -962,7 +993,8 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
     // must not redirect the shared UTS record or synthetic /proc backing.
     if (!strncmp(envp[i], "RDSOCKETGROUP=", sizeof("RDSOCKETGROUP=") - 1) ||
         !strncmp(envp[i], "RDX_MEMFD_DIR=", sizeof("RDX_MEMFD_DIR=") - 1) ||
-        !strncmp(envp[i], "RDSECCOMP_", sizeof("RDSECCOMP_") - 1))
+        !strncmp(envp[i], "RDSECCOMP_", sizeof("RDSECCOMP_") - 1) ||
+        !strncmp(envp[i], "RDLANDLOCK_", sizeof("RDLANDLOCK_") - 1))
       continue;
     henv[m++] = envp[i];
   }
@@ -985,6 +1017,7 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
     pid_t np = -1;
     int rc = posix_spawn(&np, g_self_path, NULL, NULL, hargv, henv);
     if (seccomp_fd >= 0) { shim_fd_unreserve(seccomp_fd); close(seccomp_fd); }
+    if (landlock_fd >= 0) { shim_fd_unreserve(landlock_fd); close(landlock_fd); }
     if (getenv("RDEXECDBG"))
       fprintf(stderr, "[exec-spawn] '%s' vfork posix_spawn rc=%d np=%d errno=%d\n",
               guest_path, rc, (int)np, rc != 0 ? errno : 0);
@@ -999,6 +1032,7 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
   execve(g_self_path, hargv, henv);
   int exec_error = errno;
   if (seccomp_fd >= 0) { shim_fd_unreserve(seccomp_fd); close(seccomp_fd); }
+  if (landlock_fd >= 0) { shim_fd_unreserve(landlock_fd); close(landlock_fd); }
   fprintf(stderr, "[shim] host re-exec failed for %s: %s\n", exec_guest_path, strerror(exec_error));
   free(arg0env); free(hargv); free(henv);
   return -(long)linux_errno_from_host(exec_error);
@@ -2403,6 +2437,23 @@ int main(int argc, char** argv) {
     unsetenv("RDSECCOMP_FD");
     if (!g_seccomp_seed) {
       fprintf(stderr, "[shim] refused malformed private seccomp inheritance state\n");
+      return 1;
+    }
+  }
+  const char* landlock_number = getenv("RDLANDLOCK_FD");
+  if (landlock_number) {
+    char* end = NULL;
+    long fd = strtol(landlock_number, &end, 10);
+    if (!getenv("RDGUESTENV") || end == landlock_number || *end ||
+        fd < 256 || fd > 65535) {
+      fprintf(stderr, "[shim] invalid private Landlock inheritance capability\n");
+      return 1;
+    }
+    long lr = landlock_domain_import_fd((int)fd);
+    close((int)fd);
+    unsetenv("RDLANDLOCK_FD");
+    if (lr < 0) {
+      fprintf(stderr, "[shim] refused malformed private Landlock inheritance state\n");
       return 1;
     }
   }

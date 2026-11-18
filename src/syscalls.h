@@ -49,6 +49,11 @@ void syscalls_set_main_stack(unsigned long lo, unsigned long hi);
 long syscalls_resolve(int lx_dirfd, const char* path, int nofollow_final,
                       char* hostout, size_t hcap, char* gabsout, size_t gcap);
 
+// The guest-absolute path of an open fd (F_GETPATH mapped back into the guest
+// namespace). Used by Landlock's add_rule to resolve parent_fd. Returns 0, or a
+// negative Linux errno.
+long syscalls_guest_path_of_fd(int fd, char* out, size_t cap);
+
 // Dispatch one Linux syscall. Returns the raw Linux-ABI result: >=0 on success, or a
 // NEGATIVE LINUX errno (e.g. -2 for ENOENT) — never -1/errno.
 // Unhandled numbers must tail-call linux_syscall_ext().

@@ -59,6 +59,7 @@ static int g_idle_saw_address;
 #include <sys/sysctl.h>
 
 #include "syscalls.h"
+#include "landlock.h"
 #include "net.h"
 #include "syscalls_ext.h"
 #include "signalfd_shim.h"
@@ -527,6 +528,13 @@ static long guest_path_of_fd(int fd, char* out, size_t cap) {
       snprintf(out, cap, "%s", hp);                              // outside the root (e.g. /dev/*)
   }
   return 0;
+}
+
+// Public wrapper so landlock_add_rule can resolve a ruleset parent_fd (typically
+// an O_PATH|O_DIRECTORY fd) back to its canonical guest path through the ONE fd
+// -> guest-path mechanism, instead of re-deriving it from F_GETPATH elsewhere.
+long syscalls_guest_path_of_fd(int fd, char* out, size_t cap) {
+  return guest_path_of_fd(fd, out, cap);
 }
 
 // (dirfd, path) -> guest-absolute path.  Honours AT_FDCWD (-100) and relative paths.
@@ -4366,6 +4374,8 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     if (i == sizeof guest_path) return -LX_ENAMETOOLONG;
     if ((r = resolve_f((int)a0, guest_path, RSV_NOFOLLOW, host, sizeof host, gabs, sizeof gabs)) < 0)
       return r;
+    // Landlock: creating a directory entry needs MAKE_DIR on the parent path.
+    if ((r = landlock_check(gabs, LL_FS_MAKE_DIR)) < 0) return r;
     // cgroup v2 child cgroups live in the in-memory registry, not the rootfs.
     if (cgroup_under(gabs)) {
       if (cgroup_file_name(gabs)) return -LX_EEXIST;         // mkdir of a control file
@@ -4406,6 +4416,10 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
       return r;
     if ((r = resolve_f((int)a0, guest_path, RSV_NOFOLLOW, host, sizeof host, gabs, sizeof gabs)) < 0)
       return r;
+    // Landlock: rmdir needs REMOVE_DIR, unlink needs REMOVE_FILE.
+    if ((r = landlock_check(gabs, (a2 & LX_AT_REMOVEDIR) ? LL_FS_REMOVE_DIR
+                                                          : LL_FS_REMOVE_FILE)) < 0)
+      return r;
     if (cgroup_under(gabs)) {
       if (a2 & LX_AT_REMOVEDIR) {                            // rmdir of a child cgroup
         if (cgroup_is_root(gabs)) return -LX_EBUSY;
@@ -4438,14 +4452,20 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     if (flags & LX_AT_EMPTY_PATH) return -LX_EOPNOTSUPP;
     char host2[PATH_MAX];
     char old_path[PATH_MAX], new_path[PATH_MAX];
+    char g_old[GPATH_MAX], g_new[GPATH_MAX];
     // The resolver takes host-readable strings, not raw guest addresses.
     // Check both names before either resolution or hard-link creation.
     if ((r = readlink_guest_path(a1, old_path, sizeof old_path)) < 0) return r;
     if ((r = readlink_guest_path(a3, new_path, sizeof new_path)) < 0) return r;
     int oldnf = (flags & LX_AT_SYMLINK_FOLLOW) ? 0 : RSV_NOFOLLOW;
-    if ((r = resolve_f((int)a0, old_path, oldnf, host, sizeof host, 0, 0)) < 0) return r;
-    if ((r = resolve_f((int)a2, new_path, RSV_NOFOLLOW, host2, sizeof host2, 0, 0)) < 0)
+    if ((r = resolve_f((int)a0, old_path, oldnf, host, sizeof host, g_old, sizeof g_old)) < 0)
       return r;
+    if ((r = resolve_f((int)a2, new_path, RSV_NOFOLLOW, host2, sizeof host2, g_new, sizeof g_new)) < 0)
+      return r;
+    // Landlock: REFER governs creating a new name; both the source and the
+    // destination directories must allow it.
+    if ((r = landlock_check(g_old, LL_FS_REFER)) < 0) return r;
+    if ((r = landlock_check(g_new, LL_FS_REFER)) < 0) return r;
     // Darwin link() follows a symbolic source even when Linux linkat(..., 0)
     // must link the symlink inode itself. Darwin linkat() takes the follow
     // flag explicitly, so use it after the guest-root paths are resolved.
@@ -4466,6 +4486,17 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
       return r;
     if ((r = resolve_f((int)a2, new_path, RSV_NOFOLLOW, host2, sizeof host2, g2, sizeof g2)) < 0)
       return r;
+    // Landlock: rename removes the old name and creates the new one. REFER is
+    // required on both parent directories, plus the matching REMOVE_* right on
+    // the old inode's type.
+    {
+      uint64_t acc = LL_FS_REFER;
+      struct stat st;
+      if (lstat(host, &st) == 0)
+        acc |= S_ISDIR(st.st_mode) ? LL_FS_REMOVE_DIR : LL_FS_REMOVE_FILE;
+      if ((r = landlock_check(gabs, acc)) < 0) return r;
+      if ((r = landlock_check(g2, LL_FS_REFER)) < 0) return r;
+    }
     if (cgroup_under(gabs) || cgroup_under(g2)) {
       if (cgroup_is_root(gabs)) return -LX_EBUSY;             // never rename the root cgroup
       if (!cgroup_is_dir(gabs)) return -LX_ENOENT;
@@ -4662,6 +4693,25 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     if ((r = resolve_f((int)a0, guest_path, ((int)a2 & LO_NOFOLLOW) ? RSV_NOFOLLOW : 0,
                        host, sizeof host, gabs, sizeof gabs)) < 0)
       return r;
+    // Landlock: map the access mode to READ_FILE/READ_DIR/WRITE_FILE/TRUNCATE
+    // and require the resolved guest path to be granted it. O_PATH opens name
+    // an inode without accessing it, so they need no right here.
+    {
+      uint64_t acc = 0;
+      if (!(a2 & LO_PATH)) {
+        int am = (int)(a2 & LO_ACCMODE);
+        if (am == 1) {                                        // O_WRONLY
+          acc = LL_FS_WRITE_FILE;
+        } else if (am == 2) {                                 // O_RDWR
+          acc = LL_FS_READ_FILE | LL_FS_WRITE_FILE;
+          if (a2 & LO_DIRECTORY) acc |= LL_FS_READ_DIR;
+        } else {                                              // O_RDONLY (or accmode==3)
+          acc = (a2 & LO_DIRECTORY) ? LL_FS_READ_DIR : LL_FS_READ_FILE;
+        }
+        if (a2 & LO_TRUNC) acc |= LL_FS_TRUNCATE;
+      }
+      if ((r = landlock_check(gabs, acc)) < 0) return r;
+    }
     // RDPATHS=1 names the FILE. RDVERBOSE prints pointers, which is useless when the question is
     // "what is the guest looking for" -- the answer is always a string it never shows you.
     // (From Q2, who needed it to identify a forked child; it never reached main and I then spent
@@ -4892,6 +4942,7 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     }
     { int p=pty_index((int)a0); if(p>=0) g_guest_pty[p].master=0; }
     seals_set((int)a0, 0);
+    landlock_fd_closed((int)a0);   // drop any Landlock ruleset registry entry for this fd
     if (getenv("IDLE_PIPE_TRACE") && (int)a0 == 11) {
       struct stat st;
       int ok = fstat((int)a0, &st);

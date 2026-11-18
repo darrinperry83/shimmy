@@ -63,6 +63,7 @@ void fx_note(const char* fmt, ...);
 #include <sys/xattr.h>
 
 #include "syscalls.h"       // linux_errno_from_host()
+#include "landlock.h"
 #include "net.h"
 #include "syscalls_ext.h"
 #include "signalfd_shim.h"
@@ -744,6 +745,17 @@ static long resolve_at_nf(int lx_dirfd, const char* gp, char* out, size_t outsz,
                           int nf) {
   if (!gp) return -LX_EFAULT;
   long r = syscalls_resolve(lx_dirfd, gp, nf, out, outsz, 0, 0);
+  if (r < 0) return r;
+  *hdirfd = AT_FDCWD;
+  return 0;
+}
+
+// Same as resolve_at_nf, but also returns the resolved GUEST-absolute path so a
+// Landlock enforcement check can run against the exact path the syscall touches.
+static long resolve_at_nf_g(int lx_dirfd, const char* gp, char* out, size_t outsz,
+                            int* hdirfd, int nf, char* gabs, size_t gcap) {
+  if (!gp) return -LX_EFAULT;
+  long r = syscalls_resolve(lx_dirfd, gp, nf, out, outsz, gabs, gcap);
   if (r < 0) return r;
   *hdirfd = AT_FDCWD;
   return 0;
@@ -1785,11 +1797,25 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
       case S_IFDIR: return -LX_EPERM;
       default: return -LX_EINVAL;
     }
-    char guest_path[PATH_MAX];
+    char guest_path[PATH_MAX], gabs[PATH_MAX];
     e = copy_guest_cstr(a1, guest_path, sizeof guest_path);
     if (e < 0) return e;
-    e = resolve_at_nf((int)a0, guest_path, host, sizeof host, &hdirfd, 1);
+    e = resolve_at_nf_g((int)a0, guest_path, host, sizeof host, &hdirfd, 1,
+                        gabs, sizeof gabs);
     if (e < 0) return e;
+    // Landlock: mknodat creates a directory entry of the requested type.
+    {
+      uint64_t acc;
+      switch (mode & S_IFMT) {
+        case S_IFIFO: acc = LL_FS_MAKE_FIFO; break;
+        case S_IFCHR: acc = LL_FS_MAKE_CHAR; break;
+        case S_IFBLK: acc = LL_FS_MAKE_BLOCK; break;
+        case S_IFSOCK: acc = LL_FS_MAKE_SOCK; break;
+        case 0: case S_IFREG:
+        default:       acc = LL_FS_MAKE_REG; break;
+      }
+      if ((e = landlock_check(gabs, acc)) < 0) return e;
+    }
     if (S_ISFIFO(mode)) {
       // mkfifoat exists on macOS; fall back to a cwd-relative mkfifo if the dirfd is AT_FDCWD.
       if (mkfifoat(hdirfd, host, mode & 07777) != 0) return eret();
@@ -1808,13 +1834,16 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     // The target is stored verbatim (it is guest-namespace text, not a host path).
     // Snapshot both guest strings before touching the host filesystem. The
     // target is data for the symlink, so resolving it would change its meaning.
-    char guest_target[PATH_MAX], guest_link[PATH_MAX];
+    char guest_target[PATH_MAX], guest_link[PATH_MAX], gabs[PATH_MAX];
     e = copy_guest_cstr(a0, guest_target, sizeof guest_target);
     if (e < 0) return e;
     e = copy_guest_cstr(a2, guest_link, sizeof guest_link);
     if (e < 0) return e;
-    e = resolve_at_nf((int)a1, guest_link, host, sizeof host, &hdirfd, 1);
+    e = resolve_at_nf_g((int)a1, guest_link, host, sizeof host, &hdirfd, 1,
+                        gabs, sizeof gabs);
     if (e < 0) return e;
+    // Landlock: creating a symlink entry needs MAKE_SYM on the link path.
+    if ((e = landlock_check(gabs, LL_FS_MAKE_SYM)) < 0) return e;
     return ok0(symlinkat(guest_target, hdirfd, host));
   }
   case 39: {                                                   // umount2
@@ -1896,11 +1925,14 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   case 42: return -LX_ENOSYS;                                  // nfsservctl
   case 45: {                                                   // truncate
     if ((int64_t)a1 < 0) return -LX_EINVAL;
-    char guest_path[PATH_MAX];
+    char guest_path[PATH_MAX], gabs[PATH_MAX];
     e = copy_guest_cstr(a0, guest_path, sizeof guest_path);
     if (e < 0) return e;
-    e = resolve_path(guest_path, host, sizeof host);
+    e = syscalls_resolve(LX_AT_FDCWD, guest_path, 0, host, sizeof host,
+                         gabs, sizeof gabs);
     if (e < 0) return e;
+    // Landlock: resizing a file needs TRUNCATE on its path.
+    if ((e = landlock_check(gabs, LL_FS_TRUNCATE)) < 0) return e;
     return ok0(truncate(host, (off_t)a1));
   }
   case 47: return do_fallocate((int)a0, (int)a1, (long long)a2, (long long)a3);
@@ -3607,15 +3639,27 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     // any guest pathname access or host filesystem operation.
     if ((flags & ~(unsigned)(LX_RENAME_NOREPLACE | LX_RENAME_EXCHANGE)) ||
         flags == (LX_RENAME_NOREPLACE | LX_RENAME_EXCHANGE)) return -LX_EINVAL;
-    char old_guest[PATH_MAX], new_guest[PATH_MAX];
+    char old_guest[PATH_MAX], new_guest[PATH_MAX], g_old[PATH_MAX], g_new[PATH_MAX];
     e = copy_guest_cstr(a1, old_guest, sizeof old_guest);
     if (e < 0) return e;
     e = copy_guest_cstr(a3, new_guest, sizeof new_guest);
     if (e < 0) return e;
-    e  = resolve_at_nf((int)a0, old_guest, host,  sizeof host,  &hdirfd,  1);
+    e  = resolve_at_nf_g((int)a0, old_guest, host,  sizeof host,  &hdirfd,  1,
+                         g_old, sizeof g_old);
     if (e < 0) return e;
-    e  = resolve_at_nf((int)a2, new_guest, host2, sizeof host2, &hdirfd2, 1);
+    e  = resolve_at_nf_g((int)a2, new_guest, host2, sizeof host2, &hdirfd2, 1,
+                         g_new, sizeof g_new);
     if (e < 0) return e;
+    // Landlock: same shape as renameat — REFER on both parents, REMOVE_* on the
+    // old inode's type.
+    {
+      uint64_t acc = LL_FS_REFER;
+      struct stat st;
+      if (lstat(host, &st) == 0)
+        acc |= S_ISDIR(st.st_mode) ? LL_FS_REMOVE_DIR : LL_FS_REMOVE_FILE;
+      if ((e = landlock_check(g_old, acc)) < 0) return e;
+      if ((e = landlock_check(g_new, LL_FS_REFER)) < 0) return e;
+    }
     if (flags == 0) return ok0(renameat(hdirfd, host, hdirfd2, host2));
 #ifdef RENAME_EXCL
     unsigned hf = flags == LX_RENAME_NOREPLACE ? RENAME_EXCL : RENAME_SWAP;
@@ -4090,6 +4134,45 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   case 441: return -LX_ENOSYS;                                  // epoll_pwait2 (falls back)
   case 442: return 0;                                           // mount_setattr: no-op success
   case 443: return -LX_EPERM;                                   // quotactl_fd
+  case 444: {                                                   // landlock_create_ruleset
+    const uint64_t attr = a0, size = a1, flags = a2;
+    // Version query: attr == NULL && flags == LANDLOCK_CREATE_RULESET_VERSION.
+    if (attr == 0)
+      return (flags == LL_CREATE_VERSION) ? (long)LL_ABI_VERSION : -LX_EINVAL;
+    if (flags != 0) return -LX_EINVAL;
+    // sizeof(struct landlock_ruleset_attr) == 16 (two __u64).
+    if (size < 16) return -LX_EINVAL;
+    struct { uint64_t handled_access_fs, handled_access_net; } ra;
+    if (gmem_guest_export_copyin(NULL, attr, &ra, sizeof ra) != 0)
+      return -LX_EFAULT;
+    // ABI 3 is filesystem-only; a network mask would need ABI 4, which this
+    // shim does not claim. pacman never sets it.
+    if (ra.handled_access_net != 0) return -LX_EINVAL;
+    int rfd = -1;
+    long lr = landlock_create_ruleset(ra.handled_access_fs, &rfd);
+    return lr < 0 ? lr : rfd;
+  }
+  case 445: {                                                   // landlock_add_rule
+    const uint64_t ruleset_fd = a0, rule_type = a1, rule_attr = a2, flags = a3;
+    if (flags != 0) return -LX_EINVAL;
+    if (!rule_attr) return -LX_EFAULT;
+    if (rule_type == LL_RULE_NET_PORT) return -LX_EOPNOTSUPP;   // ABI 3: no network rules
+    if (rule_type != LL_RULE_PATH_BENEATH) return -LX_EINVAL;
+    // struct landlock_path_beneath_attr is packed, 16 bytes:
+    //   u64 allowed_access; s32 parent_fd; u32 reserved.
+    struct { uint64_t allowed_access; int32_t parent_fd; uint32_t reserved; } pa;
+    if (gmem_guest_export_copyin(NULL, rule_attr, &pa, sizeof pa) != 0)
+      return -LX_EFAULT;
+    char pdir[PATH_MAX];
+    long pr = syscalls_guest_path_of_fd(pa.parent_fd, pdir, sizeof pdir);
+    if (pr < 0) return pr;                                      // e.g. -EBADF
+    return landlock_add_rule((int)ruleset_fd, (int)rule_type,
+                             pa.allowed_access, pdir);
+  }
+  case 446: {                                                   // landlock_restrict_self
+    if (a1 != 0) return -LX_EINVAL;                             // flags
+    return landlock_restrict_self((int)a0);
+  }
   case 450: {                                                   // set_mempolicy_home_node
     // Linux only updates an existing per-VMA BIND or PREFERRED_MANY policy.
     // This guest currently installs no per-VMA policy (mbind supports only
