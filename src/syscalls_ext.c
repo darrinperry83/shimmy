@@ -2534,7 +2534,16 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
       return -LX_EFAULT;
     return 0;
   }
-  case 151: return g_uid0 ? (long)guest_cred_uid(1) : (long)geteuid(); // setfsuid -> previous fsuid
+  case 151: {                                                  // setfsuid: no-change subset
+    // There is no separate guest fsuid or guest filesystem DAC yet. Linux
+    // returns the previous fsuid even when a change is denied, so blindly
+    // returning euid for a different requested ID falsely implies a switch
+    // to privileged callers. Only a query or same-ID no-op is truthful.
+    uint32_t current = g_uid0 ? guest_cred_uid(1) : (uint32_t)geteuid();
+    uint32_t requested = (uint32_t)a0;
+    if (requested == UINT32_MAX || requested == current) return current;
+    return -LX_EOPNOTSUPP;
+  }
   case 152: return g_uid0 ? (long)guest_cred_gid(1) : (long)getegid(); // setfsgid -> previous fsgid
   case 153: {                                                  // times (core normally owns this)
     struct rusage ru;

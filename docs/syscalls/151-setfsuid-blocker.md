@@ -1,9 +1,10 @@
 # `setfsuid` (#151): credential and filesystem authorization blocker
 
-Status: **not implemented as a Linux filesystem UID switch**. Do not count its
-existing dispatch case as compatible.
+Status: **not implemented as a Linux filesystem UID switch**. The separate
+`SETFSUID_NOCHANGE.md` documents a query/same-ID subset; do not count this as
+full compatibility.
 
-The current handler in `src/syscalls_ext.c` returns the guest effective UID
+The previous handler in `src/syscalls_ext.c` returned the guest effective UID
 (`geteuid()` without `RDUID0`) and ignores the requested UID. Linux returns the
 previous filesystem UID whether or not a change succeeds, so that return value
 alone cannot prove a successful switch. A root guest can currently request a
@@ -28,5 +29,6 @@ Before claiming #151 works, the credentials subsystem needs:
    allowed and disallowed changes, parent/child inheritance, and file access.
 4. A private Arch login/D-Bus boot regression after integration.
 
-Until then, the existing case is a compatibility expedient, not a working
-syscall. No runtime behavior is changed by this note.
+Until then, only query and same-ID no-op requests can be answered truthfully.
+Different requested IDs are refused with `EOPNOTSUPP` in the bounded branch;
+the credential and file-authorization blocker remains.
