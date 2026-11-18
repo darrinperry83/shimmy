@@ -14,6 +14,7 @@ typedef struct {
 void rdguest_range_init(RDGuestRangeLedger *);
 void rdguest_range_fork_child(RDGuestRangeLedger *);
 bool rdguest_range_map(RDGuestRangeLedger *,uintptr_t,size_t,bool writable);
+bool rdguest_range_covered(RDGuestRangeLedger *,uintptr_t,size_t);
 bool rdguest_range_protect(RDGuestRangeLedger *,uintptr_t,size_t,bool writable);
 bool rdguest_range_unmap(RDGuestRangeLedger *,uintptr_t,size_t);
 bool rdguest_range_move(RDGuestRangeLedger *,uintptr_t old,size_t oldLen,

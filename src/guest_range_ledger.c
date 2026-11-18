@@ -68,6 +68,12 @@ bool rdguest_range_map(RDGuestRangeLedger *ledger,uintptr_t lo,size_t len,bool w
     bool ok=replace(ledger,lo,hi,true,writable);
     pthread_mutex_unlock(&ledger->lock);return ok;
 }
+bool rdguest_range_covered(RDGuestRangeLedger *ledger,uintptr_t lo,size_t len){
+    uintptr_t hi;if(!ledger||!bounds(lo,len,&hi))return false;
+    pthread_mutex_lock(&ledger->lock);
+    bool ok=covered(ledger,lo,hi,false);
+    pthread_mutex_unlock(&ledger->lock);return ok;
+}
 bool rdguest_range_protect(RDGuestRangeLedger *ledger,uintptr_t lo,size_t len,bool writable){
     uintptr_t hi;if(!ledger||!bounds(lo,len,&hi))return false;
     pthread_mutex_lock(&ledger->lock);

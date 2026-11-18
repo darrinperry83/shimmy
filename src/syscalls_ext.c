@@ -2631,7 +2631,36 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if ((int)a3 & LX_AT_EACCESS) hf |= AT_EACCESS;
     return ok0(faccessat(hdirfd, host, (int)a2, hf));
   }
-  case 440: return 0;                                           // process_madvise: advisory
+  case 440: {                                                   // process_madvise: bounded self MADV_NORMAL
+    // Linux returns the number of bytes advised. Only NORMAL is safe to
+    // acknowledge here: Shimmy does not currently model other VMA advice or
+    // provide remote address-space operations.
+    if (a4) return -LX_EINVAL;
+    if (a2 > 1) return -LX_EOPNOTSUPP;
+    struct { uint64_t base, len; } iov = {0, 0};
+    if (a2 && (!a1 || gmem_guest_export_copyin(NULL, a1, &iov, sizeof iov) != 0))
+      return -LX_EFAULT;
+    int pfd = (int)a0;
+    if (pfd < 0 || fcntl(pfd, F_GETFD) < 0) return -LX_EBADF;
+    pid_t pid = pidfd_shim_pid(pfd);
+    if (pid <= 0) return -LX_EBADF;
+    if (pid != getpid()) return -LX_EOPNOTSUPP;
+    if (kevent(pfd, NULL, 0, NULL, 0, NULL) < 0) return -LX_EOPNOTSUPP;
+    if ((int)a3 != 0) return -LX_EOPNOTSUPP; // MADV_NORMAL only
+    if (!a2) return 0;
+    const uint64_t page = (uint64_t)getpagesize();
+    if ((iov.base & (page - 1)) || iov.len > UINT64_MAX - (page - 1) ||
+        iov.base > UINT64_MAX - iov.len)
+      return -LX_EINVAL;
+    if (!iov.len) return 0;
+    if (iov.len > (uint64_t)SSIZE_MAX) return -LX_EINVAL;
+    uint64_t rounded = (iov.len + page - 1) & ~(page - 1);
+    if (rounded > SIZE_MAX || iov.base > UINT64_MAX - rounded)
+      return -LX_EINVAL;
+    if (gmem_guest_range_mapped(iov.base, (size_t)rounded) != 0)
+      return -LX_ENOMEM;
+    return (long)iov.len;
+  }
   case 441: return -LX_ENOSYS;                                  // epoll_pwait2 (falls back)
   case 442: return 0;                                           // mount_setattr: no-op success
   case 443: return -LX_EPERM;                                   // quotactl_fd
