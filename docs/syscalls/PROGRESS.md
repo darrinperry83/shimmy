@@ -232,6 +232,8 @@ An isolated #282 userfaultfd fault/copy/wake experiment passed ARM64 guest and p
 
 `fstatfs` (#44) now stages both ordinary-fd and synthetic-pidfd results and uses checked guest copyout. Its ARM64 probe covers valid fds, invalid output, `EBADF` ordering, and 120-byte bounds; CLI build, private Arch login/D-Bus boot, and combined #43/#44 integration probes passed. The existing filesystem metric translation remains unchanged.
 
+`truncate` (#45) now snapshots its guest pathname and rejects negative lengths before host filesystem mutation. Its ARM64 probe covers invalid and unterminated paths, missing file, and actual shortening/zero extension; CLI build, private Arch login/D-Bus boot, and integration probe passed.
+
 `symlinkat` (#36) now snapshots both guest strings before host mutation, while preserving the link target verbatim as guest text. Its ARM64 probe covers invalid pointers, overlong input, existing destination, and exact target text; CLI build, private Arch login/D-Bus boot, and integration probe passed.
 
 `linkat` (#37) now validates flags before path mutation, refuses unsupported `AT_EMPTY_PATH`, and uses Darwin `linkat` so zero flags link a symlink inode while `AT_SYMLINK_FOLLOW` links its target. Its ARM64 probe, CLI build, private Arch login/D-Bus boot, and combined #36/#37 integration probes passed.

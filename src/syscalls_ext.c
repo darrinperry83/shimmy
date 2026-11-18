@@ -1690,10 +1690,15 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   }
   case 41: return -LX_EPERM;                                   // pivot_root
   case 42: return -LX_ENOSYS;                                  // nfsservctl
-  case 45:                                                     // truncate
-    e = resolve_path((const char*)a0, host, sizeof host);
+  case 45: {                                                   // truncate
+    if ((int64_t)a1 < 0) return -LX_EINVAL;
+    char guest_path[PATH_MAX];
+    e = copy_guest_cstr(a0, guest_path, sizeof guest_path);
+    if (e < 0) return e;
+    e = resolve_path(guest_path, host, sizeof host);
     if (e < 0) return e;
     return ok0(truncate(host, (off_t)a1));
+  }
   case 47: return do_fallocate((int)a0, (int)a1, (long long)a2, (long long)a3);
   case 50: return ok0(fchdir((int)a0));                        // fchdir
   case 51: return -LX_EPERM;                                   // chroot
