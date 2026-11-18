@@ -3079,7 +3079,13 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return -LX_EOPNOTSUPP;
   }
   case 265: return -LX_EOPNOTSUPP;                            // open_by_handle_at (no stored handles)
-  case 266: return -LX_EPERM;                                   // clock_adjtime
+  case 266: {                                                   // clock_adjtime
+    // The real-time clock shares the read-only timex query with adjtimex.
+    // Other clock IDs have distinct kernel support and must not silently
+    // report the Mac's real-time NTP state.
+    if ((int)a0 != 0) return -LX_EINVAL; // CLOCK_REALTIME
+    return linux_syscall_ext(171, a1, 0, 0, 0, 0, 0);
+  }
   case 267: {                                                  // syncfs
     /* Darwin sync() may return before writeback completes and cannot report
      * Linux's per-superblock errors.  Validate the fd, but do not claim a
