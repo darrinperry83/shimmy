@@ -2753,10 +2753,12 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   // Darwin SysV queues share a host-wide namespace. Passing a guest key to msgget can resolve
   // another macOS process's queue or create a persistent host object. Until all four message
   // calls share an instance-scoped ID registry, refuse queue lookup and creation truthfully.
-  // The ID-taking calls below still need their own isolation; this is only a #186 safeguard.
+  // Queue operations are refused below until an instance-scoped backend exists.
   case 186: return -LX_ENOSYS;                                   // msgget
-  case 189: { int r = msgsnd((int)a0, (const void*)a1, (size_t)a2, (int)a3);     // msgsnd
-              return r < 0 ? eret() : 0; }
+  // A raw guest msqid could name any host-global Darwin queue. Since msgget
+  // cannot issue an instance-scoped guest ID yet, no ID is safe to accept.
+  // Do not inspect the guest buffer or call host msgsnd, even for zero bytes.
+  case 189: return -LX_ENOSYS;                                   // msgsnd
   // A guest-supplied msqid is a raw Darwin ID here. Refuse before touching that queue or the
   // guest buffer until a shared instance-scoped SysV message-queue registry is implemented.
   case 188: return -LX_ENOSYS;                                   // msgrcv
