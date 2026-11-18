@@ -3683,7 +3683,24 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   }
   case 289: case 290: return -LX_ENOSYS;                        // pkey_alloc/free
   case 258:                                                     // statx alias (see report)
-  case 291: return do_statx((int)a0, (const char*)a1, (int)a2, (unsigned)a3, (void*)a4);
+  case 291: {
+    if (!a4) return -LX_EFAULT;
+    // The resolver and synthetic-path checks must never dereference a guest
+    // pathname directly. NULL is permitted only for the AT_EMPTY_PATH form.
+    char guest_path[PATH_MAX];
+    const char *path = NULL;
+    if (a1) {
+      e = copy_guest_cstr(a1, guest_path, sizeof guest_path);
+      if (e < 0) return e;
+      path = guest_path;
+    } else if (!(a2 & LX_AT_EMPTY_PATH)) {
+      return -LX_EFAULT;
+    }
+    struct lx_statx out;
+    e = do_statx((int)a0, path, (int)a2, (unsigned)a3, &out);
+    if (e < 0) return e;
+    return gmem_guest_copyout_checked(a4, &out, sizeof out) == 0 ? 0 : -LX_EFAULT;
+  }
   case 292: return lx_io_pgetevents(a0, (long)a1, (long)a2, a3, a4, a5);
   case 294: return -LX_EPERM;                                   // kexec_file_load
 
