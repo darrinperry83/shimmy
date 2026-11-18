@@ -100,3 +100,20 @@ change removes one real draw rejection but does not establish a usable or
 fully Metal-rendered SDDM greeter. The sampler diagnostic is on the rdmetal
 integration branch as `cc1ccf2`; neither driver probe has been promoted to
 rdmetal `development`.
+
+A8 upload follow-up (latest Shimmy `development` `df763a8`, disposable Arch
+root, visible host window): rdmetal integration `8d01e2f` accepts Qt's
+`PIPE_FORMAT_A8_UNORM` sampler textures even when Qt advertises both sampler
+and render-target bind flags. The guest converts each bounded A8 upload to
+RGBA8 in the broker's Metal image. The ARM CI build passed. In a fresh
+on-screen systemd/SDDM boot, the first sampler rejection disappeared, Metal
+draw submissions continued, and the window visibly painted the blue greeter
+background plus orange geometry. The screen still had **no readable username,
+password, or login control**. The driver substitutes fixed shaders for Qt's
+NIR; it does not forward the color and opacity attributes, and the host draw
+pipeline does not implement the guest blend state. The orange shapes are
+therefore diagnostic output, not a usable greeter. A8 textures can be sampled
+in this experiment, but if used as render targets they fail closed; the
+experiment remains on rdmetal's integration branch, not `development`. Next
+acceptance requires faithful shader inputs, blending and text, then an actual
+login/logout round-trip in the visible session.
