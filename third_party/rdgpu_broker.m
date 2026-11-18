@@ -2,6 +2,7 @@
 #include <Security/SecRandom.h>
 #include <pthread.h>
 #include <errno.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -274,7 +275,7 @@ RDGPUReply rdgpu_dispatch(RDGPUSession *s,const RDGPURequest *q){
     if(!s)return reply(q,RDGPU_DENIED);
     if(!q||q->magic!=RDGPU_WIRE_MAGIC||q->version!=RDGPU_WIRE_VERSION||
        q->bytes!=RDGPU_WIRE_BYTES||q->flags||q->reserved||
-       q->op<RDGPU_CREATE_BGRA8||q->op>RDGPU_PREPARE_EXPORT||!q->request_id)
+       q->op<RDGPU_CREATE_BGRA8||q->op>RDGPU_CLEAR_DEPTH_STENCIL||!q->request_id)
         return reply(q,RDGPU_BAD_MESSAGE);
     pthread_mutex_lock(&s->lock);
     RDGPUReply r=reply(q,RDGPU_STALE);
@@ -317,6 +318,22 @@ RDGPUReply rdgpu_dispatch(RDGPUSession *s,const RDGPURequest *q){
         slot->completed=false;
         float rgba[4];for(unsigned i=0;i<4;i++)rgba[i]=((q->arg0>>(i*16))&0xffffu)/65535.f;
         slot->fence=rd_metal_image_clear(slot->image,rgba[0],rgba[1],rgba[2],rgba[3]);
+        if(!slot->fence){r.status=RDGPU_GPU_FAILED;goto done;}
+        r.value0=slot->fence;r.status=RDGPU_OK;goto done;
+    }
+    if(q->op==RDGPU_CLEAR_DEPTH_STENCIL){
+        if(slot->fence||slot->exportRefs){r.status=RDGPU_BAD_STATE;goto done;}
+        if(q->arg0>>42){r.status=RDGPU_BAD_MESSAGE;goto done;}
+        uint32_t depth_bits=(uint32_t)q->arg0;
+        float depth;
+        memcpy(&depth,&depth_bits,sizeof depth);
+        uint32_t stencil=(uint32_t)((q->arg0>>32)&255u);
+        uint32_t mask=(uint32_t)((q->arg0>>40)&3u);
+        if(!mask||!isfinite(depth)||depth<0||depth>1){
+            r.status=RDGPU_BAD_MESSAGE;goto done;
+        }
+        slot->completed=false;
+        slot->fence=rd_metal_image_clear_depth_stencil(slot->image,depth,stencil,mask);
         if(!slot->fence){r.status=RDGPU_GPU_FAILED;goto done;}
         r.value0=slot->fence;r.status=RDGPU_OK;goto done;
     }

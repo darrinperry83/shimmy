@@ -40,3 +40,11 @@ clears. `tests/test_rdmetal_depth.m` exercises allocation, invalid input,
 pending-command rejection, two clears and fence completion on the Apple GPU.
 This primitive is not yet connected to the guest driver or draw packet, so it
 does not change the black-screen outcome.
+
+Broker increment: the authenticated image lease now accepts a checked
+`RDGPU_CLEAR_DEPTH_STENCIL` command. The guest entry validates finite depth,
+stencil, mask, image ownership and pending work; the broker checks the same
+wire data, clears the host attachment and returns a fence polled by the
+existing WAIT operation. Native tests cover valid, malformed and pending
+requests. Mesa still does not submit this command, and its draw packets still
+lack depth compare/write state, so the greeter remains black.

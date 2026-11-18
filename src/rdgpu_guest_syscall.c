@@ -1,6 +1,7 @@
 #include "rdgpu_guest_syscall.h"
 #include "rdmetal_draw_wire.h"
 #include <errno.h>
+#include <math.h>
 #include <stdio.h>
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
@@ -134,6 +135,39 @@ static int valid_reply(const RDGPURequest *q,const RDGPUReply *r){
 long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
                           uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5){
     if(!s||!s->ready||s->disabled||getpid()!=s->ownerPid)return -EPERM;
+    if(op==RDGPU_GUEST_CLEAR_DEPTH_STENCIL){
+        if(a2>UINT32_MAX||a3>255||!a4||a4>3||a5)return -EINVAL;
+        uint32_t bits=(uint32_t)a2;
+        float depth;
+        memcpy(&depth,&bits,sizeof depth);
+        if(!isfinite(depth)||depth<0||depth>1)return -EINVAL;
+        pthread_mutex_lock(&s->lock);
+        RDGPUGuestSlot *entry=slot(s,a1);
+        if(!entry){pthread_mutex_unlock(&s->lock);return -ESTALE;}
+        if(entry->exported||entry->drawFence){
+            pthread_mutex_unlock(&s->lock);return -EBUSY;
+        }
+        if(entry->carrierIssued&&
+           (!s->fdFrameBegin||s->fdFrameBegin(s->fdFrameContext,s->ownerPid,
+                                              entry->lease,entry->generation))){
+            pthread_mutex_unlock(&s->lock);return -EBUSY;
+        }
+        RDGPURequest q={.magic=RDGPU_WIRE_MAGIC,.version=RDGPU_WIRE_VERSION,
+            .op=RDGPU_CLEAR_DEPTH_STENCIL,.bytes=RDGPU_WIRE_BYTES,
+            .request_id=++s->nextRequest,
+            .arg0=a2|(a3<<32)|(a4<<40),.arg1=entry->generation};
+        memcpy(q.lease,entry->lease,16);
+        RDGPUReply r=s->transport(s->context,&q);
+        long result=mapped(r.status);
+        if(!valid_reply(&q,&r)||memcmp(r.lease,entry->lease,16)||
+           (result==0&&(!r.value0||r.value0>INT64_MAX))){
+            s->disabled=1;result=-EIO;
+        }else if(result==0){
+            entry->producerComplete=0;entry->lastCompletedFence=0;
+            result=(long)r.value0;
+        }
+        pthread_mutex_unlock(&s->lock);return result;
+    }
     if(op==RDGPU_GUEST_IMAGE_UPLOAD_REGION){
         uint32_t x=(uint32_t)(a3>>32),y=(uint32_t)a3;
         uint32_t width=(uint32_t)(a4>>32),height=(uint32_t)a4;

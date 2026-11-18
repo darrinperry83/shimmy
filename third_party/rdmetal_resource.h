@@ -17,6 +17,9 @@ uint64_t rd_metal_image_clear(RDMetalImage *image, float red, float green, float
  * is borrowed and remains valid until the image is destroyed. */
 void *rd_metal_image_depth_texture(RDMetalImage *image);
 uint64_t rd_metal_image_clear_depth(RDMetalImage *image, double depth, uint32_t stencil);
+/* mask: bit 0 clears depth, bit 1 clears stencil. Other bits are rejected. */
+uint64_t rd_metal_image_clear_depth_stencil(RDMetalImage *image, double depth,
+                                             uint32_t stencil, uint32_t mask);
 bool rd_metal_image_wait(RDMetalImage *image, uint64_t sequence);
 int rd_metal_image_poll(RDMetalImage *image, uint64_t sequence); /* 0 pending, 1 complete, -1 failed/stale */
 IOSurfaceRef rd_metal_image_surface(RDMetalImage *image); /* borrowed; image retains it */

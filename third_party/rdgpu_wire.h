@@ -18,7 +18,8 @@
 #define RDGPU_UPLOAD_BGRX8 3u
 
 enum RDGPUOp { RDGPU_CREATE_BGRA8=1, RDGPU_CLEAR=2, RDGPU_WAIT=3,
-               RDGPU_RELEASE=4, RDGPU_PREPARE_EXPORT=5 };
+               RDGPU_RELEASE=4, RDGPU_PREPARE_EXPORT=5,
+               RDGPU_CLEAR_DEPTH_STENCIL=6 };
 enum RDGPUStatus { RDGPU_OK=0, RDGPU_BAD_MESSAGE=1, RDGPU_DENIED=2,
                    RDGPU_STALE=3, RDGPU_LIMIT=4, RDGPU_BAD_STATE=5,
                    RDGPU_GPU_FAILED=6, RDGPU_PENDING=7 };
@@ -45,6 +46,9 @@ typedef struct __attribute__((packed)) {
 /* CREATE: arg0=width|(height<<32), arg1=0; reply value1=slot generation.
  * CLEAR: arg0 contains four little-endian UNORM16 channels R,G,B,A,
  * arg1=generation; reply value0=fence sequence.
+ * CLEAR_DEPTH_STENCIL: arg0[31:0] is finite float32 depth in [0,1],
+ * [39:32] stencil, [41:40] clear mask (bit 0 depth, bit 1 stencil).
+ * Other bits must be zero. arg1=generation; reply value0=fence.
  * WAIT: arg0=fence sequence, arg1=generation.
  * RELEASE: arg0=0, arg1=generation.
  * PREPARE_EXPORT: arg0=random local export handle, arg1=generation; reply

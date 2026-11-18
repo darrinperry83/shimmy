@@ -17,6 +17,7 @@
 #define RDGPU_GUEST_IMAGE_STRIDE 13u
 #define RDGPU_GUEST_IMAGE_UPLOAD 14u
 #define RDGPU_GUEST_IMAGE_UPLOAD_REGION 15u
+#define RDGPU_GUEST_CLEAR_DEPTH_STENCIL 16u
 typedef long (*RDGPUImageStrideQuery)(void *context,pid_t attestedGuestPid,
                                      const uint8_t lease[16],uint64_t generation,
                                      uint32_t width,uint32_t height);
