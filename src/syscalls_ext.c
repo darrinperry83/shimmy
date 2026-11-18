@@ -2568,8 +2568,19 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   case 169: {                                                  // gettimeofday (Linux timeval!)
     struct timeval tv;
     if (gettimeofday(&tv, 0) != 0) return eret();
-    if (a0) lx_tv_put((struct lx_timeval*)a0, &tv);
-    if (a1) { int* tz = (int*)a1; tz[0] = 0; tz[1] = 0; }
+    if (a0) {
+      struct lx_timeval guest_tv;
+      lx_tv_put(&guest_tv, &tv);
+      if (gmem_guest_copyout_checked(a0, &guest_tv, sizeof guest_tv) != 0)
+        return -LX_EFAULT;
+    }
+    if (a1) {
+      // Linux's obsolete timezone ABI is two 32-bit fields. The shim exposes
+      // UTC, matching the existing zero/zero result without a raw guest write.
+      const int32_t timezone[2] = {0, 0};
+      if (gmem_guest_copyout_checked(a1, timezone, sizeof timezone) != 0)
+        return -LX_EFAULT;
+    }
     return 0;
   }
   case 170: return -LX_EPERM;                                  // settimeofday
