@@ -335,3 +335,5 @@ The merged head through #186 passed a fresh private Arch login prompt with D-Bus
 `shmget` (#194) now refuses guest keys before Darwin's host-global SysV shared-memory namespace. Its ARM64 non-creating refusal probe, CLI build, and private Arch login/D-Bus boot passed in isolation; the merged CLI build and #186–190/#194 probes passed after resolving the nearby #190 merge. Companion #195–197 remain raw-ID/attachment risks and Qt shared-memory users may receive `ENOSYS`; this is a safeguard, not compatible shared memory.
 
 The merged head through #194 passed a fresh private Arch login prompt with the D-Bus broker and launcher settled. The harness stopped its exact guest and the disposable rootfs clone was removed. The full SysV IPC families remain incomplete; this gate proves only that this Arch boot path survived the safeguards.
+
+After rebasing onto concurrent `725b605` and `45f46d9` graphics/session commits, the CLI rebuild, six focused IPC probes, and a second fresh private Arch login/D-Bus boot passed. The rebased guest and clone were cleaned before publication.
