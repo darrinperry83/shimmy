@@ -5200,11 +5200,11 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   case 114: {
     int mc = clockid_l2m((int)a0);
     if (mc < 0) return -LX_EINVAL;
+    struct timespec t;
+    if (clock_getres((clockid_t)mc, &t) < 0) return herrno();
     if (a1) {
-      struct timespec t;
-      if (clock_getres((clockid_t)mc, &t) < 0) { t.tv_sec = 0; t.tv_nsec = 1; }
-      struct linux_timespec* lt = (struct linux_timespec*)a1;
-      lt->tv_sec = t.tv_sec; lt->tv_nsec = t.tv_nsec ? t.tv_nsec : 1;
+      struct linux_timespec lt = {.tv_sec=t.tv_sec, .tv_nsec=t.tv_nsec};
+      if (gmem_guest_copyout_checked(a1, &lt, sizeof lt) != 0) return -LX_EFAULT;
     }
     return 0;
   }

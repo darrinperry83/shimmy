@@ -208,6 +208,8 @@ An isolated #282 userfaultfd fault/copy/wake experiment passed ARM64 guest and p
 
 `rseq_slice_yield` (#471) now returns the Linux no-grant value 0. Shimmy does not register rseq (#293 remains `ENOSYS`), so no scheduler slice can exist to yield. Its ARM64 guest probe, CLI build, and isolated Arch login/D-Bus boot passed. This does not implement rseq registration or scheduling extensions.
 
+`clock_getres` (#114) now validates its guest output, propagates host query errors, and leaves a null output pointer valid. The isolated branch passed an ARM64 guest probe and private Arch login/D-Bus boot; the combined integration CLI build and guest probe also passed. The existing boottime and coarse-clock approximations were not changed.
+
 The combined integration head also passed a fresh private Arch login/D-Bus boot after the #424 merge; the exact clone and guest were cleaned. The `prlimit64` v2 branch remains withheld because its separate controlled Arch boot reached login without D-Bus settling, while a fresh baseline settled normally. The #425 io_uring and #77 tee opt-in branches remain isolated pending private descriptor and performance reviews.
 ## Batch integration proof
 
