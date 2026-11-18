@@ -92,6 +92,7 @@ This file records bounded behavior that has been implemented and tested. A dispa
 | 459 | `lsm_get_self_attr` | `syscall/459-lsm-get-self-attr` | Squash merged; absent-hook ABI | Validates attr, size and optional ID, writes zero required bytes, then returns `EOPNOTSUPP` because no guest LSM self-attribute hook exists. ARM64 probe and private Arch boot gate pass; no security label is exposed. |
 | 136 | `rt_sigpending` | `syscall/136-rt-sigpending` | Squash merged; checked output | Copies the existing virtual standard-signal pending mask into validated guest memory with the ARM64 8-byte sigset size. Empty-mask and invalid-pointer probe passes; per-thread and host pending semantics remain unmodeled. |
 | 161 | `sethostname` | `syscall/161-sethostname` | Squash merged; private guest UTS subset | Virtual root can set a 64-byte hostname shared across one owner-private socket group; `uname` and synthetic `/proc/sys/kernel/hostname` agree across fork/exec while the host name stays unchanged. Hostile guest environment keys are filtered. ARM64 probe and private Arch boot gate pass. UTS namespaces and full capability rules remain unsupported. |
+| 460 | `lsm_set_self_attr` | `syscall/460-lsm-set-self-attr` | Squash staged; absent-hook ABI | Checks the bounded guest context, size and flags before returning `EOPNOTSUPP` because no guest LSM attribute hook exists. Focused ARM64 probe passes; no security label changes are claimed. Private Arch boot gate pending. |
 
 ## Already merged before this batch
 

@@ -3298,6 +3298,28 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
       return -LX_EFAULT;
     return -LX_EOPNOTSUPP;                                     // no getselfattr hook
   }
+  case 460: {                                                   // lsm_set_self_attr
+    // Linux validates and copies the entire lsm_ctx before invoking a hook.
+    // No such hook exists in this guest, so a well-formed request is refused
+    // rather than pretending to change a security label.
+    const uint32_t size = (uint32_t)a2;
+    if ((uint32_t)a3) return -LX_EINVAL;                        // reserved flags
+    if (size < 32) return -LX_EINVAL;                           // sizeof(struct lsm_ctx)
+    if (size > 16384) return -LX_E2BIG;                         // guest PAGE_SIZE
+    unsigned char *ctx = malloc(size);
+    if (!ctx) return -LX_ENOMEM;
+    if (!a1 || gmem_guest_export_copyin(NULL, a1, ctx, size) != 0) {
+      free(ctx);
+      return -LX_EFAULT;
+    }
+    uint64_t len, ctx_len;
+    memcpy(&len, ctx + 16, sizeof len);
+    memcpy(&ctx_len, ctx + 24, sizeof ctx_len);
+    free(ctx);
+    if (len > size || ctx_len > UINT64_MAX - 32 || len < 32 + ctx_len)
+      return -LX_EINVAL;
+    return -LX_EOPNOTSUPP;                                     // no setselfattr hook
+  }
   case 461: {                                                   // lsm_list_modules
     // No Linux Security Module is modeled in this guest. Linux permits an
     // empty active-module list: write its byte length (zero), return count
