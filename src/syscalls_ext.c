@@ -1625,7 +1625,6 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return ok0(truncate(host, (off_t)a1));
   }
   case 47: return do_fallocate((int)a0, (int)a1, (long long)a2, (long long)a3);
-  case 50: return ok0(fchdir((int)a0));                        // fchdir
   case 51: return -LX_EPERM;                                   // chroot
   case 52: {                                                   // fchmod
     int fd = (int)a0;

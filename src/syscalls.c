@@ -4515,6 +4515,28 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     return 0;
   }
 
+  // ---------- 50 fchdir ----------
+  case 50: {
+    int fd = (int)a0;
+    if (fd < 0 || shim_fd_reserved(fd)) return -LX_EBADF;
+    struct stat opened, mapped;
+    if (fstat(fd, &opened) < 0) return herrno();
+    if (!S_ISDIR(opened.st_mode)) return -LX_ENOTDIR;
+    // F_GETPATH alone can name a host directory outside the guest root.
+    // Map the fd into the guest namespace, then require that resolving that
+    // guest name leads back to the very same directory before changing cwd.
+    if ((r = guest_path_of_fd(fd, gabs, sizeof gabs)) < 0) return r;
+    if (strnlen(gabs, sizeof gabs) == sizeof gabs) return -LX_ENAMETOOLONG;
+    if ((r = resolve(LX_AT_FDCWD, gabs, host, sizeof host, NULL, 0)) < 0)
+      return r;
+    if (stat(host, &mapped) < 0) return herrno();
+    if (opened.st_dev != mapped.st_dev || opened.st_ino != mapped.st_ino)
+      return -LX_EOPNOTSUPP;
+    if (access(host, X_OK) < 0) return herrno();
+    snprintf(g_cwd, sizeof g_cwd, "%s", gabs);
+    return 0;
+  }
+
   // ---------- 56 openat ----------
   case 437: { // openat2: validated no-RESOLVE subset uses the existing guest openat path
     struct rd_open_how how;
