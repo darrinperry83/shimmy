@@ -1259,6 +1259,82 @@ static long bounce_copy(int in_fd, long long* in_off, int out_fd, long long* out
   return (long)done;
 }
 
+// The guest and shim share a host address space. A raw memcpy here would let
+// the guest write arbitrary shim memory. This self-process subset stages and
+// validates every local vector before making checked guest-memory writes.
+static long lx_process_vm_writev_self(unsigned long pid_arg, unsigned long local_arg,
+                                     unsigned long local_count, unsigned long remote_arg,
+                                     unsigned long remote_count, unsigned long flags_arg) {
+  if (flags_arg) return -LX_EINVAL;
+  long pid = (long)(int)pid_arg;
+  if (pid <= 0) return -LX_ESRCH;
+  if (pid != syscalls_guest_pid())
+    return guest_child_known((int)pid) ? -LX_EOPNOTSUPP : -LX_ESRCH;
+  if (local_count > 1024 || remote_count > 1024) return -LX_EINVAL;
+  if (local_count > 16 || remote_count > 16) return -LX_EOPNOTSUPP;
+  if (!local_count || !remote_count) return 0;
+  if (!local_arg || !remote_arg) return -LX_EFAULT;
+  struct iovec local[16], remote[16];
+  if (gmem_guest_export_copyin(NULL, local_arg, local,
+                               local_count * sizeof local[0]) != 0 ||
+      gmem_guest_export_copyin(NULL, remote_arg, remote,
+                               remote_count * sizeof remote[0]) != 0) return -LX_EFAULT;
+  size_t local_bytes = 0, remote_bytes = 0;
+  for (unsigned long i = 0; i < local_count; ++i) {
+    size_t len = local[i].iov_len;
+    if (len > 1024ul * 1024 - local_bytes) return -LX_EOPNOTSUPP;
+    if (len && (uintptr_t)local[i].iov_base > UINTPTR_MAX - len) return -LX_EFAULT;
+    local_bytes += len;
+  }
+  for (unsigned long i = 0; i < remote_count; ++i) {
+    size_t len = remote[i].iov_len;
+    if (len > 1024ul * 1024 - remote_bytes) return -LX_EOPNOTSUPP;
+    if (len && (uintptr_t)remote[i].iov_base > UINTPTR_MAX - len) return -LX_EFAULT;
+    remote_bytes += len;
+  }
+  // Snapshotting all local bytes differs from Linux's sequential operation
+  // if source and destination overlap. Refuse that case rather than claim
+  // an unverified copy ordering.
+  for (unsigned long i = 0; i < local_count; ++i)
+    for (unsigned long j = 0; j < remote_count; ++j) {
+      uintptr_t l = (uintptr_t)local[i].iov_base, r = (uintptr_t)remote[j].iov_base;
+      if (local[i].iov_len && remote[j].iov_len &&
+          l < r + remote[j].iov_len && r < l + local[i].iov_len)
+        return -LX_EOPNOTSUPP;
+    }
+  char *staged = malloc(local_bytes ? local_bytes : 1);
+  if (!staged) return -LX_ENOMEM;
+  size_t at = 0;
+  for (unsigned long i = 0; i < local_count; ++i) {
+    size_t len = local[i].iov_len;
+    if (len && gmem_guest_export_copyin(NULL, (uintptr_t)local[i].iov_base,
+                                        staged + at, len) != 0) {
+      free(staged);
+      return -LX_EFAULT;
+    }
+    at += len;
+  }
+  size_t copied = 0, limit = local_bytes < remote_bytes ? local_bytes : remote_bytes;
+  for (unsigned long i = 0; i < remote_count && copied < limit; ++i) {
+    uintptr_t addr = (uintptr_t)remote[i].iov_base;
+    size_t remaining = remote[i].iov_len;
+    if (remaining > limit - copied) remaining = limit - copied;
+    while (remaining) {
+      size_t step = 16384 - (addr & 16383); // remote fault granularity
+      if (step > remaining) step = remaining;
+      if (gmem_guest_copyout_checked(addr, staged + copied, step) != 0) {
+        free(staged);
+        return copied ? (long)copied : -LX_EFAULT;
+      }
+      addr += step;
+      copied += step;
+      remaining -= step;
+    }
+  }
+  free(staged);
+  return (long)copied;
+}
+
 // ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
@@ -2414,7 +2490,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   // getaddrinfo(AF_UNSPEC) sends its A and AAAA queries in one sendmmsg and treats a
   // failure as fatal. Leaving it -ENOSYS here made a Debian rootfs unable to resolve
   // any name at all. net_owns() claims it before this table is reached.
-  case 270: case 271: {                                         // process_vm_readv / writev
+  case 270: {                                                   // process_vm_readv (existing path)
     // The guest shares OUR address space, so cross-"process" vm IO on ourselves is a memcpy.
     const struct iovec* liov = (const struct iovec*)a1;
     const struct iovec* riov = (const struct iovec*)a3;
@@ -2435,6 +2511,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     }
     return total;
   }
+  case 271: return lx_process_vm_writev_self(a0, a1, a2, a3, a4, a5);
   case 272: {                                                   // kcmp
     // Only comparisons within this guest process have a reliable identity.
     // Linux compares kernel object pointers; fstat(dev, ino) is not a substitute
