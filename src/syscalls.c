@@ -5114,8 +5114,7 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   // ---------- 122 sched_setaffinity / 123 sched_getaffinity ----------
   case 122: {
     long target = (long)(int)a0;
-    if (target != 0 && target != guest_tid() &&
-        !(target == syscalls_guest_pid() && guest_tid() == 1))
+    if (target != 0 && target != guest_tid())
       return guest_tid_known((int)target) ? -95 : -LX_ESRCH;
     // Darwin does not offer Linux's arbitrary CPU bitmask pinning. Accept the
     // unrestricted mask (the host scheduler already uses all online CPUs),
@@ -5136,8 +5135,7 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   }
   case 123: {
     long target = (long)(int)a0;
-    if (target != 0 && target != guest_tid() &&
-        !(target == syscalls_guest_pid() && guest_tid() == syscalls_guest_pid()))
+    if (target != 0 && target != guest_tid())
       return guest_tid_known((int)target) ? -95 : -LX_ESRCH;
     size_t sz = (size_t)a1;
     // The virtual topology exposes at most 32 online CPUs. Linux's raw

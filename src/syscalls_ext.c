@@ -1672,8 +1672,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     int priority;
     if (gmem_guest_export_copyin(NULL, a1, &priority, sizeof priority) != 0)
       return -LX_EFAULT;
-    if (target && target != guest_tid() &&
-        !(target == (long)syscalls_guest_pid() && guest_tid() == 1))
+    if (target && target != guest_tid())
       return guest_tid_known((int)target) ? -LX_EOPNOTSUPP : -LX_ESRCH;
     // Shimmy reports SCHED_OTHER for this thread. Linux requires priority 0
     // for that policy; accepting another value would claim a change we did
@@ -1694,8 +1693,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
         policy != (0x40000000 | 2) && policy != (0x40000000 | 3) &&
         policy != (0x40000000 | 5) && policy != (0x40000000 | 6) &&
         policy != (0x40000000 | 7)) return -LX_EINVAL;
-    if (target && target != guest_tid() &&
-        !(target == syscalls_guest_pid() && guest_tid() == 1))
+    if (target && target != guest_tid())
       return guest_tid_known(target) ? -LX_EOPNOTSUPP : -LX_ESRCH;
     if (policy == 0) return priority == 0 ? 0 : -LX_EINVAL;
     return -LX_EOPNOTSUPP;
@@ -1706,16 +1704,14 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     // for a nonexistent guest ID or guess another thread's scheduling state.
     long target = (long)(int)a0;
     if (target < 0) return -LX_EINVAL;
-    if (target == 0 || target == guest_tid() ||
-        (target == syscalls_guest_pid() && guest_tid() == 1))
+    if (target == 0 || target == guest_tid())
       return 0;
     return guest_tid_known((int)target) ? -LX_EOPNOTSUPP : -LX_ESRCH;
   }
   case 121: {                                                  // sched_getparam
     long target = (long)(int)a0;
     if (target < 0 || !a1) return -LX_EINVAL;
-    if (target && target != guest_tid() &&
-        !(target == syscalls_guest_pid() && guest_tid() == 1))
+    if (target && target != guest_tid())
       return guest_tid_known((int)target) ? -LX_EOPNOTSUPP : -LX_ESRCH;
     // Only the caller's SCHED_OTHER policy is modeled. Its Linux RT
     // priority is zero regardless of its separate nice value.
@@ -1749,8 +1745,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
      * misleading quantum. Never write through an unchecked guest pointer. */
     long target = (long)(int)a0;
     if (target < 0) return -LX_EINVAL;
-    if (target && target != guest_tid() &&
-        !(target == (long)syscalls_guest_pid() && guest_tid() == 1))
+    if (target && target != guest_tid())
       return guest_tid_known((int)target) ? -LX_EOPNOTSUPP : -LX_ESRCH;
     if (!a1 || gmem_guest_range_mapped(a1, sizeof(struct lx_timespec)) != 0)
       return -LX_EFAULT;
@@ -2388,8 +2383,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (!a1) return -LX_EFAULT;
     if (a2) return -LX_EINVAL;
     if (target < 0) return -LX_EINVAL;
-    if (target && target != guest_tid() &&
-        !(target == (long)getpid() && guest_tid() == 1))
+    if (target && target != guest_tid())
       return guest_tid_known((int)target) ? -LX_EOPNOTSUPP : -LX_ESRCH;
     uint32_t size = *(const uint32_t *)a1;
     if (size && size < sizeof(attr)) return -LX_EINVAL;
@@ -2426,8 +2420,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     size_t size = (size_t)(unsigned int)a2;
     if (!a1 || target < 0 || size < sizeof(attr) || size > 4096)
       return -LX_EINVAL;
-    if (target && target != guest_tid() &&
-        !(target == (long)getpid() && guest_tid() == 1))
+    if (target && target != guest_tid())
       return guest_tid_known((int)target) ? -LX_EOPNOTSUPP : -LX_ESRCH;
     if (a3) return -LX_EINVAL;  /* No SCHED_DEADLINE dynamic fields. */
     errno = 0;

@@ -1,0 +1,5 @@
+# Scheduler target identity
+
+Shimmy assigns the main guest thread's TID to its guest PID at entry and again after fork (`src/shim.c`). Scheduler queries and bounded setters can therefore identify self with PID 0 or `guest_tid()`. The former extra `guest_tid() == 1` main-PID exception was redundant; a non-init forked child's main TID equals its new PID, not 1. In `sched_setattr` and `sched_getattr`, that exception also used Darwin's `getpid()` and could accept a host PID that is not the guest init PID.
+
+This correction removes only those extra scheduler identity exceptions. It does not add scheduler policies or other-thread support. Run `./build.sh cli` and `python3 tests/run-sched-main-tid-alias.py`; the static ARM64 guest checks self targeting across scheduler calls before and after a separate-process fork, including the child's non-init PID/TID equality. A separate disposable init-mode run also checks that guest PID 1 cannot use its unrelated host PID to call `sched_setattr` or `sched_getattr`.
