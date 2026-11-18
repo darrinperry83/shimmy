@@ -4444,6 +4444,9 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
 
   // ---------- 46 ftruncate ----------
   case 46: {                                          // ftruncate
+    // Linux rejects a negative signed off_t before inspecting the fd or its
+    // seals. A sealed fd must not turn that invalid request into EPERM.
+    if ((int64_t)a1 < 0) return -LX_EINVAL;
     // Enforce the seals we can. This is what makes F_ADD_SEALS an implementation rather than a
     // promise: a guest that seals against resize and then tries to resize is refused, exactly as
     // Linux would refuse it.

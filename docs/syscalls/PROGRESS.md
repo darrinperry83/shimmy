@@ -290,3 +290,5 @@ The next per-syscall worktrees are integrated with squash commits. For `ioprio_s
 `timerfd_gettime` (#87) now stages the result before checked guest copyout, avoiding a host write through a guest pointer. Its ARM64 guest probe, CLI build, and private Arch login/D-Bus boot passed in the isolated worktree; the integration CLI build and guest probe passed after merge. This covers the tested timerfd subset, not every timer clock or flag.
 
 `fstat` (#80) now stages the Linux stat and synthetic descriptor overlays before checked guest copyout. Its ARM64 ordinary-fd, invalid-pointer, and canary probe, CLI build, and private Arch login/D-Bus boot passed in the isolated worktree; the integration CLI build and probe passed after merge. Synthetic descriptor overlays remain compile-covered rather than individually probed.
+
+`ftruncate` (#46) now rejects a negative signed length before the seal or descriptor checks. Its ARM64 probe covers negative length precedence, sealed memfd shrink refusal, and ordinary file effects; CLI build and private Arch login/D-Bus boot passed in isolation, with integration CLI build and probe passing after merge.
