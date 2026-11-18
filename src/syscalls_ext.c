@@ -2339,8 +2339,25 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
                  ? 0 : -LX_EFAULT;
     }
   case 137: return -LX_EAGAIN;                                 // rt_sigtimedwait: timed out
-  case 138: case 240: {                                        // rt_sigqueueinfo/rt_tgsigqueueinfo
-    int lsig = (nr == 138) ? (int)a1 : (int)a2;
+  case 138: {                                                  // rt_sigqueueinfo
+    int lsig = (int)a1;
+    if (lsig < 0 || lsig > 64) return -LX_EINVAL;
+    // Linux copies the sender's siginfo before targeting. Do not silently
+    // discard an invalid or missing payload, even for signal-zero queries.
+    unsigned char info[128];
+    if (!a2 || gmem_guest_export_copyin(NULL, a2, info, sizeof info) != 0)
+      return -LX_EFAULT;
+    long target = (long)(int)a0;
+    if (target <= 0) return -LX_EOPNOTSUPP; // no guest process-group delivery
+    if (target != syscalls_guest_pid())
+      return guest_child_known((int)target) ? -LX_EOPNOTSUPP : -LX_ESRCH;
+    // A self existence probe is useful and sends no signal. Nonzero delivery
+    // must preserve siginfo and invoke guest handlers, neither of which the
+    // current virtual signal path can promise. Never signal the host shim.
+    return lsig == 0 ? 0 : -LX_EOPNOTSUPP;
+  }
+  case 240: {                                                  // rt_tgsigqueueinfo (separate gap)
+    int lsig = (int)a2;
     if (lsig == 0) return 0;
     int hs = host_signo(lsig);
     if (hs < 0) return 0;

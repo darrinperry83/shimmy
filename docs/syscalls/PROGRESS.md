@@ -230,6 +230,8 @@ An isolated #282 userfaultfd fault/copy/wake experiment passed ARM64 guest and p
 
 `tkill` (#130) now validates a positive, known guest thread ID before signal-zero success or the existing delivery path; invalid IDs return `EINVAL` or `ESRCH`. Its ARM64 guest probe, CLI build, private Arch login/D-Bus boot, and integration probe passed. This does not change `tgkill` (#131) or establish complete target-thread signal delivery.
 
+`rt_sigqueueinfo` (#138) now checks the native 128-byte guest siginfo and target, permits only current-guest signal-zero existence queries, and refuses nonzero delivery rather than signaling the host shim without preserving payload or guest handler semantics. Its ARM64 guest probe, CLI build, private Arch login/D-Bus boot, and combined #130/#138 integration probes passed. `rt_tgsigqueueinfo` (#240) remains separate.
+
 `move_pages` (#239) keeps a bounded query-only subset: at most 256 page addresses are copied from guest memory, queried pages must belong to the guest mapping, and statuses are copied back through checked guest memory. The new and existing ARM64 probes, CLI build, private Arch login/D-Bus boot, and integration probes passed. Page migration is unsupported.
 
 `rt_sigtimedwait` (#137) now stages its guest signal mask and timeout and uses checked 128-byte siginfo copyout. A failed output write requeues the coalesced standard signal. Its ARM64 guest probe, CLI build, private Arch login/D-Bus boot, and combined #134/#135/#137 probes passed. Its queue is process-wide and does not provide complete Linux signal semantics.
