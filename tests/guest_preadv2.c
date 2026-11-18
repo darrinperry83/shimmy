@@ -38,6 +38,15 @@ int main(void) {
     if (rd(fd, &iov, (unsigned long)-2L, 0, 0) != -1 || errno != EINVAL) return 5;
     if (rd(fd, &iov, (unsigned long)-1L, 0, 0) != 2 ||
         memcmp(buf, "de", 2) != 0 || lseek(fd, 0, SEEK_CUR) != 5) return 6;
+
+    // Native 64-bit Linux passes the whole offset in pos_l (x3). Exercise its
+    // upper half with a sparse file; x4 remains irrelevant on this ABI.
+    const off_t large = ((off_t)1 << 32) + 3;
+    if (pwrite(fd, "Z", 1, large) != 1) return 7;
+    iov.iov_len = 1;
+    memset(buf, 0, sizeof buf);
+    if (rd(fd, &iov, (unsigned long)large, 1, 0) != 1 || buf[0] != 'Z' ||
+        lseek(fd, 0, SEEK_CUR) != 5) return 8;
     close(fd);
     puts("GUEST_PREADV2_OK");
     return 0;
