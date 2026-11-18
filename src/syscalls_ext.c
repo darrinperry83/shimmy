@@ -3047,25 +3047,26 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
      * host has not made resident. */
     long pid = (long)(int)a0;
     size_t count = (size_t)a1;
-    void *const *pages = (void *const *)a2;
-    const int *nodes = (const int *)a3;
-    int *status = (int *)a4;
     unsigned flags = (unsigned)a5;
     if (flags & ~3u) return -LX_EINVAL;  // MPOL_MF_MOVE / MOVE_ALL
     if (pid && pid != syscalls_guest_pid()) return -LX_EOPNOTSUPP;
-    if (nodes || flags) return -LX_EOPNOTSUPP; // no page migration
+    if (a3 || flags) return -LX_EOPNOTSUPP; // no page migration
     if (!count) return 0;
-    if (!pages || !status) return -LX_EFAULT;
-    if (count > SIZE_MAX / sizeof(*pages) ||
-        count > SIZE_MAX / sizeof(*status)) return -LX_EINVAL;
-    if (!host_range_mapped((unsigned long)pages, count * sizeof(*pages)) ||
-        !host_range_mapped((unsigned long)status, count * sizeof(*status)))
+    if (!a2 || !a4) return -LX_EFAULT;
+    // Bound the host stack and copy through the guest-memory registry. A
+    // host-mapped pointer alone can name Shimmy's private address space.
+    if (count > 256) return -LX_EOPNOTSUPP;
+    uint64_t pages[256];
+    int32_t status[256];
+    if (gmem_guest_export_copyin(NULL, a2, pages, count * sizeof pages[0]) != 0 ||
+        gmem_guest_range_mapped(a4, count * sizeof status[0]) != 0)
       return -LX_EFAULT;
     const size_t page = (size_t)getpagesize();
     for (size_t i = 0; i < count; ++i) {
       unsigned long addr = (unsigned long)pages[i];
       unsigned char resident = 0;
       if (addr < FOUR_GB || (addr & (page - 1)) ||
+          gmem_guest_range_mapped(addr, page) != 0 ||
           !host_range_mapped(addr, page)) {
         status[i] = -LX_EFAULT;
       } else if (mincore((void *)addr, page, (char *)&resident) < 0) {
@@ -3074,7 +3075,8 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
         status[i] = resident & 1 ? 0 : -LX_ENOENT;
       }
     }
-    return 0;
+    return gmem_guest_copyout_checked(a4, status,
+                                      count * sizeof status[0]) == 0 ? 0 : -LX_EFAULT;
   }
   case 241: return -LX_EPERM;                                   // perf_event_open
   // 243 recvmmsg is now HANDLED in net.c, next to sendmmsg. net_owns() claims both

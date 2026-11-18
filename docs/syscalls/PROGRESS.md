@@ -224,6 +224,8 @@ An isolated #282 userfaultfd fault/copy/wake experiment passed ARM64 guest and p
 
 `clock_gettime` (#113) now uses checked guest copyout for the 16-byte result. Supported clock mappings remain unchanged. Its ARM64 guest probe, CLI build, private Arch login/D-Bus boot, and combined #113/#114 integration probes passed; this does not establish clock mapping parity across all Linux IDs.
 
+`move_pages` (#239) keeps a bounded query-only subset: at most 256 page addresses are copied from guest memory, queried pages must belong to the guest mapping, and statuses are copied back through checked guest memory. The new and existing ARM64 probes, CLI build, private Arch login/D-Bus boot, and integration probes passed. Page migration is unsupported.
+
 The combined integration head through #103 passed a fresh private Arch login prompt with the D-Bus broker and launcher settled. The exact guest was stopped by the harness and its disposable rootfs clone was removed. This is a systemd boot smoke test, not a desktop or full syscall compatibility claim.
 
 The combined integration head also passed a fresh private Arch login/D-Bus boot after the #424 merge; the exact clone and guest were cleaned. The `prlimit64` v2 branch remains withheld because its separate controlled Arch boot reached login without D-Bus settling, while a fresh baseline settled normally. The #425 io_uring and #77 tee opt-in branches remain isolated pending private descriptor and performance reviews.
