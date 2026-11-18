@@ -5,8 +5,10 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/event.h>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 enum { MQS_MAGIC = 0x534d5131u, MQS_VERSION = 1,
@@ -269,4 +271,63 @@ int mq_shared_status(int fd, unsigned* count, unsigned* max_messages,
   if (writable) *writable = h.count < h.max_messages;
   flock(fd, LOCK_UN);
   return 0;
+}
+
+static int64_t mqs_now_ns(void) {
+  struct timespec now;
+  if (clock_gettime(CLOCK_MONOTONIC, &now) < 0) return -1;
+  return (int64_t)now.tv_sec * 1000000000LL + now.tv_nsec;
+}
+
+int mq_shared_wait_ready(int fd, int wanted, int timeout_ms, int* ready) {
+  if (!ready) return EFAULT;
+  *ready = 0;
+  if (fd < 0) return EBADF;
+  if (!wanted || (wanted & ~(MQ_SHARED_READABLE | MQ_SHARED_WRITABLE)) ||
+      timeout_ms < -1) return EINVAL;
+  int kq = kqueue();
+  if (kq < 0) return errno;
+  // Register before checking state so a change between the check and kevent
+  // cannot be lost. All queue mutations write this backing vnode.
+  struct kevent change;
+  EV_SET(&change, fd, EVFILT_VNODE, EV_ADD | EV_CLEAR,
+         NOTE_WRITE | NOTE_DELETE | NOTE_RENAME, 0, NULL);
+  if (kevent(kq, &change, 1, NULL, 0, NULL) < 0) {
+    int err = errno; close(kq); return err;
+  }
+  int64_t deadline = -1;
+  if (timeout_ms >= 0) {
+    int64_t now = mqs_now_ns();
+    if (now < 0) { int err = errno; close(kq); return err; }
+    deadline = now + (int64_t)timeout_ms * 1000000LL;
+  }
+  for (;;) {
+    int readable = 0, writable = 0;
+    int err = mq_shared_status(fd, NULL, NULL, NULL, &readable, &writable);
+    if (err) { close(kq); return err; }
+    int state = (readable ? MQ_SHARED_READABLE : 0) |
+                (writable ? MQ_SHARED_WRITABLE : 0);
+    *ready = state & wanted;
+    if (*ready) { close(kq); return 0; }
+    struct timespec remaining, *wait = NULL;
+    if (deadline >= 0) {
+      int64_t now = mqs_now_ns();
+      if (now < 0) { err = errno; close(kq); return err; }
+      int64_t delta = deadline - now;
+      if (delta <= 0) { close(kq); return 0; }
+      remaining.tv_sec = (time_t)(delta / 1000000000LL);
+      remaining.tv_nsec = (long)(delta % 1000000000LL);
+      wait = &remaining;
+    }
+    struct kevent event;
+    int n = kevent(kq, NULL, 0, &event, 1, wait);
+    if (n < 0 && errno == EINTR) { close(kq); return EINTR; }
+    if (n < 0) { err = errno; close(kq); return err; }
+    if (!n) { close(kq); return 0; }
+    if (event.flags & EV_ERROR) {
+      err = event.data ? (int)event.data : EIO;
+      close(kq);
+      return err;
+    }
+  }
 }

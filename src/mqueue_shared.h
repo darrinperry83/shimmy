@@ -15,4 +15,10 @@ int mq_shared_receive(int fd, void* data, size_t capacity,
 int mq_shared_status(int fd, unsigned* count, unsigned* max_messages,
                      unsigned* message_size, int* readable, int* writable);
 
+enum { MQ_SHARED_READABLE = 1, MQ_SHARED_WRITABLE = 2 };
+// Backend readiness wait. timeout_ms is relative, or -1 for no deadline.
+// This is not a guest poll/epoll adapter; the backing regular file must not
+// be passed to host poll as if it were a Linux mqueue descriptor.
+int mq_shared_wait_ready(int fd, int wanted, int timeout_ms, int* ready);
+
 #endif
