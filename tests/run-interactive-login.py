@@ -6,6 +6,7 @@ The live rootfs, account database, and personal credentials are never touched.
 import os
 import struct
 import resource
+import re
 import secrets
 import shutil
 import signal
@@ -73,6 +74,10 @@ env.update(RDUID0="1", RDCONS_DUMP="1", RDCONS_DUMPFILE=str(console),
            RDVT_TEST_INPUT_FIFO=str(fifo), RDSOCKETGROUP=str(tmp / "sockets"),
            RDNATIVE_SESSION="1", RDENV_LIBGL_ALWAYS_INDIRECT="",
            LIBGL_ALWAYS_INDIRECT="")
+if os.environ.get("RD_TEST_PLASMA_PIXELS") == "1":
+    if os.environ.get("RD_TEST_PLASMA") != "1" or os.environ.get("RD_TEST_FOOT") == "1":
+        raise SystemExit("Plasma pixel probe requires Plasma without diagnostic foot")
+    env["RDGPU_WINDOW_SELFCHECK"] = "1"
 # Every invocation boots systemd: match run.sh --init even for the login-only
 # probe, so build_guest_env omits the nested display/runtime defaults and
 # PAM/logind owns the runtime directory. No pidfd or socket-queue opt-in is passed here.
@@ -181,6 +186,15 @@ try:
                     print("KWIN_PROCESS_SEEN" if kwin_seen else "KWIN_PROCESS_MISSING", flush=True)
                     print("PLASMASHELL_PROCESS_SEEN" if shell_seen else "PLASMASHELL_PROCESS_MISSING", flush=True)
                     ok = runtime_seen and kwin_seen and shell_seen
+                    if os.environ.get("RD_TEST_PLASMA_PIXELS") == "1":
+                        samples = [(int(frame), int(nonblack), int(total)) for frame, nonblack, total in
+                                   re.findall(r"\[window-metal-selfcheck\] frame=(\d+) "
+                                              r"nonblack=(\d+)/(\d+)",
+                                              log.read_text(errors="replace"))]
+                        print("PLASMA_PIXEL_SAMPLES", samples, flush=True)
+                        visible = any(nonblack > 0 for _, nonblack, _ in samples)
+                        print("PLASMA_NONBLACK_SEEN" if visible else "PLASMA_NONBLACK_MISSING", flush=True)
+                        ok = ok and visible
                     if os.environ.get("RD_TEST_FRAME_PROGRESS") == "1":
                         # The CPU frame carrier is a testable output of KWin's DRM flips.
                         # More than two frames with real pixels rules out the previous

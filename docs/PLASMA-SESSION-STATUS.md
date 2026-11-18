@@ -326,3 +326,35 @@ out of 67,080 across the first four frames. The direct-resource bind test and
 driver build passed. This proves the observed orientation correction for that
 path; broader viewport, scissor, multisample, and performance coverage remains
 to be tested. The installed live Arch root was not modified.
+
+### Installed-root black desktop follow-up (2026-11-18)
+
+An on-screen boot of the installed Arch root authenticated and started Plasma,
+but the owner sampled only one 3600x2338 all-black IOSurface frame
+(`0/67080` nonblack sample points). A process-start result is therefore not a
+visible desktop result. The same installed-root content was copied into a
+disposable root with fresh `/run` and `/proc`, and guest system and user
+`DefaultLimitCORE=0`; these bounded runs produced no host core files.
+
+In the copy, KWin and Plasmashell started. A diagnostic `foot` connected to
+Wayland, sent buffers, and caused hundreds of direct-IOSurface presentation
+callbacks. Without `foot`, the owner again sampled only the initial black
+frame. A native one-second sample found KWin's guest main thread in its socket
+poll and Plasmashell's guest main thread waiting in Shimmy's futex path. That
+does not identify the wait's guest callsite or prove a lost wake. The existing
+`RD_TEST_FRAME_PROGRESS` assertion reads the old CPU frame carrier, so it is
+not a valid direct-IOSurface test. The new opt-in
+`RD_TEST_PLASMA_PIXELS=1` checks host-window pixels with no diagnostic
+client; it would fail this observed black-frame run. Nonblack pixels alone
+still do not prove a complete desktop.
+
+The installed root lacked `usr/share/glib-2.0/schemas/gschemas.compiled`;
+guest `glib-compile-schemas` created it in the disposable copy, and the
+previous at-spi schema error no longer appeared. Plasma-only presentation
+still stayed black, so the missing schema cache was a separate package-state
+defect, not a demonstrated fix for this scene. A clone-only
+`QT_ENABLE_REGEXP_JIT=0` control also stayed black. The installed root has no
+`/usr/bin/sddm`, so it cannot yet present an SDDM greeter. The next code
+investigation is Plasmashell's first Wayland surface/commit and its futex
+waiter/waker, separately from greeter integration. Neither a full desktop nor
+lock/logout has been demonstrated.
