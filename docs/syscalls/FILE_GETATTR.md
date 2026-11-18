@@ -1,0 +1,9 @@
+# `file_getattr` (ARM64 syscall 468): blocked by file-attribute model
+
+Linux defines `file_getattr(dfd, filename, struct file_attr *out, size, at_flags)`. The first published `file_attr` is 24 bytes: xflags, extent size, extent count, project ID, and CoW extent size. The syscall accepts `AT_SYMLINK_NOFOLLOW` and `AT_EMPTY_PATH`, checks the versioned output size, resolves the inode, then asks that filesystem's `fileattr_get` callback. A filesystem without that operation returns `EOPNOTSUPP`. This is an inode attribute query, not an ordinary `stat` or xattr read.
+
+Shimmy currently maps guest files to Darwin paths and descriptors. I found no guest-visible `file_attr` state, `FS_IOC_GETFLAGS`/`FS_IOC_FSGETXATTR` bridge, or coherent mapping from Darwin `st_flags` to Linux xflags. Returning a zero-filled structure for an APFS-backed file would claim that Linux immutable, append, project, extent, and other attributes are absent without establishing that they are. It would also disagree with a future `file_setattr` implementation unless both share per-inode state and enforcement.
+
+Keep syscall 468 on the existing `ENOSYS` fallback. To enable a bounded implementation, first define which guest filesystems expose file attributes, how each supported field is stored and enforced across path, fd, rename, hardlink, fork, and persistence, and how `file_setattr` and legacy file-attribute ioctls observe the same state. Then test output sizing and zero extension, path/dirfd/fd/symlink forms, unsupported filesystems, and round trips with setters on a disposable ARM64 guest root. Do not treat a successful host `stat` as proof of this contract.
+
+Primary sources: [Linux `fs/file_attr.c` syscall and VFS paths](https://github.com/torvalds/linux/blob/master/fs/file_attr.c) and [Linux `struct file_attr` UAPI](https://github.com/torvalds/linux/blob/master/include/uapi/linux/fs.h).
