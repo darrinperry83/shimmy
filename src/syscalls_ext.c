@@ -2132,6 +2132,44 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (e < 0) return e;
     return ok0(fchmodat(hdirfd, host, (mode_t)a2, host_at_flags((int)a3)));
   }
+  case 465: {                                                   // listxattrat(dfd, path, flags, list, size)
+    // Linux fs/xattr.c accepts exactly these flags. Unlike getxattrat, this
+    // syscall has five scalar arguments and no xattr_args structure.
+    if (a2 & ~(unsigned long)(LX_AT_SYMLINK_NOFOLLOW | LX_AT_EMPTY_PATH))
+      return -LX_EINVAL;
+    const char* path = (const char*)a1;
+    size_t size = (size_t)a4;
+    if (size > 65536) size = 65536;                              // XATTR_LIST_MAX
+    ssize_t r;
+    if ((a2 & LX_AT_EMPTY_PATH) && (!path || !path[0])) {
+      int fd = (int)a0;
+      if (fd < 0 || shim_fd_reserved(fd) || fcntl(fd, F_GETFD) < 0)
+        return -LX_EBADF;
+      // An unrecognized host fd must not expose host-private xattrs. For now,
+      // support only ordinary files/directories opened beneath the guest root.
+      struct stat st;
+      char fdpath[PATH_MAX];
+      const char* root = syscalls_get_root();
+      size_t rootlen = root ? strlen(root) : 0;
+      if (fstat(fd, &st) < 0) return -LX_EBADF;
+      if ((!S_ISREG(st.st_mode) && !S_ISDIR(st.st_mode)) || !rootlen ||
+          fcntl(fd, F_GETPATH, fdpath) < 0 ||
+          strncmp(fdpath, root, rootlen) != 0 ||
+          (fdpath[rootlen] != '/' && fdpath[rootlen] != 0))
+        return -LX_EOPNOTSUPP;
+      r = flistxattr(fd, (char*)a3, size, 0);
+    } else {
+      if (!path) return -LX_EFAULT;
+      if (!path[0]) return -LX_ENOENT;
+      e = resolve_at_nf((int)a0, path, host, sizeof host, &hdirfd,
+                        (a2 & LX_AT_SYMLINK_NOFOLLOW) != 0);
+      if (e < 0) return e;
+      r = listxattr(host, (char*)a3, size,
+                    (a2 & LX_AT_SYMLINK_NOFOLLOW) ? XATTR_NOFOLLOW : 0);
+    }
+    if (r < 0 && errno == ERANGE && size >= 65536) return -LX_E2BIG;
+    return r < 0 ? eret() : r;
+  }
 
   default:
     return -LX_ENOSYS;                                          // genuinely not implemented
