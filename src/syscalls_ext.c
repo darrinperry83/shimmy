@@ -1743,6 +1743,18 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     }
     size_t count = requested > 1024 * 1024 ? 1024 * 1024 : requested;
     if (!count) return 0;
+    // Reject a bad or read-only guest destination before host pread. The
+    // existing 1 MiB bound can return a short regular-file read, so inspect
+    // exactly that prefix rather than vectors beyond what this call copies.
+    size_t admitted = 0;
+    for (size_t i = 0; i < nvec && admitted < count; i++) {
+      size_t part = vec[i].iov_len;
+      if (part > count - admitted) part = count - admitted;
+      if (part && gmem_guest_range_writable(
+              (uint64_t)(uintptr_t)vec[i].iov_base, part) != 0)
+        return -LX_EFAULT;
+      admitted += part;
+    }
     char *buf = malloc(count);
     if (!buf) return -LX_ENOMEM;
     ssize_t n = pread(fd, buf, count, (off_t)pos);

@@ -16,6 +16,8 @@ static long raw_preadv(long fd, const struct iovec *vec, long nvec, long pos, lo
   return x0;
 }
 
+static const char readonly_output[] __attribute__((section(".text"))) = "R";
+
 int main(void) {
   int fd = open("/tmp/preadv-probe", O_CREAT | O_RDWR | O_TRUNC, 0600);
   if (fd < 0 || write(fd, "abcdef", 6) != 6) return 1;
@@ -37,6 +39,15 @@ int main(void) {
   const long high_pos = 5L * 1024 * 1024 * 1024;
   if (lseek(fd, high_pos, SEEK_SET) != high_pos || write(fd, "Q", 1) != 1) return 12;
   if (raw_preadv(fd, vec, 2, high_pos, 0xffffffff) != 1 || a[0] != 'Q') return 13;
+  char first = 'X';
+  struct iovec invalid_later[2] = {{&first, 1}, {(void*)1, 1}};
+  if (raw_preadv(fd, invalid_later, 2, 0, 0) != -14 || first != 'X') return 15;
+  struct iovec readonly_later[2] = {{&first, 1}, {(void*)readonly_output, 1}};
+  long readonly_rc = raw_preadv(fd, readonly_later, 2, 0, 0);
+  if (readonly_rc != -14) { fprintf(stderr, "readonly rc=%ld\n", readonly_rc); return 16; }
+  if (first != 'X') return 18;
+  if (readonly_output[0] != 'R') return 19;
+  if (lseek(fd, 0, SEEK_CUR) != high_pos + 1) return 17;
   close(fd);
   if (raw_preadv(fd, vec, 2, 0, 0) != -9) return 14;
   puts("GUEST_PREADV_OK");
