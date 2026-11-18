@@ -658,52 +658,6 @@ static void lx_rusage_put(struct lx_rusage* d, const struct rusage* s) {
 struct lx_tms { long tms_utime, tms_stime, tms_cutime, tms_cstime; };
 #define LX_USER_HZ 100
 
-// Linux aarch64 `struct shmid64_ds` (asm-generic/shmbuf.h) and the `ipc64_perm` it embeds.
-// This is what the guest's musl hands to shmctl(IPC_STAT), and it is NOT the macOS shape:
-// macOS puts shm_lpid/shm_cpid/shm_nattch BEFORE the timestamps and makes nattch a short, so a
-// raw pass-through would report a segment size read out of the middle of a pid pair. That is why
-// IPC_STAT used to be refused here. Refusing is not survivable, though -- see the call site.
-//
-// Offsets are pinned by the static asserts below rather than trusted to the compiler's padding.
-struct lx_ipc64_perm {
-  int            key;
-  unsigned       uid, gid, cuid, cgid;
-  unsigned       mode;
-  unsigned short seq, __pad2;
-  unsigned long long __unused1, __unused2;
-};
-struct lx_shmid64_ds {
-  struct lx_ipc64_perm shm_perm;
-  unsigned long long   shm_segsz;
-  long long            shm_atime, shm_dtime, shm_ctime;
-  int                  shm_cpid, shm_lpid;
-  unsigned long long   shm_nattch, __unused4, __unused5;
-};
-_Static_assert(sizeof(struct lx_ipc64_perm)  == 48,  "linux ipc64_perm is 48 bytes");
-_Static_assert(sizeof(struct lx_shmid64_ds)  == 112, "linux shmid64_ds is 112 bytes");
-_Static_assert(offsetof(struct lx_shmid64_ds, shm_segsz) == 48, "shm_segsz at 48");
-_Static_assert(offsetof(struct lx_shmid64_ds, shm_cpid)  == 80, "shm_cpid at 80");
-_Static_assert(offsetof(struct lx_shmid64_ds, shm_nattch) == 88, "shm_nattch at 88");
-
-// Field-by-field by NAME, never by memcpy: the two layouts agree on nothing past the first word.
-static void lx_shmid_put(struct lx_shmid64_ds* d, const struct shmid_ds* s) {
-  memset(d, 0, sizeof *d);
-  d->shm_perm.key  = (int)s->shm_perm._key;
-  d->shm_perm.uid  = (unsigned)s->shm_perm.uid;
-  d->shm_perm.gid  = (unsigned)s->shm_perm.gid;
-  d->shm_perm.cuid = (unsigned)s->shm_perm.cuid;
-  d->shm_perm.cgid = (unsigned)s->shm_perm.cgid;
-  d->shm_perm.mode = (unsigned)s->shm_perm.mode;
-  d->shm_perm.seq  = (unsigned short)s->shm_perm._seq;
-  d->shm_segsz     = (unsigned long long)s->shm_segsz;
-  d->shm_atime     = (long long)s->shm_atime;
-  d->shm_dtime     = (long long)s->shm_dtime;
-  d->shm_ctime     = (long long)s->shm_ctime;
-  d->shm_cpid      = (int)s->shm_cpid;
-  d->shm_lpid      = (int)s->shm_lpid;
-  d->shm_nattch    = (unsigned long long)(unsigned short)s->shm_nattch;  // macOS: short
-}
-
 // ---------------------------------------------------------------------------
 // Signal number translation (Linux -> macOS). They diverge badly above 6.
 // ---------------------------------------------------------------------------
@@ -2786,36 +2740,10 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   }
   case 197:                                                    // shmdt(addr)
     { int r = shmdt((const void*)a0); return r < 0 ? eret() : 0; }
-  case 195: {                                                  // shmctl(shmid, cmd, buf)
-    // IPC_RMID/IPC_SET/IPC_STAT share values 0/1/2 on both systems.
-    //
-    // IPC_STAT used to be refused here, on the reasoning that struct shmid_ds differs between
-    // Linux and macOS so garbage would be worse than an error. The premise was right and the
-    // conclusion was wrong: it is the ONE command Qt cannot do without, so refusing it left
-    // every QSharedMemory user dead anyway -- just with a better message.
-    //
-    //   QSharedMemoryPrivate::attach()  shmget -> shmat -> shmctl(IPC_STAT) to learn shm_segsz;
-    //                                   a failure here IS the failure, the mapping is discarded.
-    //   QSharedMemoryPrivate::detach()  shmctl(IPC_STAT) to read shm_nattch, and IPC_RMID only
-    //                                   when it hits 0. Report nattch wrong and every run leaks
-    //                                   a segment until the host's shmmni is exhausted.
-    //
-    // kate's SingleApplication guard is exactly this path: "SingleApplication: Unable to create
-    // block. QSharedMemory::UnknownError QSharedMemory::attach (shmctl): Function not
-    // implemented", after which kate exits without a window. 16990e1 forwarded shmget/shmat/
-    // shmdt and stopped one command short of making them useful (found by K3).
-    //
-    // So: translate. Field by field by name into the Linux shape -- see lx_shmid_put.
-    if ((int)a1 == 0 /*IPC_RMID*/) { int r = shmctl((int)a0, IPC_RMID, 0); return r < 0 ? eret() : 0; }
-    if ((int)a1 == 2 /*IPC_STAT*/) {
-      if (!a2) return -LX_EFAULT;
-      struct shmid_ds hs;
-      if (shmctl((int)a0, IPC_STAT, &hs) < 0) return eret();
-      lx_shmid_put((struct lx_shmid64_ds*)a2, &hs);
-      return 0;
-    }
-    return -LX_ENOSYS;                          // IPC_SET and the SHM_* extensions: nothing asks
-  }
+  // No guest-private SysV SHM ID registry exists. A raw numeric ID could name
+  // an unrelated macOS segment, and IPC_RMID would remove it. Refuse every
+  // command before touching host IPC; #194/#196/#197 need separate isolation.
+  case 195: return -LX_ENOSYS;                                 // shmctl
 
   case 190: return -LX_ENOSYS;                                 // semget: no private guest IPC namespace
   // A guest semid is a raw Darwin host-global ID here. Refuse before touching the semaphore
