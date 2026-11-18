@@ -15,7 +15,7 @@ This file records bounded behavior that has been implemented and tested. A dispa
 | 28 | `inotify_rm_watch` | `syscall/28-inotify-rm-watch` | In progress | Existing code returns success unconditionally; require truthful watch lifecycle or a defensible failure. |
 | 77 | `tee` | `syscall/77-tee` | Blocked: virtual pipe dependency | Existing code returns `ENOSYS`. Darwin pipe fds cannot be peeked (`MSG_PEEK` gives `ENOTSOCK`; `pread` gives `ESPIPE`); a correct implementation needs virtual pipe queue and readiness across read/write/dup/fork/exec. No code change or compatibility claim. |
 | 100 | `get_robust_list` | `syscall/100-get-robust-list` | In progress | Existing code returns `ENOSYS`; inspect `set_robust_list` and futex cleanup before claiming compatibility. |
-| 452 | `fchmodat2` | `syscall/452-fchmodat2` | In progress | Existing implementation covers common paths; audit flags, empty path, symlink and errno behavior before extending. |
+| 452 | `fchmodat2` | `syscall/452-fchmodat2` | Merged at `1286320` | Invalid flags return `EINVAL` without chmod; NULL path returns `EFAULT`; empty path with `AT_FDCWD` uses guest cwd. `./build.sh cli` and disposable static ARM64 guest test passed. Symlink, `O_PATH`, ownership and races remain unverified. |
 
 ## Already merged before this batch
 
