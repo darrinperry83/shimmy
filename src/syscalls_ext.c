@@ -3892,14 +3892,16 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return copy < 0 ? eret() : copy;
   }
   case 439: {                                                   // faccessat2(dfd, path, mode, flags)
+    char guest_path[PATH_MAX];
+    e = copy_guest_cstr(a1, guest_path, sizeof guest_path);
+    if (e < 0) return e;
     // AT_EMPTY_PATH + "" means "check the file the fd refers to". macOS faccessat() has no
     // AT_EMPTY_PATH, so resolve the fd's own path (F_GETPATH) and check that. systemd's
     // pin_callout_binary() does faccessat2(fd, "", X_OK, AT_EMPTY_PATH) on the freshly opened
     // systemd-executor binary; returning ENOENT here made manager_new() fail with -ENOENT and
     // froze PID 1 before it could start getty/dbus.
     if ((int)a3 & LX_AT_EMPTY_PATH) {
-      const char* p = (const char*)a1;
-      if (!p || !p[0]) {
+      if (!guest_path[0]) {
         int fd = (int)a0;
         if (fd == LX_AT_FDCWD) return ok0(faccessat(AT_FDCWD, ".", (int)a2, AT_EACCESS));
         char hp[PATH_MAX];
@@ -3909,7 +3911,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
         return 0;
       }
     }
-    e = resolve_at_nf((int)a0, (const char*)a1, host, sizeof host, &hdirfd,
+    e = resolve_at_nf((int)a0, guest_path, host, sizeof host, &hdirfd,
                       ((int)a3 & LX_AT_SYMLINK_NOFOLLOW) != 0);
     if (e < 0) return e;
     int hf = host_at_flags((int)a3);
