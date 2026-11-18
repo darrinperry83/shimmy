@@ -5490,12 +5490,25 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   // ---------- 216 mremap ----------
   case 216: {
     unsigned long old = a0; size_t olds = (size_t)a1, news = (size_t)a2;
-    int flags = (int)a3;
+    unsigned long flags = a3;
     const size_t PG = 16384;
-    size_t oldr = (olds + PG - 1) & ~(PG - 1), newr = (news + PG - 1) & ~(PG - 1);
-    if (!news) return -LX_EINVAL;
+    // Validate before changing any mapping. The clone form (old_size=0), FIXED,
+    // and DONTUNMAP need backing/protection metadata that this path does not keep.
+    if (!olds) return -LX_EOPNOTSUPP;
+    if (!news || (old & (PG - 1)) || (flags & ~1ul))
+      return (flags & ~1ul) ? -LX_EOPNOTSUPP : -LX_EINVAL;
+    if (olds > SIZE_MAX - (PG - 1) || news > SIZE_MAX - (PG - 1))
+      return -LX_EINVAL;
+    size_t oldr = (olds + PG - 1) & ~(PG - 1);
+    size_t newr = (news + PG - 1) & ~(PG - 1);
+    if (old > ULONG_MAX - oldr || old > ULONG_MAX - newr)
+      return -LX_EINVAL;
+    if (gmem_guest_range_mapped(old, oldr) != 0) return -LX_EFAULT;
     if (newr <= oldr) {
-      if (newr < oldr) gmem_munmap(old + newr, oldr - newr);
+      if (newr < oldr) {
+        long unmap = gmem_munmap(old + newr, oldr - newr);
+        if (unmap < 0) return unmap;
+      }
       return (long)old;
     }
     // GROW. Linux tries to extend the mapping IN PLACE first, and without MREMAP_MAYMOVE that is
@@ -5512,7 +5525,7 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     static int mr_v = -1;
     if (mr_v < 0) mr_v = getenv("RDVERBOSE") != 0;
     if (mr_v)
-      fprintf(stderr, "[mremap] grow %#lx %#zx -> %#zx flags=%#x\n", old, oldr, newr, flags);
+      fprintf(stderr, "[mremap] grow %#lx %#zx -> %#zx flags=%#lx\n", old, oldr, newr, flags);
     long ext = gmem_mmap(old + oldr, extlen, PROT_READ | PROT_WRITE,
                          LM_PRIVATE | LM_ANONYMOUS, -1, 0);
     if (ext >= 0 || ext <= -4096) {
