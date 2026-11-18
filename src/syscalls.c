@@ -5857,26 +5857,27 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
 
   // ---------- 179 sysinfo ----------
   case 179: {
-    struct linux_sysinfo* si = (struct linux_sysinfo*)a0;
-    if (!si) return -LX_EFAULT;
-    memset(si, 0, sizeof *si);
+    if (!a0) return -LX_EFAULT;
+    // Preserve the existing synthetic fields, but never write them through a
+    // guest address without the guest-memory ledger checking the destination.
+    struct linux_sysinfo si = {0};
     struct timespec up;
     clock_gettime(CLOCK_MONOTONIC, &up);
-    si->uptime = up.tv_sec;
+    si.uptime = up.tv_sec;
     uint64_t memsize = 0; size_t msz = sizeof memsize;
     if (sysctlbyname("hw.memsize", &memsize, &msz, 0, 0) != 0) memsize = 8ULL << 30;
     double la[3] = {0, 0, 0};
     if (getloadavg(la, 3) == 3)
-      for (int i = 0; i < 3; i++) si->loads[i] = (uint64_t)(la[i] * 65536.0);
-    si->mem_unit  = 1;
-    si->totalram  = memsize;
-    si->freeram   = memsize / 4;
-    si->sharedram = 0;
-    si->bufferram = 0;
-    si->totalswap = 0;
-    si->freeswap  = 0;
-    si->procs     = 1;
-    return 0;
+      for (int i = 0; i < 3; i++) si.loads[i] = (uint64_t)(la[i] * 65536.0);
+    si.mem_unit  = 1;
+    si.totalram  = memsize;
+    si.freeram   = memsize / 4;
+    si.sharedram = 0;
+    si.bufferram = 0;
+    si.totalswap = 0;
+    si.freeswap  = 0;
+    si.procs     = 1;
+    return gmem_guest_copyout_checked(a0, &si, sizeof si) == 0 ? 0 : -LX_EFAULT;
   }
 
   // ---------- 214 brk ----------
