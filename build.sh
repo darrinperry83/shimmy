@@ -27,7 +27,7 @@ CFLAGS="-arch arm64 -O2 -Wall -Wno-unused-parameter -I$SRC"
 srcsha() { cat "$SRC"/*.c "$SRC"/*.h "$SRC"/*.m third_party/*.m third_party/*.mm third_party/*.h third_party/spirv-cross/*.h third_party/spirv-cross/*.hpp build.sh 2>/dev/null | shasum -a256 | cut -d' ' -f1; }
 stamp()  { printf '%s %s\n' "$(srcsha)" "$(shasum -a256 "$1" | cut -d' ' -f1)" > "build/$1.srcsha"; }
 
-CORE="guest_ownership.c guest_cred_registry.c gmem.c guest_range_ledger.c elfload.c syscalls.c syscalls_ext.c inotify_watch.c signalfd_shim.c timerfd_shim.c posix_timer_shim.c pidfd_shim.c unix_outq_peer.c bootstrap.c net.c netlink_route_snapshot.c netlink_route_transport.c vdso.c fastcall.c hostcall_scoped.c drmasahi.c rdgpu_surface_handoff.c v4l2cam.c present_feedback.c snd_alsa.c coreaudio_host.c console.c vt.c evdev.c session_frame.c session_gpu_frame.c"
+CORE="guest_ownership.c guest_cred_registry.c gmem.c guest_range_ledger.c elfload.c syscalls.c syscalls_ext.c inotify_watch.c signalfd_shim.c timerfd_shim.c posix_timer_shim.c mqueue_core.c pidfd_shim.c unix_outq_peer.c bootstrap.c net.c netlink_route_snapshot.c netlink_route_transport.c vdso.c fastcall.c hostcall_scoped.c drmasahi.c rdgpu_surface_handoff.c v4l2cam.c present_feedback.c snd_alsa.c coreaudio_host.c console.c vt.c evdev.c session_frame.c session_gpu_frame.c"
 RDGPU="rdgpu_guest_syscall.c rdgpu_mock_gate.c rdgpu_virtual_carrier.c"
 
 build_third_party() {
