@@ -75,6 +75,8 @@ This file records bounded behavior that has been implemented and tested. A dispa
 | 283 | `membarrier` | `syscall/283-membarrier` | Squash merged at `f28b97d`; query-only | Reports zero supported barrier commands and rejects unsupported requests; it no longer falsely advertises cross-thread/global barriers. ARM64 guest probe and private Arch boot gate pass. A real guest thread rendezvous is still absent. |
 | 285 | `copy_file_range` | `syscall/285-copy-file-range` | Squash merged at `2ea99ee`; bounded subset | Same-filesystem regular files up to 1 MiB, checked guest offset pointers, flags, access modes, overlap, and short copies. Cross-filesystem, larger and concurrent offset use remain unsupported. ARM64 guest probe and private Arch boot gate pass. |
 | 267 | `syncfs` | `syscall/267-syncfs` | Squash merged at `f0d7dd7`; honest unsupported | Invalid fd returns `EBADF`; valid fd returns `ENOSYS` because Darwin `sync()` cannot guarantee Linux per-superblock writeback completion/errors. ARM64 guest probe and private Arch boot gate pass. |
+| 228 | `mlock` | `syscall/228-mlock` | Squash merged at `61e605a`; bounded subset | Eager lock of mapped guest pages up to 1 MiB, sharing validated behavior with `mlock2(flags=0)`. Host lock limits can differ from guest RLIMIT/CAP limits. Both ARM64 guest probes and private Arch boot gate pass. |
+| 84 | `sync_file_range` | `syscall/84-sync-file-range` | Squash merged at `f9ea4b6`; bounded subset | A valid zero-flag request performs Linux's no-op; range, fd, and flag errors are checked. Write/wait modes remain unsupported and no range durability is claimed. ARM64 guest probe and private Arch boot gate pass. |
 
 ## Already merged before this batch
 
@@ -97,6 +99,8 @@ The `restart_syscall` documentation/test change passed the focused ARM64 probe a
 The `migrate_pages`, `mlock2`, and `membarrier` squash merges passed a combined CLI build and all three disposable ARM64 guest probes on 2026-11-18. A new private Arch clone reached a fresh login prompt with both D-Bus broker processes settled. The clone copy reported permission errors on protected systemd fixture entries, so this is a boot smoke test of the resulting clone, not a complete filesystem fidelity check or GUI test. No installed rootfs was modified.
 
 The subsequent `copy_file_range` and `syncfs` merges passed a combined CLI build and their ARM64 guest probes. A separate fresh private Arch clone reached login with both D-Bus processes settled after these changes. The clone operation had the same protected-entry warnings; this does not prove GUI behavior, full filesystem semantics, or `syncfs` durability.
+
+The `mlock` and `sync_file_range` squash merges passed a combined CLI build, their ARM64 guest probes, and the existing `mlock2` regression probe. Another private Arch clone reached a fresh login prompt with both D-Bus processes settled. The clone operation again warned about protected fixture entries; no installed rootfs or live GUI was changed.
 
 ## Batch integration proof
 
