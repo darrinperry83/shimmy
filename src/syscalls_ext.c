@@ -2731,13 +2731,12 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   // Guest pointers may be host-addressable, but the host IPC namespace is not
   // guest-private. Direct attachment/removal remains unsafe until separately guarded.
   // A guest key must never resolve or create a segment in Darwin's host-wide
-  // SysV namespace. Leave #195/#196/#197 for their separate ID/attachment
-  // safeguards; refusing #194 alone does not isolate those companion calls.
+  // SysV namespace. #196 also refuses raw attachments, while #195/#197
+  // require separate ID/attachment safeguards; this family is not isolated.
   case 194: return -LX_ENOSYS;                                 // shmget
-  case 196: {                                                  // shmat(shmid, addr, flag)
-    void* r = shmat((int)a0, (const void*)a1, (int)a2);
-    return (r == (void*)-1) ? eret() : (long)(uintptr_t)r;
-  }
+  // A numeric guest ID must not attach a same-user segment from Darwin's
+  // global SysV namespace. No instance-scoped ID registry exists yet.
+  case 196: return -LX_ENOSYS;                                 // shmat
   case 197:                                                    // shmdt(addr)
     { int r = shmdt((const void*)a0); return r < 0 ? eret() : 0; }
   // No guest-private SysV SHM ID registry exists. A raw numeric ID could name
