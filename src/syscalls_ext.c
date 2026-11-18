@@ -2768,16 +2768,18 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   // may reach host msgctl until all message syscalls use guest-scoped IDs.
   case 187: return -LX_ENOSYS;                                   // msgctl
 
-  // SysV shared memory is still forwarded to the host. macOS implements it natively, and Qt's
-  // QSharedMemory has used that path. SysV semaphores are different: guest keys and raw IDs
-  // would address the host-global IPC namespace. semget is refused below until the semaphore
-  // family has an instance-scoped key/ID/permission model. The ID-taking companion calls still
-  // need their own safeguards.
+  // Guest SysV keys must not resolve or create host-global objects. The
+  // key-taking shmget and semget calls are refused, but their companion
+  // ID-taking calls below still need guest-scoped ownership checks. Qt
+  // QSharedMemory and QSystemSemaphore may receive ENOSYS until a private
+  // IPC namespace and lifecycle are implemented.
   //
-  // Forwarding is safe here in a way it would not be under a VM: guest pointers ARE host
-  // pointers, so an address returned by the host shmat() is directly usable by the guest.
-  case 194:                                                    // shmget(key, size, flag)
-    { int r = shmget((key_t)a0, (size_t)a1, (int)a2); return r < 0 ? eret() : r; }
+  // Guest pointers may be host-addressable, but the host IPC namespace is not
+  // guest-private. Direct attachment/removal remains unsafe until separately guarded.
+  // A guest key must never resolve or create a segment in Darwin's host-wide
+  // SysV namespace. Leave #195/#196/#197 for their separate ID/attachment
+  // safeguards; refusing #194 alone does not isolate those companion calls.
+  case 194: return -LX_ENOSYS;                                 // shmget
   case 196: {                                                  // shmat(shmid, addr, flag)
     void* r = shmat((int)a0, (const void*)a1, (int)a2);
     return (r == (void*)-1) ? eret() : (long)(uintptr_t)r;
