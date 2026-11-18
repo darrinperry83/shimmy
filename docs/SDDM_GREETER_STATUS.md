@@ -168,3 +168,25 @@ An A/B boot masked the clone's noisy `sshd.service`, which had been logging
 unsupported masked `ppoll` calls and inflating the test journal. SDDM still
 stalled with 44 bytes queued, so SSH log volume alone did not cause the parent
 wait. The SSH mask was removed from the clone afterward.
+
+## 18 November: greeter reaches DRM, then rejects logind's handed card
+
+In a later disposable-root on-screen boot, clone-only diagnostic overrides
+skipped SDDM's second D-Bus registration call and prestarted
+`user-runtime-dir@962.service`. A clone-only `busctl StartUnit` probe also
+succeeded. Logind created a real `sddm` greeter session and KWin started, so
+this run advanced beyond the earlier PAM/Wayland-socket failure. These
+overrides are diagnostic and are **not** a normal greeter startup fix.
+
+With `RDDRM_TRACE=1`, fd identity and peer-path logging showed that
+`systemd-logind` opened the card (peer `drm-event-<logind-pid>-0`) and KWin
+received that same open description as fd 23. KWin opened a new card fd,
+obtained a nonzero magic token, then called `AUTH_MAGIC` on the handed fd.
+Shimmy returned `EACCES` because KWin's process-local `g_master_owner_fd`
+was unset. A test-only attempt to claim the session master in KWin returned
+`EBUSY`: another process already held `drm-master.lock`. It was reverted;
+blindly claiming a second master would violate the existing exclusive-lock
+and host frame-authentication design. The proper integration must preserve
+or broker the existing master capability across logind's `SCM_RIGHTS` fd
+handoff, and must still reject an unrelated card fd or producer. The last
+on-screen run did not display a usable greeter.

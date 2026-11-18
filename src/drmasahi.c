@@ -560,12 +560,16 @@ static void drm_master_release(void) {
 }
 
 static long drm_master_ioctl(int fd, unsigned nr);
+static int tracing(void);
 
 static long drm_magic_ioctl(int fd, unsigned nr, uint32_t *magic) {
   if (!magic || drm_minor_of_fd(fd) != 0) return -EINVAL;
-  unsigned long long dev, ino;
+  unsigned long long dev = 0, ino = 0;
   if (drm_fd_identity(fd, &dev, &ino)) return -EBADF;
   if (nr == DRM_NR_AUTH_MAGIC) {
+    if (tracing()) fprintf(stderr,
+      "[drm] auth pid=%d fd=%d identity=%llx:%llx magic=%u master_fd=%d master_lock=%d\n",
+      getpid(), fd, dev, ino, *magic, g_master_owner_fd, g_master_lock_fd);
     // libdrm's drmIsMaster(fd) probes AUTH_MAGIC with magic=0. Linux returns
     // EINVAL to its master and EACCES to another open. The first card open in
     // the active native session owns master once it acquires our exclusive
@@ -577,7 +581,10 @@ static long drm_magic_ioctl(int fd, unsigned nr, uint32_t *magic) {
     unsigned long long master_dev, master_ino;
     if (g_master_owner_fd < 0 ||
         drm_fd_identity(g_master_owner_fd, &master_dev, &master_ino) ||
-        master_dev != dev || master_ino != ino) return -EACCES;
+        master_dev != dev || master_ino != ino) {
+      if (tracing()) fprintf(stderr, "[drm] auth rejected: no matching local master fd\n");
+      return -EACCES;
+    }
     if (*magic == 0) return -EINVAL;
   }
   pthread_mutex_lock(&g_magic_lock);
@@ -643,12 +650,16 @@ static long drm_master_ioctl(int fd, unsigned nr) {
     if (lockfd < 0) return -errno;
     if (flock(lockfd, LOCK_EX | LOCK_NB)) {
       int err = errno;
+      if (tracing()) fprintf(stderr, "[drm] master lock busy pid=%d fd=%d errno=%d\n",
+                             getpid(), fd, err);
       close(lockfd);
       return err == EWOULDBLOCK ? -16 : -err;
     }
     g_master_lock_fd = shim_fd_reserve ? shim_fd_reserve(lockfd) : lockfd;
   }
   g_master_owner_fd = fd;
+  if (tracing()) fprintf(stderr, "[drm] master claimed pid=%d fd=%d lockfd=%d\n",
+                         getpid(), fd, g_master_lock_fd);
   pid_t owner = 0;
   session_gpu_epoch epoch;
   int native_child = gpu_session_child(&owner, &epoch);
@@ -1172,8 +1183,9 @@ void drm_register_fd_path(int fd, const char* path) {
   // The virtual card fd travels through logind and D-Bus via SCM_RIGHTS. Record its pipe
   // identity in this boot's private namespace so the receiving Shimmy process can classify it.
   const char* group = getenv("RDSOCKETGROUP");
-  unsigned long long dev, ino;
-  if (group && *group && !drm_fd_identity(fd, &dev, &ino)) {
+  unsigned long long dev = 0, ino = 0;
+  int has_identity = !drm_fd_identity(fd, &dev, &ino);
+  if (group && *group && has_identity) {
     char name[PATH_MAX];
     if (snprintf(name, sizeof name, "%s/drm-fd-%llx-%llx", group, dev, ino) < (int)sizeof name) {
       int meta = open(name, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
@@ -1185,7 +1197,14 @@ void drm_register_fd_path(int fd, const char* path) {
       }
     }
   }
-  if (tracing()) fprintf(stderr, "[drm] opened render node as fd %d\n", fd);
+  if (tracing()) {
+    struct sockaddr_un peer = {0};
+    socklen_t peer_len = sizeof peer;
+    int has_peer = !getpeername(fd, (struct sockaddr *)&peer, &peer_len) &&
+                   peer.sun_family == AF_UNIX;
+    fprintf(stderr, "[drm] register pid=%d fd=%d minor=%d identity=%llx:%llx peer=%s\n",
+            getpid(), fd, minor, dev, ino, has_peer ? peer.sun_path : "(none)");
+  }
 }
 
 void drm_register_fd(int fd) { drm_register_fd_path(fd, "/dev/dri/renderD128"); }
