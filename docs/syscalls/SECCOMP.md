@@ -1,0 +1,9 @@
+# `seccomp` (ARM64 syscall 277): blocked by syscall-entry policy enforcement
+
+The `seccomp(operation, flags, args)` syscall installs strict or classic-BPF syscall filters and also exposes action and notification queries. Linux applies an installed filter on **every later syscall**, including calls made by child threads and inherited across fork/exec; actions can deny with an errno, kill, trap with `SIGSYS`, trace, log, or send a user notification. A successful install is a security promise, not an advisory hint.
+
+Shimmy currently returns `ENOSYS` for syscall 277 in `src/syscalls_ext.c`. The `prctl` route reports `PR_GET_SECCOMP` as disabled and rejects `PR_SET_SECCOMP`; `PR_SET_NO_NEW_PRIVS` is currently a no-op success. The central guest syscall route in `src/shim.c` has no filter-evaluation gate before dispatch, and the guest signal model does not yet provide all `SIGSYS`/notification behavior. Returning success for `SECCOMP_SET_MODE_STRICT` or `SECCOMP_SET_MODE_FILTER` would let the guest believe it is sandboxed when it is not. The action/notification queries must not advertise facilities that cannot be enforced.
+
+Keep syscall 277 at `ENOSYS` until Shimmy has per-thread/process filter state, classic-BPF verification and evaluation over `struct seccomp_data`, action precedence, thread synchronization, fork/exec inheritance, trap/signal and user-notification plumbing, and enforcement before every guest syscall path. Validate with disposable ARM64 guest programs that install a filter then attempt both allowed and blocked calls, including threads, fork/exec, signal actions, and the `prctl` route. The separate `PR_SET_NO_NEW_PRIVS` no-op deserves its own security review.
+
+Primary sources: [Linux `kernel/seccomp.c`](https://github.com/torvalds/linux/blob/master/kernel/seccomp.c) and [Linux UAPI `include/uapi/linux/seccomp.h`](https://github.com/torvalds/linux/blob/master/include/uapi/linux/seccomp.h).
