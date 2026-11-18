@@ -4486,16 +4486,15 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
       return r;
     if ((r = resolve_f((int)a2, new_path, RSV_NOFOLLOW, host2, sizeof host2, g2, sizeof g2)) < 0)
       return r;
-    // Landlock: rename removes the old name and creates the new one. REFER is
-    // required on both parent directories, plus the matching REMOVE_* right on
-    // the old inode's type.
+    // Landlock: rename removes the old name and creates the new one. Same-
+    // directory renames need no REFER (Linux's current_check_refer_path).
     {
-      uint64_t acc = LL_FS_REFER;
-      struct stat st;
-      if (lstat(host, &st) == 0)
-        acc |= S_ISDIR(st.st_mode) ? LL_FS_REMOVE_DIR : LL_FS_REMOVE_FILE;
-      if ((r = landlock_check(gabs, acc)) < 0) return r;
-      if ((r = landlock_check(g2, LL_FS_REFER)) < 0) return r;
+      struct stat st_old, st_new;
+      int old_is_dir = lstat(host, &st_old) == 0 && S_ISDIR(st_old.st_mode);
+      int new_exists = lstat(host2, &st_new) == 0;
+      int new_is_dir = new_exists && S_ISDIR(st_new.st_mode);
+      if ((r = landlock_check_rename(gabs, g2, old_is_dir, new_exists, new_is_dir)) < 0)
+        return r;
     }
     if (cgroup_under(gabs) || cgroup_under(g2)) {
       if (cgroup_is_root(gabs)) return -LX_EBUSY;             // never rename the root cgroup

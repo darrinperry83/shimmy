@@ -161,6 +161,35 @@ long landlock_check(const char *path, uint64_t access) {
   return 0;
 }
 
+// Both paths are canonical and start with '/'. Compare their parent directories.
+static int same_parent_dir(const char *a, const char *b) {
+  const char *pa = strrchr(a, '/');
+  const char *pb = strrchr(b, '/');
+  if (!pa || !pb) return 0;
+  size_t la = (size_t)(pa - a);
+  size_t lb = (size_t)(pb - b);
+  if (la != lb) return 0;
+  return la == 0 || memcmp(a, b, la) == 0;
+}
+
+long landlock_check_rename(const char *old_path, const char *new_path,
+                           int old_is_dir, int new_exists, int new_is_dir) {
+  if (g_domain_n == 0) return 0;
+  uint64_t old_remove = old_is_dir ? LL_FS_REMOVE_DIR : LL_FS_REMOVE_FILE;
+  uint64_t old_make   = old_is_dir ? LL_FS_MAKE_DIR   : LL_FS_MAKE_REG;
+  uint64_t new_remove = new_exists ? (new_is_dir ? LL_FS_REMOVE_DIR
+                                                 : LL_FS_REMOVE_FILE)
+                                   : 0;
+
+  if (same_parent_dir(old_path, new_path)) {
+    // No reparenting: Linux does not require REFER for a same-directory rename.
+    return landlock_check(old_path, old_remove | old_make | new_remove);
+  }
+  long r = landlock_check(old_path, LL_FS_REFER | old_remove);
+  if (r < 0) return r;
+  return landlock_check(new_path, LL_FS_REFER | old_make | new_remove);
+}
+
 int landlock_ruleset_fd(int fd) { return find_ruleset(fd) != NULL; }
 
 void landlock_fd_closed(int fd) {

@@ -64,6 +64,15 @@ long landlock_restrict_self(int ruleset_fd);
 // immediately when no domain is active or access is empty.
 long landlock_check(const char *path, uint64_t access);
 
+// Enforce a rename/link. old_path/new_path are canonical guest-absolute paths;
+// old_is_dir describes the source inode; new_exists/new_is_dir describe the
+// destination (0 when it does not exist yet). Matches Linux's current_check_refer_path():
+// a same-directory rename needs no REFER (only REMOVE_* on the source and
+// MAKE_* of the source type, plus REMOVE_* on an existing destination), while a
+// cross-directory rename additionally requires REFER on both parents.
+long landlock_check_rename(const char *old_path, const char *new_path,
+                           int old_is_dir, int new_exists, int new_is_dir);
+
 // 1 when `fd` is a live ruleset fd (for close/dup bookkeeping).
 int landlock_ruleset_fd(int fd);
 // Drop any ruleset registry entry for `fd` (called from close()).

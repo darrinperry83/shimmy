@@ -17,6 +17,7 @@ static long sc(long nr, long a, long b, long c, long d) {
 
 #define SYS_mkdirat   34
 #define SYS_openat    56
+#define SYS_renameat  38
 #define SYS_write     64
 #define SYS_exit      93
 #define SYS_ll_create 444
@@ -35,6 +36,8 @@ static long sc(long nr, long a, long b, long c, long d) {
 #define LL_READ_FILE   (1ULL << 2)
 #define LL_WRITE_FILE  (1ULL << 1)
 #define LL_READ_DIR    (1ULL << 3)
+#define LL_REMOVE_FILE (1ULL << 5)
+#define LL_MAKE_REG    (1ULL << 8)
 #define LL_TRUNCATE    (1ULL << 14)
 #define LL_RULE_PATH_BENEATH 1
 #define LL_CREATE_VERSION 1
@@ -70,7 +73,8 @@ void _start(void) {
   if (rw_fd < 0) done(6);
 
   struct ruleset_attr attr = {0};
-  attr.handled_access_fs = LL_READ_FILE | LL_WRITE_FILE | LL_READ_DIR | LL_TRUNCATE;
+  attr.handled_access_fs = LL_READ_FILE | LL_WRITE_FILE | LL_READ_DIR |
+                           LL_REMOVE_FILE | LL_MAKE_REG | LL_TRUNCATE;
   attr.handled_access_net = 0;
   long ruleset_fd = sc(SYS_ll_create, (long)&attr, sizeof attr, 0, 0);
   if (ruleset_fd < 0) done(7);
@@ -82,7 +86,8 @@ void _start(void) {
     done(8);
 
   struct path_beneath_attr rw_rule = {0};
-  rw_rule.allowed_access = LL_READ_FILE | LL_WRITE_FILE | LL_READ_DIR | LL_TRUNCATE;
+  rw_rule.allowed_access = LL_READ_FILE | LL_WRITE_FILE | LL_READ_DIR |
+                           LL_REMOVE_FILE | LL_MAKE_REG | LL_TRUNCATE;
   rw_rule.parent_fd = (int)rw_fd;
   if (sc(SYS_ll_add, ruleset_fd, LL_RULE_PATH_BENEATH, (long)&rw_rule, 0) != 0)
     done(9);
@@ -104,6 +109,12 @@ void _start(void) {
   long readable = sc(SYS_openat, AT_FDCWD, (long)"/readable.txt", O_RDONLY, 0);
   if (readable < 0) done(14);
   if (sc(57, readable, 0, 0, 0) != 0) done(15);
+
+  /* 4. Same-directory rename needs no REFER (Linux current_check_refer_path):
+   *    REMOVE_FILE on the source + MAKE_REG of the source type are enough. */
+  if (sc(SYS_renameat, AT_FDCWD, (long)"/landlock-rw/inside.txt",
+         AT_FDCWD, (long)"/landlock-rw/renamed.txt") != 0)
+    done(16);
 
   done(0);
 }

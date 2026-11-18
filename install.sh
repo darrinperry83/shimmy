@@ -145,13 +145,13 @@ printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > "$ROOTFS/etc/resolv.conf"
 mkdir -p "$ROOTFS/dev/shm" "$ROOTFS/dev/dri"
 
 SHIM_CLI="$HERE/shim_cli"
-run_pacman() { RDUID0=1 "$SHIM_CLI" "$ROOTFS" /usr/bin/pacman "$@" --disable-sandbox; }
+run_pacman() { RDUID0=1 "$SHIM_CLI" "$ROOTFS" /usr/bin/pacman "$@"; }
 
 # --- 6. initialize + trust the Arch ARM keyring (the stock pacman.conf flow) --
-# The tarball's pacman.conf already defaults to SigLevel = Required
-# DatabaseOptional (Arch ARM's documented policy: signed packages, unsigned
-# databases), and its comment instructs this exact bootstrap. The shim serves
+# The stock pacman.conf comment instructs this exact bootstrap. The shim serves
 # /etc/mtab through /proc/self/mounts, so no hand-written mount table is needed.
+# pacman's Landlock + seccomp download sandbox is implemented, so no
+# --disable-sandbox is needed either.
 echo "==> initializing the pacman keyring"
 RDUID0=1 "$SHIM_CLI" "$ROOTFS" /usr/bin/pacman-key --init
 RDUID0=1 "$SHIM_CLI" "$ROOTFS" /usr/bin/pacman-key --populate archlinuxarm

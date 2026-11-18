@@ -3693,15 +3693,14 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     e  = resolve_at_nf_g((int)a2, new_guest, host2, sizeof host2, &hdirfd2, 1,
                          g_new, sizeof g_new);
     if (e < 0) return e;
-    // Landlock: same shape as renameat — REFER on both parents, REMOVE_* on the
-    // old inode's type.
+    // Landlock: same shape as renameat — same-directory renames need no REFER.
     {
-      uint64_t acc = LL_FS_REFER;
-      struct stat st;
-      if (lstat(host, &st) == 0)
-        acc |= S_ISDIR(st.st_mode) ? LL_FS_REMOVE_DIR : LL_FS_REMOVE_FILE;
-      if ((e = landlock_check(g_old, acc)) < 0) return e;
-      if ((e = landlock_check(g_new, LL_FS_REFER)) < 0) return e;
+      struct stat st_old, st_new;
+      int old_is_dir = lstat(host, &st_old) == 0 && S_ISDIR(st_old.st_mode);
+      int new_exists = lstat(host2, &st_new) == 0;
+      int new_is_dir = new_exists && S_ISDIR(st_new.st_mode);
+      if ((e = landlock_check_rename(g_old, g_new, old_is_dir, new_exists, new_is_dir)) < 0)
+        return e;
     }
     if (flags == 0) return ok0(renameat(hdirfd, host, hdirfd2, host2));
 #ifdef RENAME_EXCL
