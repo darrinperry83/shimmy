@@ -37,8 +37,9 @@ def main():
         if result.returncode or "GUEST_FCHMODAT2_OK" not in result.stdout:
             raise RuntimeError(f"guest failed: rc={result.returncode}\n"
                                f"{result.stdout}\n{result.stderr[-2000:]}")
-        print("GUEST_FCHMODAT2_OK: invalid flags leave mode unchanged; regular, "
-              "fd-empty and cwd-empty chmod; empty/no-flag and NULL errno")
+        print("GUEST_FCHMODAT2_OK: invalid flags and unmapped guest paths leave "
+              "modes unchanged; regular, fd-empty and cwd-empty chmod; "
+              "empty/no-flag and NULL errno")
 
 
 if __name__ == "__main__":

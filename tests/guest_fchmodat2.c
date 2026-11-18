@@ -42,6 +42,13 @@ int main(void) {
         !mode_is(".", 0700)) return 9;
     if (syscall(SYS_fchmodat2, AT_FDCWD, NULL, 0700, 0) != -1 || errno != EFAULT)
         return 10;
+    // A non-null unmapped guest address must not be read by the empty-path
+    // shortcut or passed raw to the resolver, nor change either inode.
+    const char *bad = (const char *)(unsigned long)3;
+    if (syscall(SYS_fchmodat2, fd, bad, 0777, AT_EMPTY_PATH) != -1 ||
+        errno != EFAULT || !mode_is(file, 0640)) return 11;
+    if (syscall(SYS_fchmodat2, AT_FDCWD, bad, 0777, 0) != -1 ||
+        errno != EFAULT || !mode_is(".", 0700)) return 12;
     puts("GUEST_FCHMODAT2_OK");
     return 0;
 }

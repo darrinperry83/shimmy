@@ -4087,11 +4087,15 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     // host_at_flags silently ignores them, turning an invalid request into a chmod.
     if (a3 & ~(unsigned long)(LX_AT_EMPTY_PATH | LX_AT_SYMLINK_NOFOLLOW))
       return -LX_EINVAL;
-    if (!a1) return -LX_EFAULT;
+    // The empty-path fast path and the resolver both need an owned snapshot:
+    // neither may dereference an unchecked guest address before chmod.
+    char guest_path[PATH_MAX];
+    e = copy_guest_cstr(a1, guest_path, sizeof guest_path);
+    if (e < 0) return e;
     // AT_EMPTY_PATH + empty path == "chmod the dirfd itself". systemd's executor uses this while
     // setting up a service's RuntimeDirectory; the generic resolve below fails ENOENT on an empty
     // path and the executor then exits 233 (EXIT_RUNTIME_DIRECTORY), failing the unit.
-    if ((a3 & LX_AT_EMPTY_PATH) && !((const char*)a1)[0]) {
+    if ((a3 & LX_AT_EMPTY_PATH) && !guest_path[0]) {
       // AT_FDCWD means the guest's current directory, which need not equal the host cwd.
       if ((int)a0 == LX_AT_FDCWD) {
         e = resolve_at_nf(LX_AT_FDCWD, ".", host, sizeof host, &hdirfd, 0);
@@ -4100,7 +4104,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
       }
       return ok0(fchmod((int)a0, (mode_t)a2));
     }
-    e = resolve_at_nf((int)a0, (const char*)a1, host, sizeof host, &hdirfd,
+    e = resolve_at_nf((int)a0, guest_path, host, sizeof host, &hdirfd,
                       ((int)a3 & LX_AT_SYMLINK_NOFOLLOW) != 0);
     if (e < 0) return e;
     return ok0(fchmodat(hdirfd, host, (mode_t)a2, host_at_flags((int)a3)));
