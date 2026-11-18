@@ -12,7 +12,7 @@
   "header_sha256": "9ec1faddab5c363614b166ee7eed3f7723529e3a32312aad14fc6d0df5204354",
   "method": "inventory.py case-label scan plus manually reviewed source-risk flags; no guest ABI test",
   "schema_version": 1,
-  "source_commit": "0231b26c3d628234e9fb16958819bb7312a26b53",
+  "source_commit": "28f9499bc3a227e50dc400b5412c867c64ea585d",
   "source_dirty_at_scan": false,
   "syscalls": [
     {
@@ -22,7 +22,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1465,
+          "line": 1466,
           "tier": "extended"
         }
       ],
@@ -38,7 +38,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1466,
+          "line": 1467,
           "tier": "extended"
         }
       ],
@@ -54,7 +54,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1467,
+          "line": 1468,
           "tier": "extended"
         }
       ],
@@ -70,7 +70,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1468,
+          "line": 1469,
           "tier": "extended"
         }
       ],
@@ -86,7 +86,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1469,
+          "line": 1470,
           "tier": "extended"
         }
       ],
@@ -102,7 +102,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1470,
+          "line": 1471,
           "tier": "extended"
         }
       ],
@@ -118,7 +118,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1470,
+          "line": 1471,
           "tier": "extended"
         }
       ],
@@ -134,7 +134,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1470,
+          "line": 1471,
           "tier": "extended"
         }
       ],
@@ -150,7 +150,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1481,
+          "line": 1482,
           "tier": "extended"
         }
       ],
@@ -166,7 +166,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1481,
+          "line": 1482,
           "tier": "extended"
         }
       ],
@@ -182,7 +182,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1481,
+          "line": 1482,
           "tier": "extended"
         }
       ],
@@ -198,7 +198,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1492,
+          "line": 1493,
           "tier": "extended"
         }
       ],
@@ -214,7 +214,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1492,
+          "line": 1493,
           "tier": "extended"
         }
       ],
@@ -230,7 +230,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1492,
+          "line": 1493,
           "tier": "extended"
         }
       ],
@@ -246,7 +246,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1502,
+          "line": 1503,
           "tier": "extended"
         }
       ],
@@ -262,7 +262,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1502,
+          "line": 1503,
           "tier": "extended"
         }
       ],
@@ -278,7 +278,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1502,
+          "line": 1503,
           "tier": "extended"
         }
       ],
@@ -310,7 +310,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1510,
+          "line": 1511,
           "tier": "extended"
         }
       ],
@@ -390,7 +390,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1511,
+          "line": 1512,
           "tier": "extended"
         }
       ],
@@ -406,7 +406,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1522,
+          "line": 1523,
           "tier": "extended"
         }
       ],
@@ -422,7 +422,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1529,
+          "line": 1530,
           "tier": "extended"
         }
       ],
@@ -438,7 +438,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1551,
+          "line": 1552,
           "tier": "extended"
         }
       ],
@@ -454,7 +454,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1557,
+          "line": 1558,
           "tier": "extended"
         }
       ],
@@ -486,7 +486,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1558,
+          "line": 1559,
           "tier": "extended"
         }
       ],
@@ -502,7 +502,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1572,
+          "line": 1573,
           "tier": "extended"
         }
       ],
@@ -534,7 +534,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1583,
+          "line": 1584,
           "tier": "extended"
         }
       ],
@@ -582,7 +582,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1611,
+          "line": 1612,
           "tier": "extended"
         }
       ],
@@ -630,7 +630,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1618,
+          "line": 1619,
           "tier": "extended"
         }
       ],
@@ -646,7 +646,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1626,
+          "line": 1627,
           "tier": "extended"
         }
       ],
@@ -662,7 +662,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1667,
+          "line": 1668,
           "tier": "extended"
         }
       ],
@@ -678,7 +678,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1668,
+          "line": 1669,
           "tier": "extended"
         }
       ],
@@ -694,7 +694,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1673,
+          "line": 1674,
           "tier": "extended"
         }
       ],
@@ -742,7 +742,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1674,
+          "line": 1675,
           "tier": "extended"
         }
       ],
@@ -758,7 +758,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1675,
+          "line": 1676,
           "tier": "extended"
         }
       ],
@@ -774,7 +774,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1676,
+          "line": 1677,
           "tier": "extended"
         }
       ],
@@ -790,7 +790,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1677,
+          "line": 1678,
           "tier": "extended"
         }
       ],
@@ -806,7 +806,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1683,
+          "line": 1684,
           "tier": "extended"
         }
       ],
@@ -822,7 +822,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1704,
+          "line": 1705,
           "tier": "extended"
         }
       ],
@@ -870,7 +870,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1710,
+          "line": 1711,
           "tier": "extended"
         }
       ],
@@ -886,7 +886,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1711,
+          "line": 1712,
           "tier": "extended"
         },
         {
@@ -907,7 +907,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1712,
+          "line": 1713,
           "tier": "extended"
         }
       ],
@@ -1035,7 +1035,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1715,
+          "line": 1716,
           "tier": "extended"
         }
       ],
@@ -1051,7 +1051,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1758,
+          "line": 1759,
           "tier": "extended"
         }
       ],
@@ -1099,7 +1099,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1837,
+          "line": 1838,
           "tier": "extended"
         }
       ],
@@ -1115,7 +1115,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1838,
+          "line": 1839,
           "tier": "extended"
         }
       ],
@@ -1131,7 +1131,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1888,
+          "line": 1889,
           "tier": "extended"
         }
       ],
@@ -1147,7 +1147,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1943,
+          "line": 1944,
           "tier": "extended"
         }
       ],
@@ -1179,7 +1179,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1946,
+          "line": 1947,
           "tier": "extended"
         }
       ],
@@ -1195,7 +1195,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1947,
+          "line": 1948,
           "tier": "extended"
         }
       ],
@@ -1211,7 +1211,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1948,
+          "line": 1949,
           "tier": "extended"
         }
       ],
@@ -1227,7 +1227,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1952,
+          "line": 1953,
           "tier": "extended"
         }
       ],
@@ -1243,7 +1243,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1968,
+          "line": 1969,
           "tier": "extended"
         }
       ],
@@ -1259,7 +1259,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1969,
+          "line": 1970,
           "tier": "extended"
         }
       ],
@@ -1275,7 +1275,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1970,
+          "line": 1971,
           "tier": "extended"
         }
       ],
@@ -1291,7 +1291,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 1971,
+          "line": 1972,
           "tier": "extended"
         }
       ],
@@ -1307,7 +1307,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2018,
+          "line": 2019,
           "tier": "extended"
         }
       ],
@@ -1323,7 +1323,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2019,
+          "line": 2020,
           "tier": "extended"
         }
       ],
@@ -1339,7 +1339,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2036,
+          "line": 2037,
           "tier": "extended"
         }
       ],
@@ -1355,7 +1355,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2037,
+          "line": 2038,
           "tier": "extended"
         }
       ],
@@ -1403,7 +1403,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2049,
+          "line": 2050,
           "tier": "extended"
         }
       ],
@@ -1435,7 +1435,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2103,
+          "line": 2104,
           "tier": "extended"
         }
       ],
@@ -1483,7 +1483,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2104,
+          "line": 2105,
           "tier": "extended"
         }
       ],
@@ -1499,7 +1499,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2105,
+          "line": 2106,
           "tier": "extended"
         }
       ],
@@ -1515,7 +1515,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2107,
+          "line": 2108,
           "tier": "extended"
         }
       ],
@@ -1531,7 +1531,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2117,
+          "line": 2118,
           "tier": "extended"
         }
       ],
@@ -1547,7 +1547,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2133,
+          "line": 2134,
           "tier": "extended"
         }
       ],
@@ -1563,7 +1563,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2133,
+          "line": 2134,
           "tier": "extended"
         }
       ],
@@ -1579,7 +1579,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2133,
+          "line": 2134,
           "tier": "extended"
         }
       ],
@@ -1595,7 +1595,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2134,
+          "line": 2135,
           "tier": "extended"
         }
       ],
@@ -1611,7 +1611,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2135,
+          "line": 2136,
           "tier": "extended"
         }
       ],
@@ -1627,7 +1627,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2136,
+          "line": 2137,
           "tier": "extended"
         }
       ],
@@ -1643,7 +1643,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2137,
+          "line": 2138,
           "tier": "extended"
         }
       ],
@@ -1659,7 +1659,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2138,
+          "line": 2139,
           "tier": "extended"
         }
       ],
@@ -1675,7 +1675,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2141,
+          "line": 2142,
           "tier": "extended"
         }
       ],
@@ -1739,7 +1739,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2142,
+          "line": 2143,
           "tier": "extended"
         }
       ],
@@ -1755,7 +1755,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2153,
+          "line": 2154,
           "tier": "extended"
         }
       ],
@@ -1771,7 +1771,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2154,
+          "line": 2155,
           "tier": "extended"
         }
       ],
@@ -1787,7 +1787,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2167,
+          "line": 2168,
           "tier": "extended"
         }
       ],
@@ -1803,7 +1803,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2186,
+          "line": 2187,
           "tier": "extended"
         }
       ],
@@ -1819,7 +1819,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2196,
+          "line": 2197,
           "tier": "extended"
         }
       ],
@@ -1867,7 +1867,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2207,
+          "line": 2208,
           "tier": "extended"
         }
       ],
@@ -1883,7 +1883,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2208,
+          "line": 2209,
           "tier": "extended"
         }
       ],
@@ -1899,7 +1899,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2216,
+          "line": 2217,
           "tier": "extended"
         }
       ],
@@ -1915,7 +1915,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2225,
+          "line": 2226,
           "tier": "extended"
         }
       ],
@@ -1931,7 +1931,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2239,
+          "line": 2240,
           "tier": "extended"
         }
       ],
@@ -1963,7 +1963,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2248,
+          "line": 2249,
           "tier": "extended"
         }
       ],
@@ -1979,7 +1979,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2248,
+          "line": 2249,
           "tier": "extended"
         }
       ],
@@ -1995,7 +1995,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2271,
+          "line": 2272,
           "tier": "extended"
         }
       ],
@@ -2011,7 +2011,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2272,
+          "line": 2273,
           "tier": "extended"
         }
       ],
@@ -2059,7 +2059,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2275,
+          "line": 2276,
           "tier": "extended"
         }
       ],
@@ -2080,7 +2080,7 @@
         },
         {
           "file": "src/syscalls_ext.c",
-          "line": 2283,
+          "line": 2284,
           "tier": "extended"
         }
       ],
@@ -2096,7 +2096,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2284,
+          "line": 2285,
           "tier": "extended"
         }
       ],
@@ -2128,7 +2128,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2294,
+          "line": 2295,
           "tier": "extended"
         }
       ],
@@ -2144,7 +2144,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2306,
+          "line": 2307,
           "tier": "extended"
         }
       ],
@@ -2160,7 +2160,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2319,
+          "line": 2320,
           "tier": "extended"
         }
       ],
@@ -2176,7 +2176,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2322,
+          "line": 2323,
           "tier": "extended"
         }
       ],
@@ -2192,7 +2192,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2323,
+          "line": 2324,
           "tier": "extended"
         }
       ],
@@ -2208,7 +2208,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2324,
+          "line": 2325,
           "tier": "extended"
         }
       ],
@@ -2224,7 +2224,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2325,
+          "line": 2326,
           "tier": "extended"
         }
       ],
@@ -2240,7 +2240,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2326,
+          "line": 2327,
           "tier": "extended"
         }
       ],
@@ -2256,7 +2256,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2333,
+          "line": 2334,
           "tier": "extended"
         }
       ],
@@ -2272,7 +2272,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2359,
+          "line": 2360,
           "tier": "extended"
         }
       ],
@@ -2288,7 +2288,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2366,
+          "line": 2367,
           "tier": "extended"
         }
       ],
@@ -2304,7 +2304,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2389,
+          "line": 2390,
           "tier": "extended"
         }
       ],
@@ -2320,7 +2320,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2390,
+          "line": 2391,
           "tier": "extended"
         }
       ],
@@ -2341,7 +2341,7 @@
         },
         {
           "file": "src/syscalls_ext.c",
-          "line": 2391,
+          "line": 2392,
           "tier": "extended"
         }
       ],
@@ -2357,7 +2357,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2408,
+          "line": 2409,
           "tier": "extended"
         }
       ],
@@ -2373,7 +2373,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2421,
+          "line": 2422,
           "tier": "extended"
         }
       ],
@@ -2389,7 +2389,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2433,
+          "line": 2434,
           "tier": "extended"
         }
       ],
@@ -2405,7 +2405,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2451,
+          "line": 2452,
           "tier": "extended"
         }
       ],
@@ -2421,7 +2421,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2458,
+          "line": 2459,
           "tier": "extended"
         }
       ],
@@ -2437,7 +2437,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2486,
+          "line": 2487,
           "tier": "extended"
         }
       ],
@@ -2469,7 +2469,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2487,
+          "line": 2488,
           "tier": "extended"
         }
       ],
@@ -2485,7 +2485,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2494,
+          "line": 2495,
           "tier": "extended"
         }
       ],
@@ -2501,7 +2501,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2501,
+          "line": 2502,
           "tier": "extended"
         }
       ],
@@ -2517,7 +2517,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2521,
+          "line": 2522,
           "tier": "extended"
         }
       ],
@@ -2549,7 +2549,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2545,
+          "line": 2546,
           "tier": "extended"
         }
       ],
@@ -2565,7 +2565,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2546,
+          "line": 2547,
           "tier": "extended"
         }
       ],
@@ -2581,7 +2581,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2547,
+          "line": 2548,
           "tier": "extended"
         }
       ],
@@ -2597,7 +2597,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2568,
+          "line": 2569,
           "tier": "extended"
         }
       ],
@@ -2613,7 +2613,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2586,
+          "line": 2587,
           "tier": "extended"
         }
       ],
@@ -2629,7 +2629,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2587,
+          "line": 2588,
           "tier": "extended"
         }
       ],
@@ -2773,7 +2773,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2631,
+          "line": 2632,
           "tier": "extended"
         }
       ],
@@ -2789,7 +2789,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2631,
+          "line": 2632,
           "tier": "extended"
         }
       ],
@@ -2805,7 +2805,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2631,
+          "line": 2632,
           "tier": "extended"
         }
       ],
@@ -2821,7 +2821,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2631,
+          "line": 2632,
           "tier": "extended"
         }
       ],
@@ -2837,7 +2837,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2631,
+          "line": 2632,
           "tier": "extended"
         }
       ],
@@ -2853,7 +2853,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2631,
+          "line": 2632,
           "tier": "extended"
         }
       ],
@@ -2869,7 +2869,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2638,
+          "line": 2639,
           "tier": "extended"
         }
       ],
@@ -2885,7 +2885,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2643,
+          "line": 2644,
           "tier": "extended"
         }
       ],
@@ -2901,7 +2901,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2641,
+          "line": 2642,
           "tier": "extended"
         }
       ],
@@ -2917,7 +2917,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2639,
+          "line": 2640,
           "tier": "extended"
         }
       ],
@@ -2933,7 +2933,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2714,
+          "line": 2715,
           "tier": "extended"
         }
       ],
@@ -2949,7 +2949,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2721,
+          "line": 2722,
           "tier": "extended"
         }
       ],
@@ -2965,7 +2965,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2750,
+          "line": 2751,
           "tier": "extended"
         }
       ],
@@ -2981,7 +2981,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2716,
+          "line": 2717,
           "tier": "extended"
         }
       ],
@@ -2997,7 +2997,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2675,
+          "line": 2676,
           "tier": "extended"
         }
       ],
@@ -3013,7 +3013,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2683,
+          "line": 2684,
           "tier": "extended"
         }
       ],
@@ -3029,7 +3029,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2677,
+          "line": 2678,
           "tier": "extended"
         }
       ],
@@ -3045,7 +3045,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2681,
+          "line": 2682,
           "tier": "extended"
         }
       ],
@@ -3301,7 +3301,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2760,
+          "line": 2761,
           "tier": "extended"
         }
       ],
@@ -3365,7 +3365,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2783,
+          "line": 2784,
           "tier": "extended"
         }
       ],
@@ -3381,7 +3381,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2783,
+          "line": 2784,
           "tier": "extended"
         }
       ],
@@ -3397,7 +3397,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2783,
+          "line": 2784,
           "tier": "extended"
         }
       ],
@@ -3413,7 +3413,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2784,
+          "line": 2785,
           "tier": "extended"
         }
       ],
@@ -3429,7 +3429,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2785,
+          "line": 2786,
           "tier": "extended"
         }
       ],
@@ -3445,7 +3445,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2812,
+          "line": 2813,
           "tier": "extended"
         }
       ],
@@ -3461,7 +3461,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2812,
+          "line": 2813,
           "tier": "extended"
         }
       ],
@@ -3493,7 +3493,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2813,
+          "line": 2814,
           "tier": "extended"
         }
       ],
@@ -3509,7 +3509,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2832,
+          "line": 2833,
           "tier": "extended"
         }
       ],
@@ -3525,7 +3525,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2833,
+          "line": 2834,
           "tier": "extended"
         }
       ],
@@ -3541,7 +3541,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2840,
+          "line": 2841,
           "tier": "extended"
         }
       ],
@@ -3557,7 +3557,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2841,
+          "line": 2842,
           "tier": "extended"
         }
       ],
@@ -3573,7 +3573,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2846,
+          "line": 2847,
           "tier": "extended"
         }
       ],
@@ -3605,7 +3605,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2876,
+          "line": 2877,
           "tier": "extended"
         }
       ],
@@ -3621,7 +3621,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2877,
+          "line": 2878,
           "tier": "extended"
         }
       ],
@@ -3637,7 +3637,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2910,
+          "line": 2911,
           "tier": "extended"
         }
       ],
@@ -3653,7 +3653,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2942,
+          "line": 2943,
           "tier": "extended"
         }
       ],
@@ -3669,7 +3669,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2972,
+          "line": 2973,
           "tier": "extended"
         }
       ],
@@ -3685,7 +3685,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2998,
+          "line": 2999,
           "tier": "extended"
         }
       ],
@@ -3701,7 +3701,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 2284,
+          "line": 2285,
           "tier": "extended"
         }
       ],
@@ -3717,7 +3717,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3034,
+          "line": 3035,
           "tier": "extended"
         }
       ],
@@ -3780,7 +3780,7 @@
         },
         {
           "file": "src/syscalls_ext.c",
-          "line": 3040,
+          "line": 3041,
           "tier": "extended"
         }
       ],
@@ -3812,7 +3812,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3054,
+          "line": 3055,
           "tier": "extended"
         }
       ],
@@ -3828,7 +3828,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3054,
+          "line": 3055,
           "tier": "extended"
         }
       ],
@@ -3844,7 +3844,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3055,
+          "line": 3056,
           "tier": "extended"
         }
       ],
@@ -3860,7 +3860,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3074,
+          "line": 3081,
           "tier": "extended"
         }
       ],
@@ -3876,7 +3876,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3075,
+          "line": 3082,
           "tier": "extended"
         }
       ],
@@ -3892,7 +3892,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3076,
+          "line": 3083,
           "tier": "extended"
         }
       ],
@@ -3908,7 +3908,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3083,
+          "line": 3090,
           "tier": "extended"
         }
       ],
@@ -3940,7 +3940,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3088,
+          "line": 3095,
           "tier": "extended"
         }
       ],
@@ -3956,7 +3956,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3089,
+          "line": 3096,
           "tier": "extended"
         }
       ],
@@ -3972,7 +3972,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3090,
+          "line": 3097,
           "tier": "extended"
         }
       ],
@@ -3988,7 +3988,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3111,
+          "line": 3118,
           "tier": "extended"
         }
       ],
@@ -4004,7 +4004,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3112,
+          "line": 3119,
           "tier": "extended"
         }
       ],
@@ -4020,7 +4020,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3149,
+          "line": 3156,
           "tier": "extended"
         }
       ],
@@ -4036,7 +4036,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3177,
+          "line": 3184,
           "tier": "extended"
         }
       ],
@@ -4052,7 +4052,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3194,
+          "line": 3201,
           "tier": "extended"
         }
       ],
@@ -4084,7 +4084,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3195,
+          "line": 3202,
           "tier": "extended"
         }
       ],
@@ -4100,7 +4100,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3196,
+          "line": 3203,
           "tier": "extended"
         }
       ],
@@ -4116,7 +4116,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3197,
+          "line": 3204,
           "tier": "extended"
         }
       ],
@@ -4132,7 +4132,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3235,
+          "line": 3242,
           "tier": "extended"
         }
       ],
@@ -4148,7 +4148,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3236,
+          "line": 3243,
           "tier": "extended"
         }
       ],
@@ -4164,7 +4164,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3245,
+          "line": 3252,
           "tier": "extended"
         }
       ],
@@ -4180,7 +4180,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3255,
+          "line": 3262,
           "tier": "extended"
         }
       ],
@@ -4196,7 +4196,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3326,
+          "line": 3333,
           "tier": "extended"
         }
       ],
@@ -4212,7 +4212,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3338,
+          "line": 3345,
           "tier": "extended"
         }
       ],
@@ -4228,7 +4228,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3351,
+          "line": 3358,
           "tier": "extended"
         }
       ],
@@ -4244,7 +4244,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3363,
+          "line": 3370,
           "tier": "extended"
         }
       ],
@@ -4260,7 +4260,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3363,
+          "line": 3370,
           "tier": "extended"
         }
       ],
@@ -4276,7 +4276,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3365,
+          "line": 3372,
           "tier": "extended"
         }
       ],
@@ -4292,7 +4292,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3366,
+          "line": 3373,
           "tier": "extended"
         }
       ],
@@ -4324,7 +4324,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3367,
+          "line": 3374,
           "tier": "extended"
         }
       ],
@@ -4340,7 +4340,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3372,
+          "line": 3379,
           "tier": "extended"
         }
       ],
@@ -4376,7 +4376,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3375,
+          "line": 3382,
           "tier": "extended"
         }
       ],
@@ -4392,7 +4392,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3377,
+          "line": 3384,
           "tier": "extended"
         }
       ],
@@ -4448,7 +4448,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3394,
+          "line": 3401,
           "tier": "extended"
         }
       ],
@@ -4464,7 +4464,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3402,
+          "line": 3409,
           "tier": "extended"
         }
       ],
@@ -4480,7 +4480,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3407,
+          "line": 3414,
           "tier": "extended"
         }
       ],
@@ -4576,7 +4576,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3413,
+          "line": 3420,
           "tier": "extended"
         }
       ],
@@ -4592,7 +4592,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3421,
+          "line": 3428,
           "tier": "extended"
         }
       ],
@@ -4608,7 +4608,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3421,
+          "line": 3428,
           "tier": "extended"
         }
       ],
@@ -4624,7 +4624,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3421,
+          "line": 3428,
           "tier": "extended"
         }
       ],
@@ -4640,7 +4640,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3422,
+          "line": 3429,
           "tier": "extended"
         }
       ],
@@ -4656,7 +4656,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3438,
+          "line": 3445,
           "tier": "extended"
         }
       ],
@@ -4672,7 +4672,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3428,
+          "line": 3435,
           "tier": "extended"
         }
       ],
@@ -4688,7 +4688,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3439,
+          "line": 3446,
           "tier": "extended"
         }
       ],
@@ -4704,7 +4704,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3422,
+          "line": 3429,
           "tier": "extended"
         }
       ],
@@ -4720,7 +4720,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3428,
+          "line": 3435,
           "tier": "extended"
         }
       ],
@@ -4736,7 +4736,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3440,
+          "line": 3447,
           "tier": "extended"
         }
       ],
@@ -4752,7 +4752,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3441,
+          "line": 3448,
           "tier": "extended"
         }
       ],
@@ -4768,7 +4768,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3456,
+          "line": 3463,
           "tier": "extended"
         }
       ],
@@ -4800,7 +4800,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3498,
+          "line": 3505,
           "tier": "extended"
         }
       ],
@@ -4816,7 +4816,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3526,
+          "line": 3533,
           "tier": "extended"
         }
       ],
@@ -4832,7 +4832,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3551,
+          "line": 3558,
           "tier": "extended"
         }
       ],
@@ -4848,7 +4848,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3581,
+          "line": 3588,
           "tier": "extended"
         },
         {
@@ -4869,7 +4869,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3582,
+          "line": 3589,
           "tier": "extended"
         }
       ],
@@ -4885,7 +4885,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3583,
+          "line": 3590,
           "tier": "extended"
         }
       ],
@@ -4967,7 +4967,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3584,
+          "line": 3591,
           "tier": "extended"
         }
       ],
@@ -4993,7 +4993,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3653,
+          "line": 3660,
           "tier": "extended"
         }
       ],
@@ -5087,7 +5087,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3596,
+          "line": 3603,
           "tier": "extended"
         }
       ],
@@ -5103,7 +5103,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3617,
+          "line": 3624,
           "tier": "extended"
         }
       ],
@@ -5119,7 +5119,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3639,
+          "line": 3646,
           "tier": "extended"
         }
       ],
@@ -5145,7 +5145,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3676,
+          "line": 3683,
           "tier": "extended"
         }
       ],
@@ -5161,7 +5161,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3724,
+          "line": 3731,
           "tier": "extended"
         }
       ],
@@ -5177,7 +5177,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3774,
+          "line": 3781,
           "tier": "extended"
         }
       ],
@@ -5193,7 +5193,7 @@
       "locations": [
         {
           "file": "src/syscalls_ext.c",
-          "line": 3812,
+          "line": 3819,
           "tier": "extended"
         }
       ],
