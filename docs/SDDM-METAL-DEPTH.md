@@ -75,5 +75,28 @@ greeter, the first driver failure was specific: Qt submitted a three-attribute
 vertex layout, while `rdmetal_create_vertex_elements` accepted at most two.
 The first `rdmetal_draw_vbo` had `ve=NULL` and marked the context failed;
 subsequent draws were rejected. The trace showed position R32G32_FLOAT and
-color R8G8B8A8_UNORM in the first two attributes. This is a separate blocker
+color R8G8B8A8_UNORM in the first two attributes. A second driver build showed
+the third input is R32_FLOAT opacity from another vertex buffer. Five distinct
+Qt layouts appeared: three-input position/color/opacity and
+position/UV/opacity arrangements, plus two-input arrangements. The direct
+context only retained two vertex buffers, so merely allowing a third vertex
+element would still fail. The driver also emits a synthetic shader instead of
+the application's shader, which loses color and opacity semantics. A
+three-attribute acceptance probe exists on the rdmetal feature branch, but it
+intentionally does not claim correct rendering. This is a separate blocker
 after depth allocation; do not report the depth work as a visible greeter fix.
+
+Indexed-strip follow-up (disposable on-screen SDDM boot): the next first
+failure was an indexed Qt `MESA_PRIM_TRIANGLE_STRIP` draw, 30 U16 indices. The
+rdmetal integration branch now expands bounded indexed strips into triangle
+lists with alternating winding (`3055e18`). Its ARM CI build passed, and the
+on-screen boot reached 84 broker draw submissions before a different first
+failure. The greeter window remained black. The new rejection was a sampler
+view with `PIPE_FORMAT_A8_UNORM` (format 134), observed at 1437×158 and
+419×109, backed by a softpipe resource rather than a Metal texture. The
+current driver accepts only its RGBA8/direct sampled resources, and the
+synthetic shader still ignores Qt color and opacity. Thus the indexed-strip
+change removes one real draw rejection but does not establish a usable or
+fully Metal-rendered SDDM greeter. The sampler diagnostic is on the rdmetal
+integration branch as `cc1ccf2`; neither driver probe has been promoted to
+rdmetal `development`.
