@@ -139,7 +139,8 @@ echo "==> configuring the guest (DNS, mount table, pacman)"
 rm -f "$ROOTFS/etc/resolv.conf"
 printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > "$ROOTFS/etc/resolv.conf"
 # pacman needs a mount table + no GPG signature check (keyring can't be written)
-[ -e "$ROOTFS/etc/mtab" ] || printf '/dev/root / ext4 rw,relatime 0 0\nproc /proc proc rw 0 0\n' > "$ROOTFS/etc/mtab"
+rm -f "$ROOTFS/etc/mtab"
+printf '/dev/root / ext4 rw,relatime 0 0\nproc /proc proc rw 0 0\n' > "$ROOTFS/etc/mtab"
 sed -i '' 's/^#*SigLevel.*/SigLevel = Never/' "$ROOTFS/etc/pacman.conf"
 # /dev/shm + /dev/dri placeholders (keymap shm_open + the DRM render node)
 mkdir -p "$ROOTFS/dev/shm" "$ROOTFS/dev/dri"
