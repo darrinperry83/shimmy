@@ -4425,9 +4425,14 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
       return -LX_EINVAL;
     if (flags & LX_AT_EMPTY_PATH) return -LX_EOPNOTSUPP;
     char host2[PATH_MAX];
+    char old_path[PATH_MAX], new_path[PATH_MAX];
+    // The resolver takes host-readable strings, not raw guest addresses.
+    // Check both names before either resolution or hard-link creation.
+    if ((r = readlink_guest_path(a1, old_path, sizeof old_path)) < 0) return r;
+    if ((r = readlink_guest_path(a3, new_path, sizeof new_path)) < 0) return r;
     int oldnf = (flags & LX_AT_SYMLINK_FOLLOW) ? 0 : RSV_NOFOLLOW;
-    if ((r = resolve_f((int)a0, (const char*)a1, oldnf, host, sizeof host, 0, 0)) < 0) return r;
-    if ((r = resolve_f((int)a2, (const char*)a3, RSV_NOFOLLOW, host2, sizeof host2, 0, 0)) < 0)
+    if ((r = resolve_f((int)a0, old_path, oldnf, host, sizeof host, 0, 0)) < 0) return r;
+    if ((r = resolve_f((int)a2, new_path, RSV_NOFOLLOW, host2, sizeof host2, 0, 0)) < 0)
       return r;
     // Darwin link() follows a symbolic source even when Linux linkat(..., 0)
     // must link the symlink inode itself. Darwin linkat() takes the follow
