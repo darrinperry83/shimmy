@@ -4928,7 +4928,7 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
                            (const struct linux_timespec*)a3, a4, (unsigned int)a5);
 
   // ---------- 99 set_robust_list ----------
-  case 99: return 0;
+  case 99: return guest_set_robust_list(a0, a1);
 
   // ---------- 113 clock_gettime ----------
   case 113: {

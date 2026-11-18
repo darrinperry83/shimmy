@@ -361,6 +361,7 @@ struct gthread {
   unsigned long tpidr;           // this thread's virtualized TPIDR_EL0
   int           tid;             // guest tid
   unsigned long ctid;            // CLONE_CHILD_CLEARTID address, 0 if none
+  unsigned long robust_head;     // Linux set_robust_list registration (per thread)
   // THE ONE HOME for this thread's guest x18 — the very word the VENEERS address inline
   // (mrs xJ,tpidrro_el0 / and xJ,xJ,#~7 / ldr|str xK,[xJ,#tsd_off]), recorded here as an address
   // so the TRAP path can reach the same word. See the invariant note above gmem_x18_slot() and
@@ -608,6 +609,37 @@ int guest_child_known(int pid) {
 
 int  guest_is_child(void)   { return t_cur ? t_cur->is_child : 0; }
 void guest_set_tid_address(unsigned long addr) { if (t_cur) t_cur->ctid = addr; }
+
+long guest_set_robust_list(unsigned long head, unsigned long len) {
+  // aarch64 Linux's robust_list_head is three 64-bit words. Linux validates
+  // the size now and only reads the head when the thread exits.
+  if (len != 3 * sizeof(unsigned long)) return -22; // EINVAL
+  if (!t_cur) return -3;                            // ESRCH
+  pthread_mutex_lock(&g_gt_mu);
+  t_cur->robust_head = head;
+  pthread_mutex_unlock(&g_gt_mu);
+  return 0;
+}
+
+long guest_get_robust_list(long tid, unsigned long head_out, unsigned long len_out) {
+  if (!head_out || !len_out) return -14;             // EFAULT
+  unsigned long head = 0, len = 0;
+  pthread_mutex_lock(&g_gt_mu);
+  struct gthread *target = NULL;
+  if (!tid || tid == guest_tid()) target = t_cur;
+  else for (int i = 0; i < MAX_GTHREAD; i++)
+    if (g_gt[i].used && g_gt[i].tid == tid) { target = &g_gt[i]; break; }
+  if (target) { head = target->robust_head; len = 3 * sizeof(unsigned long); }
+  pthread_mutex_unlock(&g_gt_mu);
+  if (!target) return -3;                            // ESRCH
+  // Copy through the guest-range ledger so an invalid pointer returns EFAULT
+  // instead of crashing the host. No host pointer is ever exposed to the guest.
+  if (gmem_guest_copyout_checked(len_out, &len, sizeof len) < 0 ||
+      gmem_guest_copyout_checked(head_out, &head, sizeof head) < 0) {
+    return -14;
+  }
+  return 0;
+}
 
 // A guest thread has called exit(). Publish the clear-tid word and wake anyone joining, exactly
 // as CLONE_CHILD_CLEARTID promises, then unhook the record.
@@ -2549,6 +2581,10 @@ int main(int argc, char** argv) {
 
   size_t stksz = 8 * 1024 * 1024;
   void* stack = malloc(stksz);              // plain RW is fine for the guest stack
+  if (!stack || gmem_guest_register_main_stack(stack, stksz) < 0) {
+    fprintf(stderr, "[shim] cannot register main guest stack\n");
+    return 1;
+  }
   int gargc = argc - 2; char** gargv = &argv[2];
   const char* guest_arg0 = getenv("RDGUESTARGV0");
   if (guest_arg0 && gargc > 0) gargv[0] = (char*)guest_arg0;

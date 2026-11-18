@@ -33,6 +33,7 @@ long  gmem_munmap(unsigned long addr, size_t len);
 int gmem_guest_register_main_stack(void *address,size_t length);
 int gmem_guest_export_copyout(void *unused,uint64_t guestAddress,
                               const void *bytes,size_t length);
+int gmem_guest_copyout_checked(uint64_t guestAddress,const void *bytes,size_t length);
 int gmem_guest_export_copyin(void *unused,uint64_t guestAddress,
                              void *snapshot,size_t length);
 void gmem_guest_ranges_fork_child(void);

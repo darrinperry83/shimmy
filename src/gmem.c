@@ -3897,6 +3897,11 @@ int gmem_guest_export_copyout(void *unused,uint64_t guestAddress,
   return rdguest_range_copyout(&g_export_ranges,(uintptr_t)guestAddress,
                                bytes,length)?0:-1;
 }
+int gmem_guest_copyout_checked(uint64_t guestAddress,const void *bytes,size_t length){
+  pthread_once(&g_export_ranges_once,g_export_ranges_init);
+  return rdguest_range_copyout_bytes(&g_export_ranges,(uintptr_t)guestAddress,
+                                     bytes,length)?0:-1;
+}
 int gmem_guest_export_copyin(void *unused,uint64_t guestAddress,
                              void *snapshot,size_t length){
   (void)unused;
