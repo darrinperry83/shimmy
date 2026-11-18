@@ -87,6 +87,7 @@ extern void rd_rtnl_dup(int oldfd, int newfd);
 #define LX_EACCES         13
 #define LX_EFAULT         14
 #define LX_EINVAL         22
+#define LX_ERANGE         34
 #define LX_ENAMETOOLONG   36
 #define LX_ENOSYS         38
 #define LX_ELOOP          40
@@ -2144,6 +2145,54 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
                       ((int)a3 & LX_AT_SYMLINK_NOFOLLOW) != 0);
     if (e < 0) return e;
     return ok0(fchmodat(hdirfd, host, (mode_t)a2, host_at_flags((int)a3)));
+  }
+  case 463: {                                                   // setxattrat: pathname subset
+    // Linux uapi xattr_args: { u64 value; u32 size; u32 flags }.
+    // Keep the mutation inside the resolved guest root; fd/AT_EMPTY_PATH
+    // needs separate guest-fd provenance and is deliberately unsupported.
+    struct { uint64_t value; uint32_t size, flags; } args;
+    if (a5 < sizeof args) return -LX_EINVAL;
+    if (a5 > 16384) return -LX_E2BIG;
+    if (!a4 || gmem_guest_export_copyin(NULL, a4, &args, sizeof args) != 0)
+      return -LX_EFAULT;
+    for (size_t off = sizeof args; off < a5;) {
+      unsigned char extra[256];
+      size_t n = a5 - off < sizeof extra ? a5 - off : sizeof extra;
+      if (gmem_guest_export_copyin(NULL, a4 + off, extra, n) != 0)
+        return -LX_EFAULT;
+      for (size_t i = 0; i < n; ++i) if (extra[i]) return -LX_E2BIG;
+      off += n;
+    }
+    if (args.flags & ~3u) return -LX_EINVAL;  // Linux CREATE=1, REPLACE=2
+    if (args.flags == 3) return -LX_EINVAL;
+    if (args.size > 65536u) return -LX_E2BIG;
+    if (a2 & ~(unsigned long)(LX_AT_SYMLINK_NOFOLLOW | LX_AT_EMPTY_PATH))
+      return -LX_EINVAL;
+    if (!a1) return (a2 & LX_AT_EMPTY_PATH) ? -LX_EOPNOTSUPP : -LX_EFAULT;
+    char guest_path[PATH_MAX], guest_name[256];
+    e = copy_guest_cstr(a1, guest_path, sizeof guest_path);
+    if (e < 0) return e;
+    if (!guest_path[0])
+      return (a2 & LX_AT_EMPTY_PATH) ? -LX_EOPNOTSUPP : -LX_ENOENT;
+    e = copy_guest_cstr(a3, guest_name, sizeof guest_name);
+    if (e < 0) return e;
+    if (!guest_name[0]) return -LX_ERANGE;
+    e = resolve_at_nf((int)a0, guest_path, host, sizeof host, &hdirfd,
+                      (a2 & LX_AT_SYMLINK_NOFOLLOW) != 0);
+    if (e < 0) return e;
+    void* value = args.size ? malloc(args.size) : NULL;
+    if (args.size && !value) return -LX_ENOMEM;
+    if (args.size && gmem_guest_export_copyin(NULL, args.value, value, args.size) != 0) {
+      free(value);
+      return -LX_EFAULT;
+    }
+    int hopt = (a2 & LX_AT_SYMLINK_NOFOLLOW) ? XATTR_NOFOLLOW : 0;
+    if (args.flags & 1) hopt |= XATTR_CREATE;
+    if (args.flags & 2) hopt |= XATTR_REPLACE;
+    int result = setxattr(host, guest_name, value, args.size, 0, hopt);
+    long ret = result < 0 ? eret() : 0;
+    free(value);
+    return ret;
   }
   case 464: {                                                   // getxattrat: pathname subset
     // Linux uapi struct xattr_args is { u64 value; u32 size; u32 flags }.
