@@ -4,6 +4,12 @@ This file records bounded behavior that has been implemented and tested. A dispa
 
 Current safety and refusal status is summarized in [`SAFEGUARDS.md`](SAFEGUARDS.md).
 
+The isolated #21 `epoll_ctl` follow-up snapshots ADD/MOD event input before
+changing watch state; DEL continues to ignore the event pointer. Its
+focused no-libc ARM64 probe, existing epoll wait regression, CLI build, and
+private Arch login/D-Bus boot gate pass. See
+[`EPOLL-CTL-INPUT.md`](EPOLL-CTL-INPUT.md).
+
 The isolated #81 `sync` safeguard replaces a host-wide Darwin sync call and
 false Linux success with explicit `ENOSYS`. Its CLI build, disposable ARM64
 probe, and private Arch login/D-Bus boot gate pass. This is a safe refusal,

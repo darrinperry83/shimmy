@@ -1780,7 +1780,10 @@ static long sys_epoll_ctl(int epfd, int op, int fd, struct lin_epoll_event* uev)
   struct lin_epoll_event ev = { 0, 0, 0 };
   if (op != L_EPOLL_CTL_DEL) {
     if (!uev) return -L_EFAULT;
-    ev = *uev;
+    // ADD/MOD consume a Linux event from guest memory. Snapshot it before
+    // changing the interest list or touching the host kqueue.
+    if (gmem_guest_export_copyin(NULL, (uint64_t)(uintptr_t)uev,
+                                &ev, sizeof ev) != 0) return -L_EFAULT;
   }
   long r = 0;
   pthread_mutex_lock(&g_lock);
