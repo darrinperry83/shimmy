@@ -16,6 +16,7 @@ def main():
         root = Path(tmp)
         (root / "tmp").mkdir()
         (root / "tmp/fixture").write_text("Fixture")
+        (root / "tmp/fixture-link").symlink_to("fixture")
         guest = root / "tmp/guest-openat-input"
         subprocess.run([
             "clang", "--target=aarch64-linux-gnu", "-nostdlib", "-static-pie",
@@ -31,7 +32,7 @@ def main():
                                f"{result.stdout}\n{result.stderr[-2000:]}")
         if not (root / "tmp/created").is_file():
             raise RuntimeError("O_CREAT did not create disposable file")
-        print("GUEST_OPENAT_INPUT_OK: bad paths refused; read/create work")
+        print("GUEST_OPENAT_INPUT_OK: bad paths refused; read/create/nofollow work")
 
 
 if __name__ == "__main__":

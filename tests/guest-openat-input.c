@@ -15,7 +15,7 @@ static __attribute__((noreturn)) void done(int code) {
 }
 void _start(void) {
   static const char path[] = "/tmp/fixture", created[] = "/tmp/created";
-  static const char empty[] = "";
+  static const char empty[] = "", symlink[] = "/tmp/fixture-link";
   if (sc4(56, -100, 0, 0, 0) != -14) done(1);
   if (sc4(56, -100, 1, 0, 0) != -14) done(2);
   if (sc4(56, -100, (long)empty, 0, 0) != -2) done(3);
@@ -23,7 +23,10 @@ void _start(void) {
   if (fd < 0) done(4);
   char b = 0;
   if (sc4(63, fd, (long)&b, 1, 0) != 1 || b != 'F') done(5);
+  // Arch AArch64 asm/fcntl.h defines O_NOFOLLOW as octal 0100000 (0x8000).
+  if (sc4(56, -100, (long)symlink, 0x8000, 0) != -40) done(6); /* ELOOP */
+  if (sc4(56, -100, (long)path, 0x8000, 0) < 0) done(7);
   fd = sc4(56, -100, (long)created, 0x41, 0600); /* O_CREAT | O_WRONLY */
-  if (fd < 0) done(6);
+  if (fd < 0) done(8);
   done(0);
 }

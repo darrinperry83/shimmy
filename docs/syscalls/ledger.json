@@ -1148,7 +1148,7 @@
       ],
       "dispatch_state": "case",
       "name": "openat",
-      "notes": "Guest pathname copied through checked memory before resolution. NULL/unmapped paths and ordinary read/create are probed; broader flags, symlink, device and permission behavior remain unverified. See docs/syscalls/56-openat-input.md.",
+      "notes": "Guest pathname copied through checked memory before resolution. NULL/unmapped paths, ordinary read/create, and AArch64 O_NOFOLLOW on symlink/regular file are probed; broader flags, device and permission behavior remain unverified. See docs/syscalls/56-openat-input.md.",
       "number": 56,
       "priority": "P2_other",
       "runtime_evidence": ["Private Arch boot: fresh LOGIN; D-Bus broker and launcher settled; runner exit 0"],
