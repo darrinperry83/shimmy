@@ -1671,27 +1671,37 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (e < 0) return e;
     return ok0(fchmodat(hdirfd, host, (mode_t)a2, 0));
   }
-  case 54:                                                     // fchownat
+  case 54: {                                                   // fchownat
+    // Snapshot a non-NULL guest pathname before either branch dereferences it
+    // or passes it to the resolver. Preserve the existing NULL/empty-path case.
+    char guest_path_buf[PATH_MAX];
+    const char *guest_path = (const char*)a1;
+    if (a1) {
+      e = copy_guest_cstr(a1, guest_path_buf, sizeof guest_path_buf);
+      if (e < 0) return e;
+      guest_path = guest_path_buf;
+    }
     if (g_uid0) {
       struct stat st;
       if ((int)a4 & ~(LX_AT_EMPTY_PATH | LX_AT_SYMLINK_NOFOLLOW)) return -LX_EINVAL;
-      if ((a4 & LX_AT_EMPTY_PATH) && (!a1 || !((const char*)a1)[0])) {
+      if ((a4 & LX_AT_EMPTY_PATH) && (!guest_path || !guest_path[0])) {
         if ((int)a0 == LX_AT_FDCWD) { if (stat(".", &st)<0) return eret(); }
         else if (fstat((int)a0, &st)<0) return eret();
       } else {
-        e=resolve_at_nf((int)a0,(const char*)a1,host,sizeof host,&hdirfd,
+        e=resolve_at_nf((int)a0,guest_path,host,sizeof host,&hdirfd,
                        ((int)a4 & LX_AT_SYMLINK_NOFOLLOW)!=0);
         if(e<0)return e;
         if(fstatat(hdirfd,host,&st,host_at_flags((int)a4))<0)return eret();
       }
       return ok0(guest_ownership_set(&st,(uint32_t)a2,(uint32_t)a3));
     }
-    if ((a4 & LX_AT_EMPTY_PATH) && (!a1 || !((const char*)a1)[0]))
+    if ((a4 & LX_AT_EMPTY_PATH) && (!guest_path || !guest_path[0]))
       return ok0(fchown((int)a0, (uid_t)a2, (gid_t)a3));       // "chown the dirfd itself"
-    e = resolve_at_nf((int)a0, (const char*)a1, host, sizeof host, &hdirfd,
+    e = resolve_at_nf((int)a0, guest_path, host, sizeof host, &hdirfd,
                       ((int)a4 & LX_AT_SYMLINK_NOFOLLOW) != 0);
     if (e < 0) return e;
     return ok0(fchownat(hdirfd, host, (uid_t)a2, (gid_t)a3, host_at_flags((int)a4)));
+  }
   case 55: // fchown
     if (g_uid0) {
       struct stat st; if(fstat((int)a0,&st)<0)return eret();

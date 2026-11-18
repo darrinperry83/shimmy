@@ -1098,7 +1098,7 @@
       "verified_compatible": false
     },
     {
-      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "classification_reason": "bounded: checked guest pathname in virtual-root and host-identity paths",
       "dispatch_locations": [
         {
           "file": "src/syscalls_ext.c",
@@ -1108,12 +1108,12 @@
       ],
       "dispatch_state": "case",
       "name": "fchownat",
-      "notes": "",
+      "notes": "Guest pathname is copied before inspection/resolution; ownership security remains unverified. See docs/syscalls/54-fchownat-guest-path.md.",
       "number": 54,
       "priority": "P2_other",
       "runtime_evidence": [],
-      "semantic_status": "unknown",
-      "test_evidence": [],
+      "semantic_status": "partial_or_unknown",
+      "test_evidence": ["tests/run-fchownat-path.py"],
       "trap_override": false,
       "verified_compatible": false
     },
