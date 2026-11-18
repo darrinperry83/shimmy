@@ -67,6 +67,9 @@ This file records bounded behavior that has been implemented and tested. A dispa
 | 213 | `readahead` | `syscall/213-readahead` | Squash merged at `3db06af`; bounded subset | Validated readable regular-file ranges issue a Darwin asynchronous read hint; nonregular, invalid and oversized requests are rejected. ARM64 guest test passes. |
 | 223 | `fadvise64` | `syscall/223-fadvise64` | Squash merged at `4239189`; bounded subset | Valid regular-file `POSIX_FADV_NORMAL` uses the existing default state; other advice is rejected until per-file behavior exists. ARM64 guest test passes. |
 | 233 | `madvise` | `syscall/233-madvise` | Squash merged at `bc032af`; bounded subset | Mapped guest ranges and nondestructive NORMAL/RANDOM/SEQUENTIAL/WILLNEED hints reach Darwin; data/VMA/fork effects remain unsupported. ARM64 guest test passes. |
+| 128 | `restart_syscall` | `syscall/128-restart-syscall` | Squash merged at `5b84fee`; documented limit | With no saved restart block, the guest receives `EINTR`; a focused ARM64 guest test passes. Resuming an interrupted operation remains unsupported. |
+| 91 | `capset` | `syscall/91-capset` | Blocked by systemd D-Bus regression | Isolated empty-capability validation passed its ARM64 probe, but two private Arch boots reached login without a settled D-Bus broker/launcher. The baseline boot settled D-Bus. A coherent virtual capability model is needed before integration. Branch `8e53371` remains isolated. |
+| 39, 429, 431, 442 | `umount2`, `move_mount`, `fsconfig`, `mount_setattr` | Per-syscall branches | Blocked by systemd boot regression | Each isolated refusal/validation branch passed its CLI build and focused ARM64 test. Combined and reduced private Arch boot gates did not reach login; `move_mount` refusal alone reproduced the regression. A guest mount-state model and boot-compatible transition are required. No mount-family change was merged or pushed. |
 
 ## Already merged before this batch
 
@@ -83,6 +86,8 @@ The scheduler trio (118–120) passed a combined CLI build and all three disposa
 The next scheduler/affinity set (121–123 and 125–127) passed a combined CLI build and six disposable ARM64 guest tests on 2026-11-18. A separate squash correction at `5f4ffbd` removes redundant main-thread aliases and host PID acceptance in scheduler target checks. Its ARM64 regression passes in ordinary and PID 1 init processes, each with a forked child. The host `/proc/cpuinfo` presentation is not yet unified with the 32-CPU status/sysfs cap.
 
 After merging the advisory-call trio (213, 223, 233), the CLI build and all ten focused ARM64 probes for this set, including the scheduler identity regression, passed together on 2026-11-18. The installed Arch root was not modified. This does not establish live systemd or GUI regression coverage.
+
+The `restart_syscall` documentation/test change passed the focused ARM64 probe and CLI build. A separate private Arch baseline reached login with D-Bus settled. The experimental `capset` and mount-family branches failed the additional private boot gates described above and were removed from the integration branch before publication. Their source branches are retained for diagnosis; none is a compatibility claim.
 
 ## Batch integration proof
 
