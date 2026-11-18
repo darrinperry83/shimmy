@@ -57,6 +57,27 @@ RDMetalImage *rd_metal_image_create(RDMetalCore *core, uint32_t width, uint32_t 
     return image;
 }
 
+RDMetalImage *rd_metal_image_import(RDMetalCore *core, IOSurfaceRef surface) {
+    if (!core || !surface) return NULL;
+    size_t width = IOSurfaceGetWidth(surface), height = IOSurfaceGetHeight(surface);
+    size_t stride = IOSurfaceGetBytesPerRow(surface);
+    if (!width || !height || width > 4096 || height > 4096 ||
+        IOSurfaceGetPixelFormat(surface) != (uint32_t)'BGRA' ||
+        stride < width * 4 || stride > 4096 * 4 ||
+        (uint64_t)stride * height > 64u * 1024u * 1024u) return NULL;
+    MTLTextureDescriptor *descriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                                                                        width:width height:height mipmapped:NO];
+    descriptor.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+    id<MTLTexture> texture = [core->device newTextureWithDescriptor:descriptor iosurface:surface plane:0];
+    if (!texture) return NULL;
+    RDMetalImage *image = calloc(1, sizeof *image);
+    if (!image) { [texture release]; return NULL; }
+    image->core = core;
+    image->surface = (IOSurfaceRef)CFRetain(surface);
+    image->texture = texture;
+    return image;
+}
+
 uint64_t rd_metal_image_clear(RDMetalImage *image, float red, float green, float blue, float alpha) {
     if (!image || image->pending || !isfinite(red) || !isfinite(green) ||
         !isfinite(blue) || !isfinite(alpha) || red < 0 || red > 1 || green < 0 || green > 1 ||
