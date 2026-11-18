@@ -25,6 +25,9 @@ This file records bounded behavior that has been implemented and tested. A dispa
 | 454 | `futex_wake` | `syscall/454-futex-wake` | Merged at `d74578d`; bounded subset | Private aligned U32 wake routes through the existing futex queue. Flags, mask, count, and invalid addresses are checked in a disposable ARM64 guest test. Shared and NUMA futexes remain unsupported. |
 | 464 | `getxattrat` | `syscall/464-getxattrat` | Merged at `dc82da6`; bounded subset | Guest-root path and dirfd xattr reads, size queries, versioned arguments, flags, and bad-address handling pass a disposable ARM64 guest test. `AT_EMPTY_PATH` fd reads remain unsupported. |
 | 465 | `listxattrat` | `syscall/465-listxattrat` | Merged at `8abbe0f`; bounded subset | Guest-root path, dirfd, and ordinary guest-root fd empty-path xattr lists, size queries, flags, and symlink behavior pass a disposable ARM64 guest test. Broader synthetic fd and filesystem behavior remain unverified. |
+| 455 | `futex_wait` | `syscall/455-futex-wait` | Merged at `aa129b3`; bounded subset | Private aligned U32 wait with mask and absolute monotonic/realtime timeout passes a disposable ARM64 guest test. Shared, NUMA, and broader futex2 modes remain unsupported. |
+| 463 | `setxattrat` | `syscall/463-setxattrat` | Merged at `0a9bc8e`; bounded subset | Guest-root path and dirfd writes, CREATE/REPLACE, versioned arguments, bounds, and bad-address rejection pass a disposable ARM64 guest test. Fd empty-path writes remain unsupported. |
+| 466 | `removexattrat` | `syscall/466-removexattrat` | Merged at `27511e3`; bounded subset | Guest-root path and dirfd removals, flags, missing attribute, and bad-address rejection pass a disposable ARM64 guest test. Fd empty-path removals remain unsupported. |
 
 ## Already merged before this batch
 
@@ -39,3 +42,5 @@ After merging the second batch, `./build.sh cli` and `python3 tests/run-kcmp.py`
 After merging the third batch, `./build.sh cli` and `python3 tests/run-mknodat.py`, `python3 tests/run-pkey-mprotect.py`, and `python3 tests/run-pidfd-getfd.py` (each with `--sysroot <installed-Arch-root>`) passed together on 2026-11-18. No live GUI or installed rootfs was modified.
 
 After merging the fourth batch, `./build.sh cli`, `python3 tests/run-futex-wake2.py`, `python3 tests/run-getxattrat.py --sysroot <installed-Arch-root>`, and `python3 tests/run-listxattrat.py --sysroot <installed-Arch-root>` passed together on 2026-11-18. The `getxattrat`/`listxattrat` switch conflict was resolved by retaining both syscall cases. No live GUI or installed rootfs was modified.
+
+After merging the fifth batch, `./build.sh cli` and all six focused tests for syscall numbers 454, 455, and 463–466 passed together on 2026-11-18. `setxattrat` and `removexattrat` run against disposable guest roots; the installed Arch root is used only as a read-only compiler sysroot. This is not a live systemd or desktop regression test.
