@@ -43,6 +43,7 @@ void fx_note(const char* fmt, ...);
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/time.h>
+#include <sys/timex.h>
 #include <sys/times.h>
 #include <sys/resource.h>
 #include <sys/mman.h>
@@ -607,6 +608,22 @@ static long guest_mlock_eager(unsigned long addr, unsigned long len) {
 
 // Linux `struct timeval` — tv_usec is 64-bit here, unlike macOS.
 struct lx_timeval { long long tv_sec; long long tv_usec; };
+// Native AArch64 Linux layout from linux/timex.h. Darwin's struct timex has
+// neither the embedded time nor all of the trailing fields, so it cannot be
+// copied to guest memory directly.
+struct lx_timex_clock {
+  uint32_t modes, pad0;
+  int64_t offset, freq, maxerror, esterror;
+  int32_t status, pad1;
+  int64_t constant, precision, tolerance;
+  int64_t time_sec, time_usec, tick;
+  int64_t ppsfreq, jitter;
+  int32_t shift, pad2;
+  int64_t stabil, jitcnt, calcnt, errcnt, stbcnt;
+  int32_t tai;
+  uint32_t reserved[11];
+};
+_Static_assert(sizeof(struct lx_timex_clock) == 208, "Linux AArch64 timex ABI");
 struct lx_itimerval { struct lx_timeval it_interval; struct lx_timeval it_value; };
 struct lx_timespec { long long tv_sec; long long tv_nsec; };   // matches macOS arm64
 
@@ -2461,9 +2478,44 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return 0;
   }
   case 170: return -LX_EPERM;                                  // settimeofday
-  case 171:                                                    // adjtimex: report TIME_OK
-    if (a0) memset((void*)a0, 0, 208);
-    return 0;
+  case 171: {                                                  // adjtimex
+    // Linux arm64's timex is 208 bytes. Only the read-only modes=0 query is
+    // backed by the host NTP clock. Never allow a guest to discipline the Mac.
+    struct lx_timex_clock tx;
+    if (!a0 || gmem_guest_export_copyin(NULL, a0, &tx, sizeof tx) != 0)
+      return -LX_EFAULT;
+    if (tx.modes) return -LX_EOPNOTSUPP;
+    struct timex host = {0};
+    int state = ntp_adjtime(&host);
+    if (state < 0) return eret();
+    struct ntptimeval clock = {0};
+    if (ntp_gettime(&clock) < 0) return eret();
+    memset(&tx, 0, sizeof tx);
+    tx.offset = host.offset;
+    tx.freq = host.freq;
+    tx.maxerror = host.maxerror;
+    tx.esterror = host.esterror;
+    tx.status = host.status;
+    tx.constant = host.constant;
+    tx.precision = host.precision;
+    tx.tolerance = host.tolerance;
+    tx.time_sec = clock.time.tv_sec;
+    tx.time_usec = (host.status & STA_NANO) ? clock.time.tv_nsec :
+        clock.time.tv_nsec / 1000;
+    tx.tick = 1000000 / LX_USER_HZ;
+    tx.ppsfreq = host.ppsfreq;
+    tx.jitter = host.jitter;
+    tx.shift = host.shift;
+    tx.stabil = host.stabil;
+    tx.jitcnt = host.jitcnt;
+    tx.calcnt = host.calcnt;
+    tx.errcnt = host.errcnt;
+    tx.stbcnt = host.stbcnt;
+    tx.tai = clock.tai;
+    if (gmem_guest_copyout_checked(a0, &tx, sizeof tx) != 0)
+      return -LX_EFAULT;
+    return state;
+  }
 
   // ===== 180..197: SysV IPC / POSIX mqueues ================================
   // POSIX mqueues (mq_open/...) have NO macOS equivalent (Darwin implements SysV IPC and POSIX

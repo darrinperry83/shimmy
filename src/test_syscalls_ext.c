@@ -29,6 +29,7 @@
 #define LX_EPERM   1
 #define LX_ENOENT  2
 #define LX_EBADF   9
+#define LX_EFAULT  14
 #define LX_EINVAL  22
 #define LX_ENOSYS  38
 #define LX_AT_FDCWD (-100)
@@ -485,7 +486,7 @@ int main(void) {
     CHECK(SC1(125, 1) >= SC1(126, 1), "FIFO max < min?");
     CHECK(SC1(125, 77) == -LX_EINVAL, "bad sched policy must be -EINVAL");
     CHECK(SC3(116, 0, 0, 0) == 0, "syslog stub must return 0");
-    CHECK(SC1(171, NULL) == 0, "adjtimex stub must return 0");
+    CHECK(SC1(171, NULL) == -LX_EFAULT, "adjtimex null buffer must fail");
   }
 
   // -------------------------------------------------------------------- signals
