@@ -5522,10 +5522,23 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
 
   // ---------- 278 getrandom ----------
   case 278: {
-    void* buf = (void*)a0; size_t len = (size_t)a1;
-    if (!buf && len) return -LX_EFAULT;
-    arc4random_buf(buf, len);
-    return (long)len;
+    /* The host CSPRNG is ready before a guest runs.  Its secure output
+     * satisfies the default and NONBLOCK urandom modes, but it cannot model
+     * the separate RANDOM/INSECURE sources.  Linux permits a short result
+     * above 256 bytes; keeping this call to one 256-byte chunk also avoids
+     * unbounded host work on a guest-supplied length. */
+    unsigned flags = (unsigned)a2;
+    if (flags & ~7u) return -LX_EINVAL;
+    if ((flags & 6u) == 6u) return -LX_EINVAL;
+    if (flags & 6u) return -LX_EOPNOTSUPP; /* RANDOM or INSECURE */
+    if (!a1) return 0;
+    if (!a0) return -LX_EFAULT;
+    size_t n = a1 < 256 ? (size_t)a1 : 256;
+    unsigned char bytes[256];
+    arc4random_buf(bytes, n);
+    if (gmem_guest_copyout_checked(a0, bytes, n) != 0)
+      return -LX_EFAULT;
+    return (long)n;
   }
 
   // ---------- 293 rseq ----------
