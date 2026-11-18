@@ -1607,10 +1607,36 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return r < 0 ? eret() : r;
   }
   case 71: {                                                   // sendfile(out, in, off*, count)
-    long long off, *offp = 0;
-    if (a2) { off = *(long long*)a2; offp = &off; }
-    long r = bounce_copy((int)a1, offp, (int)a0, 0, (size_t)a3, 0);
-    if (r >= 0 && a2) *(long long*)a2 = off;
+    int out_fd = (int)a0, in_fd = (int)a1;
+    long long off = 0, initial = 0;
+    if (a2 && gmem_guest_export_copyin(NULL, a2, &off, sizeof off) != 0)
+      return -LX_EFAULT;
+    if (a2 && off < 0) return -LX_EINVAL;
+    if (in_fd < 0 || out_fd < 0 || shim_fd_reserved(in_fd) ||
+        shim_fd_reserved(out_fd)) return -LX_EBADF;
+    int in_fl = fcntl(in_fd, F_GETFL), out_fl = fcntl(out_fd, F_GETFL);
+    if (in_fl < 0 || out_fl < 0) return -LX_EBADF;
+    if ((in_fl & O_ACCMODE) == O_WRONLY ||
+        (out_fl & O_ACCMODE) == O_RDONLY) return -LX_EBADF;
+    if (out_fl & O_APPEND) return -LX_EINVAL;
+    struct stat st, out_st;
+    if (fstat(in_fd, &st) < 0 || fstat(out_fd, &out_st) < 0) return eret();
+    if (!S_ISREG(st.st_mode)) return -LX_EINVAL;
+    if (S_ISREG(out_st.st_mode) && st.st_dev == out_st.st_dev &&
+        st.st_ino == out_st.st_ino) return -LX_EINVAL;
+    if (a2) initial = off;
+    /* Linux may return a short transfer. Keep each host copy bounded. */
+    size_t count = (size_t)a3;
+    if (count > 1024 * 1024) count = 1024 * 1024;
+    if (a2 && initial > INT64_MAX - (int64_t)count) return -LX_EINVAL;
+    long r = bounce_copy(in_fd, a2 ? &off : NULL, out_fd, NULL, count, 0);
+    if (a2) {
+      /* bounce_copy updates its local offset only on its clean-exit path.
+       * A short write followed by an error also advances by the bytes sent. */
+      if (r > 0) off = initial + r;
+      if (gmem_guest_copyout_checked(a2, &off, sizeof off) != 0)
+        return -LX_EFAULT;
+    }
     return r;
   }
   case 74: return signalfd4_shim((int)a0, (const uint64_t*)a1, (size_t)a2, (int)a3);
