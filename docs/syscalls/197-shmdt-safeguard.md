@@ -7,8 +7,8 @@ an unrelated host mapping would violate the guest boundary. This isolated
 change returns `ENOSYS` before any host `shmdt` call.
 
 This is a narrow guard, not Linux-compatible shared memory. `shmget` (194),
-`shmctl` (195), and `shmat` (196) require their own instance-scoped safeguards
-or a common private backend. The latter must track segment IDs, attachments,
+`shmctl` (195), and `shmat` (196) now also refuse host IPC. A compatible
+private backend must track segment IDs, attachments,
 fork/exec inheritance, and detach/removal lifetime. Existing Qt
 `QSharedMemory` flows may regress with an unavailable `shmdt`.
 

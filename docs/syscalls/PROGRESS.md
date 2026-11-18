@@ -128,9 +128,12 @@ Current safety and refusal status is summarized in [`SAFEGUARDS.md`](SAFEGUARDS.
 | 179 | `sysinfo` | `syscall/179-sysinfo-blocker` | Blocked; runtime refusal withheld | Current route invents free RAM, swap, process count and writes directly to guest memory. Truthful `EOPNOTSUPP` refusal caused Arch init to abort before login. Guest resource accounting and a boot-compatible policy are needed; no runtime change merged. |
 | 186 | `msgget` | `syscall/186-msgget-refuse` | Squash merged safeguard | Guest key lookup and creation return `ENOSYS` before host-global Darwin queue access. ARM64 probe and private Arch boot passed. This is not compatible message queues. |
 | 189 | `msgsnd` | `syscall/189-msgsnd-host-id-guard` | Squash merged safeguard | Arbitrary guest queue IDs and buffers return `ENOSYS` before host access. ARM64 probe and private Arch boot passed. This is not compatible message queues. |
-| 190 | `semget` | `syscall/190-semget-20261118` | Squash merged safeguard | Guest keys now return `ENOSYS` before host-global Darwin semaphore access. ARM64 probe and private Arch boot passed; companion #191–193 still accept raw host IDs. |
+| 190 | `semget` | `syscall/190-semget-20261118` | Squash merged safeguard | Guest keys now return `ENOSYS` before host-global Darwin semaphore access. ARM64 probe and private Arch boot passed; the full #190–193 family is guarded. |
 | 192 | `semtimedop` | `syscall/192-semtimedop-host-id-guard` | Squash merged safeguard | Refuses raw host semaphore IDs and unsupported finite waits before guest pointer or host IPC access. ARM64 probe and private Arch boot passed; no semaphore behavior is claimed. |
-| 194 | `shmget` | `syscall/194-shmget` | Squash merged safeguard | Guest keys now return `ENOSYS` before host-global Darwin shared-memory access. ARM64 probe and private Arch boot passed; companion #195–197 still need isolation. |
+| 194 | `shmget` | `syscall/194-shmget` | Squash merged safeguard | Guest keys now return `ENOSYS` before host-global Darwin shared-memory access. ARM64 probe and private Arch boot passed; the full #194–197 family is guarded. |
+| 195 | `shmctl` | `syscall/195-shmctl-20261118` | Squash merged safeguard | Refuses all commands, including destructive IPC_RMID, before host IPC. ARM64 probe, private Arch boot, and merged integration probe passed. |
+| 196 | `shmat` | `syscall/196-shmat-20261118` | Squash merged safeguard | Refuses raw segment IDs before attaching host shared memory. ARM64 probe, private Arch boot, and merged integration probe passed. |
+| 197 | `shmdt` | `syscall/197-shmdt-20261118` | Squash merged safeguard | Refuses guest addresses before detaching host mappings. ARM64 probe, private Arch boot, and merged integration probe passed. |
 
 ## Already merged before this batch
 
@@ -344,3 +347,5 @@ After rebasing onto concurrent `725b605` and `45f46d9` graphics/session commits,
 `semop` (#193) now refuses a raw host semaphore ID before reading the guest operation array or calling Darwin. Its ARM64 no-mutation probe, CLI build, and private Arch login/D-Bus boot passed in isolation; the merged CLI build and #190/#191/#193 probes passed after resolving the adjacent #191 merge. #192 still needs its own gate.
 
 `semtimedop` (#192) now refuses raw host semaphore IDs and finite waits before Darwin's untimed `semop`. Its ARM64 refusal probe, CLI build, and private Arch login/D-Bus boot passed in isolation; the merged CLI build and #190–193 probes passed after resolving adjacent changes. The family still lacks a private semaphore backend.
+
+`shmctl`, `shmat`, and `shmdt` (#195–197) now refuse raw host segment IDs or attachment addresses before touching Darwin IPC. Each passed an isolated ARM64 probe, CLI build, and private Arch login/D-Bus boot. The merged #194–197 probes and combined #191–197 Arch boot also passed: fresh LOGIN prompt and settled D-Bus broker/launcher. These are safety refusals, not Linux-compatible SysV IPC; Qt shared-memory and semaphore users may receive `ENOSYS`. A guest-private shared backend is the next compatibility step.

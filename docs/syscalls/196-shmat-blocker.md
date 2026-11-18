@@ -7,8 +7,8 @@ memory to a guest. A valid guest ID registry and attachment lifetime model do
 not yet exist. #196 now returns `ENOSYS` before calling host IPC.
 
 This deliberately disables `shmat`, including any Qt `QSharedMemory` path.
-It does not make the SysV shared-memory family safe or compatible: `shmctl`
-(#195) and `shmdt` (#197) require separate ID/attachment guards. A future
+It does not make the SysV shared-memory family compatible: `shmctl`
+(#195) and `shmdt` (#197) now also refuse host IPC. A future
 implementation needs per-instance opaque IDs, permission checks, mapped-page
 accounting, fork/exec ownership and final cleanup.
 

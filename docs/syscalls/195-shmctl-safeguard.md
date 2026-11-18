@@ -7,8 +7,8 @@ scoped safely to the Shimmy instance. This isolated change returns `ENOSYS`
 for all `shmctl` commands before any host IPC call.
 
 This is a narrow safety guard, not Linux-compatible shared memory. `shmget`
-(194), `shmat` (196), and `shmdt` (197) still have independent host-namespace
-and lifecycle risks. Qt `QSharedMemory` uses `IPC_STAT` and may stop working
+(194), `shmat` (196), and `shmdt` (197) now also refuse host IPC. Qt
+`QSharedMemory` uses `IPC_STAT` and may stop working
 under this guard. A complete design needs private guest IDs, permissions,
 attachments, metadata, fork/exec sharing, and cleanup before the family can
 be advertised as compatible.
