@@ -47,6 +47,7 @@
 #include "timerfd_shim.h"
 #include "syscalls.h"
 #include "syscalls_ext.h"
+#include "seccomp_runtime.h"
 #include "net.h"
 #include "bootstrap.h"
 #include "gmem.h"
@@ -199,6 +200,9 @@ static unsigned long g_guest_tpidr;
 // LOUDLY with -ENOSYS instead of silently doing the wrong thing and hanging.
 static long route_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigned long a2,
                           unsigned long a3, unsigned long a4, unsigned long a5);
+static int seccomp_predispatch(unsigned long nr, unsigned long a0, unsigned long a1,
+                              unsigned long a2, unsigned long a3, unsigned long a4,
+                              unsigned long a5, long *result);
 static long route_syscall_fc(unsigned long nr, unsigned long a0, unsigned long a1,
                              unsigned long a2, unsigned long a3, unsigned long a4,
                              unsigned long a5) {
@@ -278,6 +282,8 @@ static long route_syscall_census(unsigned long nr, unsigned long a0, unsigned lo
 
 static long route_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigned long a2,
                           unsigned long a3, unsigned long a4, unsigned long a5) {
+  long denied;
+  if (seccomp_predispatch(nr, a0, a1, a2, a3, a4, a5, &denied)) return denied;
   // exit / exit_group. The guest's exit becomes a host _exit(), which skips atexit(), so the W^X
   // final counts have to be printed HERE or they are never printed at all -- and they are the only
   // way to see the emulation THRASHING, which is this design's failure mode. (census_dump() had to
@@ -388,8 +394,10 @@ struct gthread {
                                  // clobbered each other's stash between enter and leave.
   int           vfork_slot;      // 1-based index into g_vf, or 0
   int           is_child;        // created by clone(): exit() must end the thread, not the process
+  const struct shim_seccomp_state* seccomp; // immutable policy inherited by guest descendants
 };
 static struct gthread   g_gt[MAX_GTHREAD];
+static const struct shim_seccomp_state* g_seccomp_seed;
 static pthread_mutex_t  g_gt_mu = PTHREAD_MUTEX_INITIALIZER;
 static int              g_next_tid = 1;
 static int              g_gt_peak;      // high-water mark of live records; see gt_for()
@@ -406,6 +414,7 @@ static struct gthread* gt_for(mach_port_t th) {
       if (!g_gt[i].used) {
         memset(&g_gt[i], 0, sizeof g_gt[i]);
         g_gt[i].used = 1; g_gt[i].port = th; g_gt[i].tid = g_next_tid++;
+        g_gt[i].seccomp = g_seccomp_seed;
         r = &g_gt[i];
         break;
       }
@@ -423,6 +432,7 @@ static struct gthread* gt_for(mach_port_t th) {
           continue;                                  // still alive: leave it alone
         memset(&g_gt[i], 0, sizeof g_gt[i]);
         g_gt[i].used = 1; g_gt[i].port = th; g_gt[i].tid = g_next_tid++;
+        g_gt[i].seccomp = g_seccomp_seed;
         r = &g_gt[i];
         fprintf(stderr, "[shim] gthread table full; reclaimed the record of a dead thread\n");
         break;
@@ -511,6 +521,30 @@ static unsigned long gt_x18_get(struct gthread* g) {
 // The record for the thread currently in a syscall. Set by the trap handler before dispatch so
 // syscalls.c can ask "which guest thread am I?" without threading a parameter through everything.
 static _Thread_local struct gthread* t_cur;
+
+static int seccomp_predispatch(unsigned long nr, unsigned long a0, unsigned long a1,
+                              unsigned long a2, unsigned long a3, unsigned long a4,
+                              unsigned long a5, long *result) {
+  const struct shim_seccomp_state* state = t_cur ? t_cur->seccomp : g_seccomp_seed;
+  if (!state) return 0; // ordinary unfiltered guests pay one predictable branch
+  const uint64_t args[6] = {a0, a1, a2, a3, a4, a5};
+  return shim_seccomp_state_check(state, (uint32_t)nr, args,
+                                  0 /* guest IP is not available here */, result);
+}
+
+int guest_no_new_privs_get(void) {
+  const struct shim_seccomp_state* state = t_cur ? t_cur->seccomp : g_seccomp_seed;
+  return shim_seccomp_state_no_new_privs(state);
+}
+
+long guest_no_new_privs_set(void) {
+  if (guest_no_new_privs_get()) return 0;
+  struct shim_seccomp_state* state = shim_seccomp_state_new(NULL, 0, 1);
+  if (!state) return -12; // ENOMEM, with no guest-visible state change
+  if (t_cur) t_cur->seccomp = state;
+  else g_seccomp_seed = state;
+  return 0;
+}
 
 int  guest_tid(void)        { return t_cur ? t_cur->tid : (int)syscalls_guest_pid(); }
 
@@ -897,10 +931,26 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
   if (!arg0env) { free(hargv); return -12; }
   snprintf(arg0env, arg0env_size, "RDGUESTARGV0=%s", guest_arg0);
 
-  char** henv = (char**)calloc((size_t)genvc + ncarry + 6, sizeof *henv);
+  char** henv = (char**)calloc((size_t)genvc + ncarry + 7, sizeof *henv);
   if (!henv) { free(arg0env); free(hargv); return -12; }
+  int seccomp_fd = -1;
+  char seccomp_env[48];
+  const struct shim_seccomp_state* seccomp_state =
+      t_cur ? t_cur->seccomp : g_seccomp_seed;
+  if (seccomp_state) {
+    seccomp_fd = shim_seccomp_state_export_fd(seccomp_state);
+    if (seccomp_fd < 0) { free(henv); free(arg0env); free(hargv); return -12; }
+    seccomp_fd = shim_fd_reserve(seccomp_fd);
+    if (seccomp_fd < 0 || !shim_fd_reserved(seccomp_fd) ||
+        fcntl(seccomp_fd, F_SETFD, 0) < 0) {
+      if (seccomp_fd >= 0) { shim_fd_unreserve(seccomp_fd); close(seccomp_fd); }
+      free(henv); free(arg0env); free(hargv); return -12;
+    }
+    snprintf(seccomp_env, sizeof seccomp_env, "RDSECCOMP_FD=%d", seccomp_fd);
+  }
   int m = 0;
   henv[m++] = (char*)"RDGUESTENV=1";
+  if (seccomp_fd >= 0) henv[m++] = seccomp_env; // host-owned capability precedes guest env
   henv[m++] = cwdenv;
   henv[m++] = ppidenv;
   henv[m++] = signalcarry;
@@ -909,7 +959,8 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
     // These are host-side paths, not guest environment variables. A guest
     // must not redirect the shared UTS record or synthetic /proc backing.
     if (!strncmp(envp[i], "RDSOCKETGROUP=", sizeof("RDSOCKETGROUP=") - 1) ||
-        !strncmp(envp[i], "RDX_MEMFD_DIR=", sizeof("RDX_MEMFD_DIR=") - 1))
+        !strncmp(envp[i], "RDX_MEMFD_DIR=", sizeof("RDX_MEMFD_DIR=") - 1) ||
+        !strncmp(envp[i], "RDSECCOMP_", sizeof("RDSECCOMP_") - 1))
       continue;
     henv[m++] = envp[i];
   }
@@ -931,6 +982,7 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
     // separate host shim and hand the pid to the parent that is blocked waiting for exactly this.
     pid_t np = -1;
     int rc = posix_spawn(&np, g_self_path, NULL, NULL, hargv, henv);
+    if (seccomp_fd >= 0) { shim_fd_unreserve(seccomp_fd); close(seccomp_fd); }
     if (getenv("RDEXECDBG"))
       fprintf(stderr, "[exec-spawn] '%s' vfork posix_spawn rc=%d np=%d errno=%d\n",
               guest_path, rc, (int)np, rc != 0 ? errno : 0);
@@ -944,6 +996,7 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
   }
   execve(g_self_path, hargv, henv);
   int exec_error = errno;
+  if (seccomp_fd >= 0) { shim_fd_unreserve(seccomp_fd); close(seccomp_fd); }
   fprintf(stderr, "[shim] host re-exec failed for %s: %s\n", exec_guest_path, strerror(exec_error));
   free(arg0env); free(hargv); free(henv);
   return -(long)linux_errno_from_host(exec_error);
@@ -1066,6 +1119,7 @@ void guest_vfork_finish(long host_pid, int status) {
 struct child_start {
   unsigned long regs[GUEST_REGS_WORDS];
   unsigned long tls, ctid, x18;
+  const struct shim_seccomp_state* seccomp;
   int           tid;
   int           settls;
 };
@@ -1083,6 +1137,7 @@ static void* child_trampoline(void* arg) {
   if (g) {
     g->tid = cs->tid;
     g->is_child = 1;
+    g->seccomp = cs->seccomp;
     g->ctid = cs->ctid;
     if (cs->settls) g->tpidr = cs->tls;
   }
@@ -1107,14 +1162,16 @@ static void* child_trampoline(void* arg) {
 
 
 // A guest thread's saved register file, used to resume the guest after a fork().
-struct fork_ctx { unsigned long regs[GUEST_REGS_WORDS]; unsigned long x18; };
+struct fork_ctx { unsigned long regs[GUEST_REGS_WORDS]; unsigned long x18;
+                  const struct shim_seccomp_state* seccomp; };
 
 static void* forked_guest(void* arg) {
   fastcall_thread_init();   // per-thread native stack for the syscall fast path
   struct fork_ctx* fc = (struct fork_ctx*)arg;
   mach_port_t self = mach_thread_self();
   struct gthread* g = gt_for(self);
-  if (g) { g->tid = (int)syscalls_guest_pid(); g->is_child = 0; g->tpidr = g_guest_tpidr; }
+  if (g) { g->tid = (int)syscalls_guest_pid(); g->is_child = 0;
+           g->tpidr = g_guest_tpidr; g->seccomp = fc->seccomp; }
   // fork() kept only the calling thread — the EXCEPTION thread — so the guest thread that called
   // fork(), and its TSD block, do not exist in this child. This is a brand new pthread with a
   // brand new, all-zero TSD block, so the parent's x18 has to be re-seeded into it. (The
@@ -1194,6 +1251,7 @@ static long do_fork(const arm_thread_state64_t* ts) {
   // state survives, so t_cur's record is what the child's single guest thread inherits.
   unsigned long saved_tpidr = gt_tpidr_get(t_cur);   // the LIVE word, i.e. what a veneer wrote
   unsigned long saved_x18   = gt_x18_get(t_cur);   // the LIVE word, i.e. what the veneers wrote
+  const struct shim_seccomp_state* saved_seccomp = t_cur ? t_cur->seccomp : g_seccomp_seed;
   long parent_guest_pid = syscalls_guest_pid();    // child's guest ppid (1 for a direct child of init)
 
   fflush(NULL);                              // do not duplicate buffered output into the child
@@ -1281,6 +1339,7 @@ static long do_fork(const arm_thread_state64_t* ts) {
   fc->regs[31] = (unsigned long)ts->__sp;
   fc->regs[32] = (unsigned long)ts->__pc + 4;
   fc->x18      = saved_x18;                  // forked_guest re-seeds it into its own TSD slot
+  fc->seccomp  = saved_seccomp;
 
   pthread_t gt;
   if (pthread_create(&gt, NULL, forked_guest, fc) != 0) _exit(127);
@@ -1296,7 +1355,8 @@ static long do_fork(const arm_thread_state64_t* ts) {
 
 static void* vfork_trampoline(void* arg);
 struct vfork_start { unsigned long regs[GUEST_REGS_WORDS]; int slot;
-                     unsigned long tpidr, x18; };
+                     unsigned long tpidr, x18;
+                     const struct shim_seccomp_state* seccomp; };
 
 // CLONE_VM without CLONE_THREAD: run the child on a thread (it shares memory, so that is exact)
 // and block here until it execs or exits, as CLONE_VFORK requires.
@@ -1322,6 +1382,7 @@ static long do_vfork(const arm_thread_state64_t* ts, unsigned long stack) {
   // child's TLS at 0 and its first errno write faults at TLS-164.
   vs->tpidr    = gt_tpidr_get(t_cur);      // the LIVE word, not a stale copy
   vs->x18      = gt_x18_get(t_cur);        // ditto for x18: the LIVE word, not a stale copy
+  vs->seccomp  = t_cur ? t_cur->seccomp : g_seccomp_seed;
 
   struct fdsnap snap;
   fd_snapshot(&snap);
@@ -1358,6 +1419,7 @@ static void* vfork_trampoline(void* arg) {
     g->is_child = 1;
     g->vfork_slot = vs->slot;
     g->tpidr = vs->tpidr;
+    g->seccomp = vs->seccomp;
   }
   // Another brand new pthread with an all-zero TSD block. CLONE_VM means the child shares memory
   // with the parent, so it also inherits the parent's x18 — but not the parent's TSD slot, which
@@ -1495,6 +1557,7 @@ static long do_clone(const arm_thread_state64_t* ts) {
   cs->settls   = (flags & LX_CLONE_SETTLS) != 0;
   cs->ctid     = (flags & LX_CLONE_CHILD_CLEARTID) ? ctid : 0;
   cs->x18      = gt_x18_get(t_cur);       // the cloning thread's LIVE x18, veneer-written or not
+  cs->seccomp  = t_cur ? t_cur->seccomp : g_seccomp_seed;
 
   pthread_mutex_lock(&g_gt_mu);
   int tid = g_next_tid++;
@@ -2295,6 +2358,23 @@ int main(int argc, char** argv) {
       !realpath(self_image, g_self_path) || !realpath(rootfs, g_rootfs_path)) {
     fprintf(stderr, "[shim] cannot resolve shim executable or guest root: %s\n", strerror(errno));
     return 1;
+  }
+  const char* seccomp_number = getenv("RDSECCOMP_FD");
+  if (seccomp_number) {
+    char* end = NULL;
+    long fd = strtol(seccomp_number, &end, 10);
+    if (!getenv("RDGUESTENV") || end == seccomp_number || *end ||
+        fd < 256 || fd > 65535) {
+      fprintf(stderr, "[shim] invalid private seccomp inheritance capability\n");
+      return 1;
+    }
+    g_seccomp_seed = shim_seccomp_state_import_fd((int)fd);
+    close((int)fd);
+    unsetenv("RDSECCOMP_FD");
+    if (!g_seccomp_seed) {
+      fprintf(stderr, "[shim] refused malformed private seccomp inheritance state\n");
+      return 1;
+    }
   }
   const char* guestpath = argv[2];          // guest-absolute, e.g. /bin/busybox
   // systemd keeps its host PID when it re-execs. Recover the rootfs lock's

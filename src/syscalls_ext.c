@@ -1063,7 +1063,6 @@ static unsigned long g_timerslack = 50000;
 
 static long do_prctl(int opt, unsigned long a1, unsigned long a2,
                      unsigned long a3, unsigned long a4) {
-  (void)a2; (void)a3; (void)a4;
   switch (opt) {
     case LX_PR_SET_NAME: {
       if (!a1) return -LX_EFAULT;
@@ -1088,8 +1087,12 @@ static long do_prctl(int opt, unsigned long a1, unsigned long a2,
     case LX_PR_GET_KEEPCAPS:   return 0;
     case LX_PR_SET_SECUREBITS: g_securebits = (int)a1; return 0;
     case LX_PR_GET_SECUREBITS: return g_securebits;
-    case LX_PR_SET_NO_NEW_PRIVS: return 0;
-    case LX_PR_GET_NO_NEW_PRIVS: return 0;
+    case LX_PR_SET_NO_NEW_PRIVS:
+      if (a1 != 1 || a2 || a3 || a4) return -LX_EINVAL;
+      return guest_no_new_privs_set();
+    case LX_PR_GET_NO_NEW_PRIVS:
+      if (a1 || a2 || a3 || a4) return -LX_EINVAL;
+      return guest_no_new_privs_get();
     case LX_PR_CAPBSET_READ:   return 0;
     case LX_PR_CAPBSET_DROP:   return 0; // CapBnd is already empty; dropping remains idempotent.
     case LX_PR_SET_TIMERSLACK: g_timerslack = a1 ? a1 : g_timerslack; return 0;

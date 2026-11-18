@@ -34,7 +34,8 @@ int shim_seccomp_bpf_verify(const struct shim_sock_filter *p, size_t n) {
     const struct shim_sock_filter *f = &p[i];
     switch (f->code) {
       case SHIM_BPF_LD_W_ABS:
-        if (f->k > sizeof(struct shim_seccomp_data) - 4 || (f->k & 3)) return -1;
+        if (f->k > sizeof(struct shim_seccomp_data) - 4 || (f->k & 3) ||
+            (f->k >= 8 && f->k < 16)) return -1; /* guest IP is not plumbed yet */
         break;
       case SHIM_BPF_LD_IMM: case SHIM_BPF_LDX_IMM:
       case SHIM_BPF_AND_K: case SHIM_BPF_OR_K: case SHIM_BPF_XOR_K:
@@ -67,6 +68,13 @@ uint32_t shim_seccomp_bpf_eval(const struct shim_sock_filter *p, size_t n,
                               const struct shim_seccomp_data *data) {
   const uint32_t deny = SHIM_SECCOMP_RET_ERRNO | 1u; /* EPERM */
   if (!data || shim_seccomp_bpf_verify(p, n) != 0) return deny;
+  return shim_seccomp_bpf_eval_verified(p, n, data);
+}
+
+uint32_t shim_seccomp_bpf_eval_verified(const struct shim_sock_filter *p, size_t n,
+                                       const struct shim_seccomp_data *data) {
+  const uint32_t deny = SHIM_SECCOMP_RET_ERRNO | 1u;
+  if (!p || !data || !n || n > SHIM_BPF_MAX_INSNS) return deny;
   uint32_t a = 0, x = 0;
   for (size_t pc = 0; pc < n;) {
     const struct shim_sock_filter *f = &p[pc];

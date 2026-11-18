@@ -14,6 +14,11 @@ int  guest_tid(void);
 int  guest_tid_known(int tid);
 int  guest_thread_count(void);  // live guest threads in this host process
 
+// Linux no_new_privs is monotonic and inherited by clone/fork/exec. This does
+// not install a seccomp filter; syscall 277 remains unavailable.
+int  guest_no_new_privs_get(void);
+long guest_no_new_privs_set(void);
+
 // HOST child processes the shim created on the guest's behalf (fork, and the posix_spawn behind
 // vfork/execve). These are the only pids outside this process that a guest may legitimately name:
 // it learned them from fork()/wait4(), which return real host pids. Everything else a guest passes

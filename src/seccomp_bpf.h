@@ -30,4 +30,9 @@ int shim_seccomp_bpf_verify(const struct shim_sock_filter *insns, size_t count);
 uint32_t shim_seccomp_bpf_eval(const struct shim_sock_filter *insns, size_t count,
                               const struct shim_seccomp_data *data);
 
+/* For a private immutable copy that already passed verify at construction. */
+uint32_t shim_seccomp_bpf_eval_verified(const struct shim_sock_filter *insns,
+                                       size_t count,
+                                       const struct shim_seccomp_data *data);
+
 #endif
