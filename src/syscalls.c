@@ -5427,7 +5427,10 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   }
 
   // ---------- 139 rt_sigreturn ----------
-  case 139: return 0;                           // unreachable: no signal frames are ever built
+  // No guest signal frame or saved register context exists to restore. A raw
+  // guest syscall can reach this case, so success would falsely claim a
+  // return from a handler. Keep it unavailable until signal frames exist.
+  case 139: return -LX_ENOSYS;
 
   // ---------- 153 times ----------
   case 153: {
