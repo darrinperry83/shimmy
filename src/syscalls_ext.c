@@ -1665,7 +1665,27 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return -LX_EPERM;
   }
   case 117: return -LX_EPERM;                                  // ptrace
-  case 118: case 119: return 0;                                // sched_setparam/setscheduler
+  case 118: return 0;                                          // sched_setparam
+  case 119: {                                                  // sched_setscheduler
+    /* The guest exposes SCHED_OTHER.  Do not claim an RT policy or change
+     * another guest thread's scheduler through a process-wide host API. */
+    int target = (int)a0, policy = (int)a1;
+    int32_t priority;
+    if (policy < 0 || target < 0 || !a2) return -LX_EINVAL;
+    if (gmem_guest_export_copyin(NULL, a2, &priority, sizeof priority) != 0)
+      return -LX_EFAULT;
+    if (policy != 0 && policy != 1 && policy != 2 && policy != 3 &&
+        policy != 5 && policy != 6 && policy != 7 &&
+        policy != (0x40000000 | 0) && policy != (0x40000000 | 1) &&
+        policy != (0x40000000 | 2) && policy != (0x40000000 | 3) &&
+        policy != (0x40000000 | 5) && policy != (0x40000000 | 6) &&
+        policy != (0x40000000 | 7)) return -LX_EINVAL;
+    if (target && target != guest_tid() &&
+        !(target == syscalls_guest_pid() && guest_tid() == 1))
+      return guest_tid_known(target) ? -LX_EOPNOTSUPP : -LX_ESRCH;
+    if (policy == 0) return priority == 0 ? 0 : -LX_EINVAL;
+    return -LX_EOPNOTSUPP;
+  }
   case 120: {                                                  // sched_getscheduler: current thread
     // The guest exposes SCHED_OTHER for the current thread. A Linux PID here
     // names a thread, not an arbitrary Darwin process. Do not report a policy
