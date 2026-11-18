@@ -31,6 +31,9 @@ long  gmem_mmap(unsigned long addr, size_t len, int prot, int flags, int fd, lon
 long  gmem_mprotect(unsigned long addr, size_t len, int prot);
 long  gmem_munmap(unsigned long addr, size_t len);
 int gmem_guest_register_main_stack(void *address,size_t length);
+// Register only a loader-owned executable PT_LOAD, not the entire MAP_JIT
+// reservation (which may contain ELF holes or host-side JIT thunks).
+int gmem_guest_register_elf_exec(void *address,size_t length);
 int gmem_guest_export_copyout(void *unused,uint64_t guestAddress,
                               const void *bytes,size_t length);
 int gmem_guest_copyout_checked(uint64_t guestAddress,const void *bytes,size_t length);

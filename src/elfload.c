@@ -417,6 +417,14 @@ int elf_load(const char* host_path, struct loaded* out) {
       }
     }
 
+    // The MAP_JIT reservation also covers ELF gaps and host-side machinery;
+    // admit only this placed executable PT_LOAD to guest pointer queries.
+    if (is_exec && sh < pend &&
+        gmem_guest_register_elf_exec((void*)sh, (size_t)(pend - sh)) != 0) {
+      fprintf(stderr, "[elfload] %s: cannot register executable segment %d as guest memory\n",
+              host_path, i);
+      free(buf); failed = 1; break;
+    }
     free(buf);
     prev_end = pend;
     prev_jit = is_exec;

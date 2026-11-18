@@ -34,6 +34,17 @@ static int  g_map_code_calls;
 static int  g_rewrite_calls;
 
 void gmem_init(void) { g_nregions = 0; }
+// The standalone layout test does not exercise the opt-in syscall fast path.
+unsigned long fastcall_thunk_once(void) { return 0; }
+int fastcall_patch_ex(void* code,size_t len,unsigned long thunk,int* out_skipped) {
+  (void)code; (void)len; (void)thunk;
+  if (out_skipped) *out_skipped = 0;
+  return 0;
+}
+static int stub_in_region(unsigned long a,size_t len);
+int gmem_guest_register_elf_exec(void* address,size_t length) {
+  return address && length && stub_in_region((unsigned long)address,length) ? 0 : -1;
+}
 
 void* gmem_reserve(size_t len) {
   // The real one hands back MAP_JIT (kernel-placed, never MAP_FIXED, always above 4GB because the

@@ -2643,10 +2643,21 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     // __PAGEZERO mapping besides. A straight passthrough therefore told Mesa that the integer 3
     // was dereferenceable, and it duly called wl_proxy_create_wrapper((void*)3) and died on
     // `ldr x0, [x20, #0x18]`. Reproducing Linux's ENOMEM is what makes Wayland EGL work at all.
-    if (a1 == 0) return 0;
-    if (a0 < FOUR_GB) return -LX_ENOMEM;            // __PAGEZERO: never guest-dereferenceable
-    if (!host_range_mapped(a0, (size_t)a1)) return -LX_ENOMEM;
-    return ok0(mincore((void*)a0, (size_t)a1, (char*)a2));
+    const unsigned long page = 16384;                          // guest AT_PAGESZ
+    if (a0 & (page - 1)) return -LX_EINVAL;
+    if (a1 > 16ul * 1024 * 1024) return -LX_EOPNOTSUPP;
+    if (a1 > ULONG_MAX - (page - 1)) return -LX_ENOMEM;
+    unsigned long rounded = (a1 + page - 1) & ~(page - 1);
+    if (a0 > ULONG_MAX - rounded) return -LX_ENOMEM;
+    if (!rounded) return 0;
+    if (a0 < FOUR_GB || gmem_guest_range_mapped(a0, (size_t)rounded) != 0 ||
+        !host_range_mapped(a0, (size_t)rounded)) return -LX_ENOMEM;
+    // Never let Darwin write residency bytes through an unchecked guest
+    // pointer. The bounded stack vector is copied out only after it succeeds.
+    unsigned char vec[1024];
+    if (mincore((void*)a0, (size_t)rounded, (char*)vec) != 0) return eret();
+    return gmem_guest_copyout_checked(a2, vec, (size_t)(rounded / page)) == 0 ?
+           0 : -LX_EFAULT;
   }
   case 234: return -LX_ENOSYS;                                  // remap_file_pages (dead on Linux too)
   case 235: {                                                   // mbind: default-policy subset

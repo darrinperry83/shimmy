@@ -3890,6 +3890,22 @@ int gmem_guest_register_main_stack(void *address,size_t length){
   pthread_once(&g_export_ranges_once,g_export_ranges_init);
   return rdguest_range_map(&g_export_ranges,(uintptr_t)address,length,true)?0:-1;
 }
+int gmem_guest_register_elf_exec(void *address,size_t length){
+  uintptr_t lo=(uintptr_t)address;
+  if(!address||!length||length>UINTPTR_MAX-lo)return -1;
+  // The loader calls this only after placing an executable PT_LOAD. Require
+  // that it still belongs to gmem's tracked JIT reservation before admitting
+  // the pages to the guest ledger as read-only.
+  gm_lock();
+  int owned=reg_containing(lo,lo+length)>=0;
+  int ok=0;
+  if(owned){
+    pthread_once(&g_export_ranges_once,g_export_ranges_init);
+    ok=rdguest_range_map(&g_export_ranges,lo,length,false);
+  }
+  gm_unlock();
+  return ok?0:-1;
+}
 int gmem_guest_export_copyout(void *unused,uint64_t guestAddress,
                               const void *bytes,size_t length){
   (void)unused;
