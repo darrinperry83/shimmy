@@ -1118,7 +1118,7 @@
       "verified_compatible": false
     },
     {
-      "classification_reason": "dispatch present; Linux semantics not verified by this static scan",
+      "classification_reason": "bounded: ordinary file path retained; shim-owned descriptors rejected",
       "dispatch_locations": [
         {
           "file": "src/syscalls_ext.c",
@@ -1128,12 +1128,12 @@
       ],
       "dispatch_state": "case",
       "name": "fchown",
-      "notes": "",
+      "notes": "Reserved descriptor guard; virtual ownership is compatibility metadata, not DAC enforcement. See docs/syscalls/55-fchown-reserved-fd.md.",
       "number": 55,
       "priority": "P2_other",
       "runtime_evidence": [],
-      "semantic_status": "unknown",
-      "test_evidence": [],
+      "semantic_status": "partial_or_unknown",
+      "test_evidence": ["tests/run-fchown-reserved.py"],
       "trap_override": false,
       "verified_compatible": false
     },

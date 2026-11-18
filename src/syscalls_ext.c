@@ -1702,12 +1702,17 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (e < 0) return e;
     return ok0(fchownat(hdirfd, host, (uid_t)a2, (gid_t)a3, host_at_flags((int)a4)));
   }
-  case 55: // fchown
+  case 55: {                                                   // fchown
+    int fd = (int)a0;
+    // A shim-owned descriptor is not a guest file. Never attach virtual
+    // ownership metadata to it or change its real Darwin ownership.
+    if (fd < 0 || shim_fd_reserved(fd)) return -LX_EBADF;
     if (g_uid0) {
-      struct stat st; if(fstat((int)a0,&st)<0)return eret();
+      struct stat st; if(fstat(fd,&st)<0)return eret();
       return ok0(guest_ownership_set(&st,(uint32_t)a1,(uint32_t)a2));
     }
-    return ok0(fchown((int)a0,(uid_t)a1,(gid_t)a2));
+    return ok0(fchown(fd,(uid_t)a1,(gid_t)a2));
+  }
   case 58: return -LX_EPERM;                                   // vhangup
   case 59: return do_pipe2((int*)a0, (int)a1);                 // pipe2 (net.c normally owns this)
   case 60: return -LX_EPERM;                                   // quotactl
