@@ -79,7 +79,7 @@ if [ "$BOOT_INIT" = 1 ]; then
   if [ ! -x "$INIT" ] && [ ! -x "$INIT_RESOLVED" ]; then
     echo "error: no bootable init at $ROOT/sbin/init" >&2
     echo "       install systemd + the /sbin/init symlink into the rootfs:" >&2
-    echo "       RDUID0=1 $HERE/shim_cli $ROOT /usr/bin/pacman -Sy --noconfirm --disable-sandbox systemd systemd-sysvcompat" >&2
+    echo "       RDUID0=1 $HERE/shim_cli $ROOT /usr/bin/pacman -Sy --noconfirm systemd systemd-sysvcompat" >&2
     exit 1
   fi
   echo "[run] boot-to-init: $INIT -> ${INIT_RESOLVED:-$INIT} (shim=$(basename "$SHIM"))" >&2
