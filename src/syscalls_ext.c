@@ -3545,10 +3545,11 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   }
   case 280: return -LX_EPERM;                                   // bpf
   case 281: {                                                   // execveat(dirfd, path, argv, envp, flags)
-    const char *path = (const char *)a1;
     unsigned flags = (unsigned)a4;
-    if (!path) return -LX_EFAULT;
     if (flags & ~(LX_AT_EMPTY_PATH | LX_AT_SYMLINK_NOFOLLOW)) return -LX_EINVAL;
+    char path[PATH_MAX];
+    long e = copy_guest_cstr(a1, path, sizeof path);
+    if (e < 0) return e;
     if (!path[0]) {
       if (!(flags & LX_AT_EMPTY_PATH)) return -LX_ENOENT;
       // The existing exec bridge resolves /proc/self/fd/N through F_GETPATH.

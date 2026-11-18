@@ -34,7 +34,7 @@ def main():
         link.symlink_to("/usr/bin/echo")
         shutil.copy2(root / "usr/bin/echo", detached)
         for mode in ("relative", "empty", "nofollow", "bad-flags", "bad-fd",
-                     "empty-no-flag", "detached"):
+                     "empty-no-flag", "bad-path", "detached"):
             result = subprocess.run([str(cli), str(root), "/tmp/guest-execveat", mode],
                                     env={**os.environ, "RDUID0": "1"}, capture_output=True,
                                     text=True, timeout=30, preexec_fn=no_core)

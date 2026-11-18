@@ -4,6 +4,12 @@ This file records bounded behavior that has been implemented and tested. A dispa
 
 Current safety and refusal status is summarized in [`SAFEGUARDS.md`](SAFEGUARDS.md).
 
+The isolated #281 `execveat` path correction snapshots the bounded guest
+pathname before resolution or execution. Its CLI build, eight-mode ARM64
+probe, and private Arch login/D-Bus boot gate pass; it does not change the
+existing executable, argv, or envp translation. See
+[`EXECVEAT-PATH.md`](EXECVEAT-PATH.md).
+
 ## Integration baseline
 
 - Base: `3e47e28` (`development` as tracked on 2026-11-18).

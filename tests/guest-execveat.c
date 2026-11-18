@@ -47,6 +47,9 @@ int main(int argc, char **argv) {
     } else if (!strcmp(argv[1], "empty-no-flag")) {
         path = "";
         expected = ENOENT;
+    } else if (!strcmp(argv[1], "bad-path")) {
+        path = (const char *)1;
+        expected = EFAULT;
     } else return 91;
     long rc = syscall(LX_EXECVEAT, fd, path, args, env, flags);
     if (expected && rc == -1 && errno == expected) {
