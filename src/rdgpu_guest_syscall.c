@@ -401,7 +401,8 @@ long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
             draw.version!=RDMETAL_DRAW_VERSION_TEXTURE&&
             draw.version!=RDMETAL_DRAW_VERSION_V3&&
             draw.version!=RDMETAL_DRAW_VERSION_V4&&
-            draw.version!=RDMETAL_DRAW_VERSION_V5)||
+            draw.version!=RDMETAL_DRAW_VERSION_V5&&
+            draw.version!=RDMETAL_DRAW_VERSION_V6)||
            draw.total_bytes!=a3||draw.target_handle!=a1){
             free(snapshot);pthread_mutex_unlock(&s->lock);return -EINVAL;
         }
