@@ -3078,7 +3078,22 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
       return eret();
     return -LX_EOPNOTSUPP;
   }
-  case 265: return -LX_EOPNOTSUPP;                            // open_by_handle_at (no stored handles)
+  case 265: {                                                  // open_by_handle_at
+    // No guest filesystem exports a decodable file handle. Validate the
+    // bounded Linux header and mount anchor before reporting that limit;
+    // never reinterpret untrusted handle bytes as a host path or descriptor.
+    struct { unsigned int handle_bytes; int handle_type; } fh;
+    if (!a1 || gmem_guest_export_copyin(NULL, a1, &fh, sizeof fh) != 0)
+      return -LX_EFAULT;
+    if (!fh.handle_bytes || fh.handle_bytes > 128 || fh.handle_type < 0)
+      return -LX_EINVAL;
+    int mount_fd = (int)a0;
+    if (mount_fd != LX_AT_FDCWD &&
+        (mount_fd < 0 || shim_fd_reserved(mount_fd) ||
+         fcntl(mount_fd, F_GETFD) < 0))
+      return -LX_EBADF;
+    return -LX_EOPNOTSUPP;
+  }
   case 266: {                                                   // clock_adjtime
     // The real-time clock shares the read-only timex query with adjtimex.
     // Other clock IDs have distinct kernel support and must not silently
