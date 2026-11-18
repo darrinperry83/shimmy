@@ -3309,21 +3309,25 @@ static long do_fcntl(int fd, int cmd, unsigned long arg) {
     }
     case LF_GETLK: case LF_SETLK: case LF_SETLKW:
     case LF_OFD_GETLK: case LF_OFD_SETLK: case LF_OFD_SETLKW: {
-      struct linux_flock* lf = (struct linux_flock*)arg;
-      if (!lf) return -LX_EFAULT;
+      struct linux_flock lf;
+      if (!arg || gmem_guest_export_copyin(NULL, arg, &lf, sizeof lf) != 0)
+        return -LX_EFAULT;
+      const int query = cmd == LF_GETLK || cmd == LF_OFD_GETLK;
+      if (query && gmem_guest_range_writable(arg, sizeof lf) != 0)
+        return -LX_EFAULT;
       // Linux OFD locks belong to the open file description rather than a PID.
       // macOS provides matching F_OFD_* operations; do not map these to POSIX
       // process locks, which would release at different times after dup/fork.
       const int ofd = cmd == LF_OFD_GETLK || cmd == LF_OFD_SETLK || cmd == LF_OFD_SETLKW;
-      if (ofd && lf->l_pid != 0) return -LX_EINVAL;
-      if (lf->l_type != 0 && lf->l_type != 1 && lf->l_type != 2) return -LX_EINVAL;
+      if (ofd && lf.l_pid != 0) return -LX_EINVAL;
+      if (lf.l_type != 0 && lf.l_type != 1 && lf.l_type != 2) return -LX_EINVAL;
       struct flock mf;
       memset(&mf, 0, sizeof mf);
-      mf.l_start  = lf->l_start;
-      mf.l_len    = lf->l_len;
-      mf.l_pid    = lf->l_pid;
-      mf.l_type   = (short)flock_type_l2m(lf->l_type);
-      mf.l_whence = lf->l_whence;
+      mf.l_start  = lf.l_start;
+      mf.l_len    = lf.l_len;
+      mf.l_pid    = lf.l_pid;
+      mf.l_type   = (short)flock_type_l2m(lf.l_type);
+      mf.l_whence = lf.l_whence;
       int mcmd;
       switch (cmd) {
         case LF_GETLK: mcmd = F_GETLK; break;
@@ -3334,12 +3338,14 @@ static long do_fcntl(int fd, int cmd, unsigned long arg) {
         default: mcmd = F_OFD_SETLKW; break;
       }
       if (fcntl(fd, mcmd, &mf) < 0) return herrno();
-      if (cmd == LF_GETLK || cmd == LF_OFD_GETLK) {
-        lf->l_type   = (int16_t)flock_type_m2l(mf.l_type);
-        lf->l_whence = (int16_t)mf.l_whence;
-        lf->l_start  = mf.l_start;
-        lf->l_len    = mf.l_len;
-        lf->l_pid    = mf.l_pid;
+      if (query) {
+        lf.l_type   = (int16_t)flock_type_m2l(mf.l_type);
+        lf.l_whence = (int16_t)mf.l_whence;
+        lf.l_start  = mf.l_start;
+        lf.l_len    = mf.l_len;
+        lf.l_pid    = mf.l_pid;
+        if (gmem_guest_copyout_checked(arg, &lf, sizeof lf) != 0)
+          return -LX_EFAULT;
       }
       return 0;
     }
