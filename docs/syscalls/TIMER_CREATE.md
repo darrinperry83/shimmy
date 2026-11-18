@@ -4,6 +4,10 @@ Linux `timer_create(clockid, sigevent *, timer_t *)` allocates a process-owned t
 
 Shimmy currently returns `ENOSYS` for the entire POSIX timer family (107–111). It has no per-process timer table or expiration worker, and its virtual signal delivery is incomplete. Adding only an integer ID allocator to syscall 107 would report success for a timer that cannot be armed, queried, deleted, or notify its owner. That would be a false compatibility claim. Keep the existing `ENOSYS` result until the family has a coherent backend.
 
+## Staged backend branch
+
+The separate `syscall/107-timer-create-backend` branch now contains a process-owned registry and a Linux ARM64 `sigevent` reader. It creates disarmed `CLOCK_REALTIME` or `CLOCK_MONOTONIC` timers only with explicit `SIGEV_NONE`, writes stable 32-bit IDs through checked guest memory, serializes concurrent creation, and clears the registry in a fork child. A disposable static ARM64 guest test covers pointer, clock, and notification errors, sequential IDs, and fork isolation. `./build.sh cli` passes. This branch **must remain unmerged** while `timer_settime`, `timer_gettime`, `timer_getoverrun`, and `timer_delete` still return `ENOSYS`; the new ID cannot yet be used. The test establishes a registry foundation, not useful POSIX timer support.
+
 The first bounded implementation should handle `CLOCK_MONOTONIC` and `CLOCK_REALTIME` with `SIGEV_NONE`: define a per-process timer registry with stable IDs, a locking/lifecycle rule for concurrent threads, and working create, settime, gettime, overrun, and delete operations. Add default and explicit signal notification only after the guest signal path can queue `SI_TIMER` with the correct timer ID and value. Tests should cover ARM64 `sigevent` and `timer_t` layouts, bad guest pointers, clock validation, disarmed state, one-shot and periodic expirations, concurrent deletion, and fork/exec cleanup. Compare the result against Linux before enabling syscall 107.
 
 Primary source: [Linux `kernel/time/posix-timers.c`, `do_timer_create` and `SYSCALL_DEFINE3(timer_create)`](https://github.com/torvalds/linux/blob/master/kernel/time/posix-timers.c).

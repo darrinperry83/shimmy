@@ -62,6 +62,7 @@ void fx_note(const char* fmt, ...);
 #include "syscalls_ext.h"
 #include "signalfd_shim.h"
 #include "timerfd_shim.h"
+#include "posix_timer_shim.h"
 #include "pidfd_shim.h"
 #include "gmem.h"
 #include "inotify_watch.h"
@@ -1260,7 +1261,8 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return 0;
   }
   case 104: case 105: case 106: return -LX_EPERM;              // kexec_load, init/delete_module
-  case 107: case 108: case 109: case 110: case 111:
+  case 107: return posix_timer_shim_create(a0, a1, a2);         // staged SIGEV_NONE subset
+  case 108: case 109: case 110: case 111:
     return -LX_ENOSYS;                                         // POSIX timer_*
 
   // ===== 116..128: logging + scheduling ====================================
