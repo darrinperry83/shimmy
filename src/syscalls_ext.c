@@ -88,7 +88,9 @@ extern void rd_rtnl_dup(int oldfd, int newfd);
 #define LX_ENOMEM         12
 #define LX_EACCES         13
 #define LX_EFAULT         14
+#define LX_EISDIR         21
 #define LX_EINVAL         22
+#define LX_EOVERFLOW      75
 #define LX_ESPIPE         29
 #define LX_ERANGE         34
 #define LX_ENAMETOOLONG   36
@@ -2552,14 +2554,76 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
         !host_range_mapped(base, (size_t)rounded)) return -LX_ENOMEM;
     return ok0(mlock((void*)base, (size_t)rounded));
   }
-  case 285: {                                                   // copy_file_range
-    long long ioff, ooff, *ip = 0, *op = 0;
-    if (a1) { ioff = *(long long*)a1; ip = &ioff; }
-    if (a3) { ooff = *(long long*)a3; op = &ooff; }
-    long r = bounce_copy((int)a0, ip, (int)a2, op, (size_t)a4, 0);
-    if (r >= 0 && a1) *(long long*)a1 = ioff;
-    if (r >= 0 && a3) *(long long*)a3 = ooff;
-    return r;
+  case 285: {                                                   // copy_file_range: regular-file subset
+    int in = (int)a0, out = (int)a2;
+    if ((unsigned int)a5) return -LX_EINVAL;                    // Linux requires flags=0
+    if (in < 0 || out < 0 || shim_fd_reserved(in) || shim_fd_reserved(out))
+      return -LX_EBADF;
+    struct stat si, so;
+    if (fstat(in, &si) != 0 || fstat(out, &so) != 0) return -LX_EBADF;
+    if (S_ISDIR(si.st_mode) || S_ISDIR(so.st_mode)) return -LX_EISDIR;
+    if (!S_ISREG(si.st_mode) || !S_ISREG(so.st_mode)) return -LX_EINVAL;
+    int ifl = fcntl(in, F_GETFL), ofl = fcntl(out, F_GETFL);
+    if (ifl < 0 || ofl < 0 || (ifl & O_ACCMODE) == O_WRONLY ||
+        (ofl & O_ACCMODE) == O_RDONLY || (ofl & O_APPEND)) return -LX_EBADF;
+    // Unlike shared bounce_copy, pread/pwrite lets an output error report
+    // exactly the bytes copied without consuming extra input. Concurrent
+    // mutation of either open-file offset is outside this bounded subset.
+    if (a4 > 1024ul * 1024) return -LX_EOPNOTSUPP;
+    if (a1 && a1 == a3) return -LX_EOPNOTSUPP;
+    int64_t ipos, opos;
+    if (a1) {
+      if (gmem_guest_export_copyin(NULL, a1, &ipos, sizeof ipos) != 0 ||
+          gmem_guest_copyout_checked(a1, &ipos, sizeof ipos) != 0) return -LX_EFAULT;
+    } else {
+      ipos = lseek(in, 0, SEEK_CUR);
+      if (ipos < 0) return eret();
+    }
+    if (a3) {
+      if (gmem_guest_export_copyin(NULL, a3, &opos, sizeof opos) != 0 ||
+          gmem_guest_copyout_checked(a3, &opos, sizeof opos) != 0) return -LX_EFAULT;
+    } else {
+      opos = lseek(out, 0, SEEK_CUR);
+      if (opos < 0) return eret();
+    }
+    if (ipos < 0 || opos < 0) return -LX_EINVAL;
+    if (a4 > (unsigned long)(LLONG_MAX - ipos) ||
+        a4 > (unsigned long)(LLONG_MAX - opos)) return -LX_EOVERFLOW;
+    if (!a4) return 0;
+    int same = si.st_dev == so.st_dev && si.st_ino == so.st_ino;
+    if (same) {
+      if (!a1 || !a3) return -LX_EOPNOTSUPP;
+      if (a4 && ipos < opos + (int64_t)a4 && opos < ipos + (int64_t)a4)
+        return -LX_EINVAL;
+    }
+    if (si.st_dev != so.st_dev) return -LX_EOPNOTSUPP;
+    char buf[65536];
+    size_t copied = 0;
+    long error = 0;
+    while (copied < (size_t)a4) {
+      size_t want = (size_t)a4 - copied;
+      if (want > sizeof buf) want = sizeof buf;
+      ssize_t got = pread(in, buf, want, (off_t)(ipos + (int64_t)copied));
+      if (got < 0) { error = eret(); break; }
+      if (!got) break;
+      size_t put = 0;
+      while (put < (size_t)got) {
+        ssize_t n = pwrite(out, buf + put, (size_t)got - put,
+                           (off_t)(opos + (int64_t)copied + (int64_t)put));
+        if (n <= 0) { error = n < 0 ? eret() : -LX_EIO; break; }
+        put += (size_t)n;
+      }
+      copied += put;
+      if (error || (size_t)got < want) break;
+    }
+    if (copied) {
+      int64_t nexti = ipos + (int64_t)copied, nexto = opos + (int64_t)copied;
+      if (a1) (void)gmem_guest_copyout_checked(a1, &nexti, sizeof nexti);
+      else (void)lseek(in, (off_t)nexti, SEEK_SET);
+      if (a3) (void)gmem_guest_copyout_checked(a3, &nexto, sizeof nexto);
+      else (void)lseek(out, (off_t)nexto, SEEK_SET);
+    }
+    return copied ? (long)copied : error;
   }
   case 286: {                                                   // preadv2
     // Linux's six-argument ABI puts rwf_t flags in x5; x4 is pos_h and is

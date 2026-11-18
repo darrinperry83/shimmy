@@ -1,0 +1,7 @@
+# ARM64 copy_file_range (#285)
+
+The syscall accepts two open regular-file descriptors, optional `off_t` pointers, a count, and flags. Linux currently requires flags zero; a non-NULL offset pointer advances by the bytes copied while the descriptor's current offset stays fixed. A NULL pointer uses and advances that descriptor's current offset. Copying within the same file is allowed only when the requested ranges do not overlap ([Linux manual](https://man7.org/linux/man-pages/man2/copy_file_range.2.html), [kernel implementation](https://github.com/torvalds/linux/blob/master/fs/read_write.c)).
+
+Shimmy supports same-filesystem regular files with flags zero and requests up to 1 MiB. It checks guest offset pointers, descriptor access modes, `O_APPEND`, file types, nonnegative/representable offsets, and same-file overlap before copying. The dedicated `pread`/`pwrite` loop tracks bytes actually written and advances both explicit pointers or current offsets by that count, including after partial success. The shared `bounce_copy` helper remains unchanged.
+
+This is a bounded byte-copy fallback. Cross-filesystem copies, requests above 1 MiB, aliased offset pointers, and same-file copies using a NULL offset are rejected with `EOPNOTSUPP`. Concurrent mutation of the open-file offsets or offset pointers is outside this subset; copy acceleration and sparse-hole preservation are not promised. `python3 tests/run-copy-file-range.py` builds a static ARM64 guest in a disposable root and checks content, offsets, validation, and same-file cases.
