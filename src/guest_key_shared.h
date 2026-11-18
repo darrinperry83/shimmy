@@ -23,4 +23,5 @@ long gks_ring_link(gks_namespace *ns, uint32_t caller, int32_t ring, int32_t key
 long gks_ring_search_user(gks_namespace *ns, uint32_t caller, int32_t ring,
                           const char *description);
 long gks_ring_unlink(gks_namespace *ns, uint32_t caller, int32_t ring, int32_t key);
+long gks_ring_check_owner(gks_namespace *ns, uint32_t caller, int32_t ring);
 #endif

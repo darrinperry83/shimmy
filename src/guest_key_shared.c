@@ -259,6 +259,25 @@ long gks_ring_unlink(gks_namespace *ns, uint32_t caller, int32_t ring, int32_t k
   return ring_modify(ns, caller, ring, key, 1);
 }
 
+long gks_ring_check_owner(gks_namespace *ns, uint32_t caller, int32_t serial) {
+  if (serial <= 0) return -EINVAL;
+  int fd = locked_file(ns, 0);
+  if (fd < 0) return fd;
+  long result = -ENOENT;
+  for (size_t i = 0; i < GKS_MAX_RINGS; i++) {
+    struct gks_ring ring;
+    if (full_read(fd, &ring, sizeof ring, ring_offset(i)) || !valid_ring(&ring)) {
+      result = -EIO; break;
+    }
+    if (ring.occupied && ring.serial == (uint32_t)serial) {
+      result = ring.owner == caller ? 0 : -EACCES;
+      break;
+    }
+  }
+  unlock_file(fd);
+  return result;
+}
+
 long gks_ring_search_user(gks_namespace *ns, uint32_t caller, int32_t ring_serial,
                           const char *description) {
   if (ring_serial <= 0 || !description) return -EINVAL;
