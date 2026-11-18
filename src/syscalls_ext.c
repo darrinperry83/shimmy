@@ -3507,7 +3507,13 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
 #endif
   }
   case 277: return -LX_ENOSYS;                                  // seccomp
-  case 279: return do_memfd_create((const char*)a0, (unsigned)a1);
+  case 279: {                                                 // memfd_create(name, flags)
+    char guest_name[250];
+    e = copy_guest_cstr(a0, guest_name, sizeof guest_name);
+    if (e == -LX_ENAMETOOLONG) return -LX_EINVAL; // prior name limit
+    if (e < 0) return e;
+    return do_memfd_create(guest_name, (unsigned)a1);
+  }
   case 280: return -LX_EPERM;                                   // bpf
   case 281: {                                                   // execveat(dirfd, path, argv, envp, flags)
     const char *path = (const char *)a1;
