@@ -62,6 +62,7 @@ void fx_note(const char* fmt, ...);
 #include "signalfd_shim.h"
 #include "timerfd_shim.h"
 #include "pidfd_shim.h"
+#include "gmem.h"
 #include "inotify_watch.h"
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -1893,7 +1894,19 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
       : pwritev((int)a0, (const struct iovec*)a1, (int)a2, (off_t)pos);
     return r < 0 ? eret() : r;
   }
-  case 288: case 289: case 290: return -LX_ENOSYS;              // pkey_* (glibc falls back)
+  case 288: {                                                   // pkey_mprotect
+    // ARM64 has no protection-key allocation in this guest. Linux's no-pkeys
+    // implementation permits the default key 0 and the legacy key -1, both
+    // of which use ordinary mprotect permissions. Never claim another key
+    // was installed: that would silently omit its access restrictions.
+    if (a0 & (16384UL - 1)) return -LX_EINVAL; // guest page size
+    if (!a1) return 0; // Linux checks zero length before key allocation
+    if ((int)a3 != 0 && (int)a3 != -1) return -LX_EINVAL;
+    if (a2 & ~(unsigned long)(PROT_READ | PROT_WRITE | PROT_EXEC))
+      return -LX_EINVAL;
+    return gmem_mprotect(a0, (size_t)a1, (int)a2);
+  }
+  case 289: case 290: return -LX_ENOSYS;                        // pkey_alloc/free
   case 258:                                                     // statx alias (see report)
   case 291: return do_statx((int)a0, (const char*)a1, (int)a2, (unsigned)a3, (void*)a4);
   case 292: return -LX_ENOSYS;                                  // io_pgetevents
