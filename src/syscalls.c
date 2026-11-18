@@ -4291,7 +4291,8 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     if (!buf) return -LX_EFAULT;
     size_t n = strlen(g_cwd);
     if (sz < n + 1) return -LX_ERANGE;
-    memcpy(buf, g_cwd, n + 1);
+    if (gmem_guest_copyout_checked((uint64_t)(uintptr_t)buf, g_cwd, n + 1) != 0)
+      return -LX_EFAULT;
     return (long)(n + 1);                       // Linux returns the length INCLUDING the NUL
   }
 
