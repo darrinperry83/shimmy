@@ -2042,7 +2042,39 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return ok0(mincore((void*)a0, (size_t)a1, (char*)a2));
   }
   case 234: return -LX_ENOSYS;                                  // remap_file_pages (dead on Linux too)
-  case 235: return 0;                                           // mbind: single NUMA node, no-op
+  case 235: {                                                   // mbind: default-policy subset
+    // A single virtual node makes MPOL_DEFAULT a truthful no-op only when
+    // the range belongs to guest memory. Do not claim that BIND, INTERLEAVE,
+    // migration, or per-VMA policy state was installed when none exists.
+    const unsigned long page = 16384;                           // guest AT_PAGESZ
+    const unsigned long mode_flags = (1ul << 13) | (1ul << 14) | (1ul << 15);
+    unsigned long mode = a2 & ~mode_flags;
+    if ((a2 & ~(mode_flags | 0x1ffful)) || mode >= 7 ||
+        ((a2 & (1ul << 14)) && (a2 & (1ul << 15))))
+      return -LX_EINVAL;
+    unsigned flags = (unsigned)a5;                               // Linux ABI is u32
+    if (flags & ~7u) return -LX_EINVAL;                           // MPOL_MF_VALID
+    if (a0 & (page - 1)) return -LX_EINVAL;
+    if (a1 > ULONG_MAX - (page - 1)) return -LX_EINVAL;
+    unsigned long rounded = (a1 + page - 1) & ~(page - 1);
+    if (rounded > ULONG_MAX - a0) return -LX_EINVAL;
+    if (mode || (a2 & mode_flags) || a3 || flags)
+      return -LX_EOPNOTSUPP;
+    // Linux ignores maxnode when the nodemask pointer is NULL.
+    (void)a4;
+    if (!rounded) return 0;
+    if (a0 < FOUR_GB || !host_range_mapped(a0, (size_t)rounded))
+      return -LX_EFAULT;
+    // This bounded subset checks every guest page in the range. A host-only
+    // mapping or unreadable guest page is outside it, even if Mach says mapped.
+    if (rounded > 16ul * 1024 * 1024) return -LX_EOPNOTSUPP;
+    for (unsigned long off = 0; off < rounded; off += page) {
+      unsigned char probe;
+      if (gmem_guest_export_copyin(NULL, a0 + off, &probe, 1) != 0)
+        return -LX_EOPNOTSUPP;
+    }
+    return 0;
+  }
   case 236:                                                     // get_mempolicy
     if (a0) *(int*)a0 = 0;                                      // MPOL_DEFAULT
     return 0;
