@@ -330,6 +330,27 @@ static long lx_io_submit(uint64_t handle, long nr, uint64_t iocbpp) {
   return submitted ? submitted : error;
 }
 
+// Every request in the staged regular-file subset finishes synchronously in
+// io_submit. Linux io_cancel reads aio_key before looking up the context, then
+// returns EINVAL if the request is no longer on its active list. Preserve the
+// queued completion: a failed cancellation does not consume it. The result
+// pointer is unused by current Linux kernels for this failure path.
+static long lx_io_cancel(uint64_t handle, uint64_t iocb_addr,
+                          uint64_t result_addr) {
+  (void)handle;
+  (void)result_addr;
+  uint32_t key;
+  if (!iocb_addr ||
+      gmem_guest_export_copyin(NULL, iocb_addr +
+                               offsetof(struct lx_aio_iocb, key),
+                               &key, sizeof key) != 0)
+    return -LX_EFAULT;
+  if (key) return -LX_EINVAL;
+  // A valid context has no cancellable in-flight request in this subset.
+  // Invalid contexts carry the same Linux EINVAL result.
+  return -LX_EINVAL;
+}
+
 // io_getevents(2), bounded to this process's synchronous regular-file AIO
 // completions. The timeout is relative, as in Linux. We wait only for an
 // already accepted request (or another guest thread's submission); no host
@@ -1196,7 +1217,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   case 0: return lx_io_setup((unsigned)a0, a1);                 // io_setup; family gate pending
   case 1: return lx_io_destroy(a0);                            // io_destroy; family gate pending
   case 2: return lx_io_submit(a0, (long)a1, a2);               // io_submit; family gate pending
-  case 3: return -LX_ENOSYS;                                   // io_cancel pending
+  case 3: return lx_io_cancel(a0, a1, a2);                      // io_cancel; inline-only AIO
   case 4: return lx_io_getevents(a0, (long)a1, (long)a2, a3, a4);
   case 5: case 6: case 7: {                                    // setxattr / lsetxattr / fsetxattr
     int hopt = 0;                                              // Linux XATTR_CREATE=1 REPLACE=2
