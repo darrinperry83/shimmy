@@ -64,6 +64,7 @@ static int g_idle_saw_address;
 #include "signalfd_shim.h"
 #include "timerfd_shim.h"
 #include "pidfd_shim.h"
+#include "inotify_watch.h"
 #include "unix_outq_peer.h"
 // net.c owns the kqueue-backed epoll; on close(2) it must drop the fd from every epoll set
 // (Linux drops a watched fd from epoll automatically on close; kqueue does not).
@@ -3282,7 +3283,10 @@ static int flock_type_m2l(int t) { return t == F_RDLCK ? 0 : (t == F_WRLCK ? 1 :
 static long do_fcntl(int fd, int cmd, unsigned long arg) {
   switch (cmd) {
     case LF_DUPFD: case LF_DUPFD_CLOEXEC: {
+      int allowed = inotify_watch_can_dup(fd, -1);
+      if (allowed < 0) return allowed;
       int nf = fcntl(fd, cmd == LF_DUPFD ? F_DUPFD : F_DUPFD_CLOEXEC, (int)arg);
+      if (nf >= 0) inotify_watch_dup(fd, nf);
       if (nf >= 0) rd_rtnl_dup(fd, nf);
       if (nf >= 0 && pidfd_shim_pid(fd) > 0) pidfd_shim_register(nf, pidfd_shim_pid(fd));
       if (nf >= 0 && drm_owns_fd(fd)) drm_register_fd_copy(nf, fd);
@@ -4706,6 +4710,10 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
 
   // ---------- 57 close ----------
   case 57:
+    if (inotify_watch_is_fd((int)a0)) {
+      net_fd_closed((int)a0);
+      return inotify_watch_close((int)a0) ? 0 : -LX_EBADF;
+    }
     // Shim-owned descriptors (the six pty MASTERs, the private stderr dup) are not the guest's to
     // close. systemd's fd cleanup closes 3..8 at boot (it sees them as leaked init fds); letting
     // it close the pty masters leaves the console slave with no master, and the NEXT

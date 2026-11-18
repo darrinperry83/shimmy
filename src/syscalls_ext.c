@@ -1201,7 +1201,10 @@ static long do_dup3(int oldfd, int newfd, int flags) {
   if (oldfd == newfd) return -LX_EINVAL;         // this is the whole point of dup3 vs dup2
   if (flags & ~LX_O_CLOEXEC) return -LX_EINVAL;
   if (fcntl(oldfd, F_GETFD) < 0) return eret();  // validate before clobbering newfd
+  int allowed = inotify_watch_can_dup(oldfd, newfd);
+  if (allowed < 0) return allowed;
   if (dup2(oldfd, newfd) < 0) return eret();
+  inotify_watch_dup(oldfd, newfd);
   rd_rtnl_dup(oldfd, newfd);
   if (pidfd_shim_pid(oldfd) > 0) pidfd_shim_register(newfd, pidfd_shim_pid(oldfd));
   if (flags & LX_O_CLOEXEC) fcntl(newfd, F_SETFD, fcntl(newfd, F_GETFD) | FD_CLOEXEC);
@@ -1513,7 +1516,10 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   // ===== 18..34: fds, inotify, nodes ========================================
   case 18: return -LX_ENOSYS;                                  // lookup_dcookie
   case 23: {                                                   // dup
+    int allowed = inotify_watch_can_dup((int)a0, -1);
+    if (allowed < 0) return allowed;
     int r = dup((int)a0);
+    if (r >= 0) inotify_watch_dup((int)a0, r);
     // A dup of the DRM render node is still the render node. gbm dups the fd, and without this
     // the copy reported /dev/null's device numbers and Mesa went looking for /sys/dev/char/0:12290.
     if (r >= 0 && pidfd_shim_pid((int)a0) > 0) pidfd_shim_register(r, pidfd_shim_pid((int)a0));

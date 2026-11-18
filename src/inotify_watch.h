@@ -8,5 +8,11 @@ int inotify_watch_register(int read_fd, int write_fd, int kq_fd,
                            int (*reserve_fd)(int), void (*unreserve_fd)(int));
 long inotify_watch_add(int fd, const char *host_path, unsigned mask);
 long inotify_watch_remove(int fd, int wd);
+// Track guest-visible aliases; explicit close of the final alias tears down
+// the worker, watches and private descriptors. Return 1 if close was handled.
+int inotify_watch_can_dup(int old_fd, int new_fd);
+void inotify_watch_dup(int old_fd, int new_fd);
+int inotify_watch_is_fd(int fd);
+int inotify_watch_close(int fd);
 
 #endif
