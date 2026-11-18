@@ -43,6 +43,8 @@
 #include <stdint.h>
 #include <string.h>
 #include <time.h>
+#include <pthread.h>
+#include <unistd.h>
 
 #include "vdso.h"
 #include "gmem.h"
@@ -116,6 +118,7 @@ struct lx_timezone { int32_t tz_minuteswest; int32_t tz_dsttime; };
 #define LX_EFAULT   14
 #define LX_EINVAL   22
 #define LX_ENOSYS   38
+#define LX_EOPNOTSUPP 95
 
 // Linux clock ids.
 #define LX_CLOCK_REALTIME            0
@@ -225,8 +228,22 @@ static long vdso_impl_time(int64_t* tp) {
 __attribute__((used, noinline))
 static long vdso_impl_getcpu(uint32_t* cpu, uint32_t* node, void* unused) {
   (void)unused;
-  if (cpu)  *cpu  = 0;
-  if (node) *node = 0;
+  if (!cpu && !node) return 0;
+  size_t host_cpu = 0;
+  // Match the raw #168 syscall and the guest CPU set advertised through
+  // affinity, /proc/cpuinfo and /sys. Never invent CPU 0 after migration.
+  if (pthread_cpu_number_np(&host_cpu) != 0) return -LX_ENOSYS;
+  long online = sysconf(_SC_NPROCESSORS_ONLN);
+  if (online < 1) online = 1;
+  if (online > 32) online = 32;
+  if (host_cpu >= (size_t)online) return -LX_EOPNOTSUPP;
+  uint32_t observed = (uint32_t)host_cpu, guest_node = 0;
+  if (cpu && gmem_guest_copyout_checked((uint64_t)(uintptr_t)cpu,
+                                         &observed, sizeof observed) != 0)
+    return -LX_EFAULT;
+  if (node && gmem_guest_copyout_checked((uint64_t)(uintptr_t)node,
+                                          &guest_node, sizeof guest_node) != 0)
+    return -LX_EFAULT;
   return 0;
 }
 

@@ -16,3 +16,14 @@ scheduler. `/proc/cpuinfo` was capped at the same 32 entries.
 Proof: `./build.sh cli` and `python3 tests/run-getcpu.py` with a disposable
 static ARM64 guest. The probe checks the returned CPU against the guest
 affinity mask, node zero, nullable outputs, and bad pointers.
+
+The synthesized vDSO's `__kernel_getcpu` previously returned CPU zero on
+every call even while raw #168 reported the current CPU. It now uses the same
+host observation and advertised 0..N-1 bound, with checked guest output
+writes. A host query failure returns `ENOSYS` from the vDSO so libc can use
+the raw syscall path. `python3 tests/run-getcpu-vdso.py` resolves the exported
+symbol directly in an ARM64 guest, checks bad pointers and node zero, and
+checks both vDSO and raw syscall observations against the advertised affinity
+set. It also requires a nonzero vDSO CPU on this multicore host, catching the
+former constant-zero behavior. The thread can migrate between calls, so exact
+back-to-back CPU equality is not a sound test.
