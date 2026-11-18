@@ -2826,14 +2826,12 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   // Refuse every command until the four semaphore calls share guest-scoped
   // IDs and ownership checks. No host IPC or guest pointer is touched here.
   case 191: return -LX_ENOSYS;                                 // semctl
-  case 192: {                                                  // semtimedop -> semop
-    // macOS has no semtimedop. The timeout is only a real-time upper bound; mapping to a plain
-    // blocking semop is exact for a NULL or effectively-infinite timeout (the common case) and
-    // the honest approximation otherwise — strictly better than the -ENOSYS it replaced.
-    // struct sembuf is identical on both systems, so the guest's sops array passes through.
-    int r = semop((int)a0, (struct sembuf*)a1, (size_t)a2);
-    return r < 0 ? eret() : 0;
-  }
+  // Darwin SysV semaphores have a host-global ID space. #190 semget cannot
+  // issue a guest-owned ID, so no raw semid is safe to pass to host semop.
+  // Darwin also lacks this syscall's timeout; a blocking semop could wait
+  // indefinitely when the guest requested a finite bound. Refuse before
+  // reading guest pointers or touching a host semaphore.
+  case 192: return -LX_ENOSYS;                                 // semtimedop
 
   // ===== 213..241: memory ==================================================
   case 213: {                                                  // readahead: regular-file async hint

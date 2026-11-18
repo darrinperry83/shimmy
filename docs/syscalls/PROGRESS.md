@@ -129,6 +129,7 @@ Current safety and refusal status is summarized in [`SAFEGUARDS.md`](SAFEGUARDS.
 | 186 | `msgget` | `syscall/186-msgget-refuse` | Squash merged safeguard | Guest key lookup and creation return `ENOSYS` before host-global Darwin queue access. ARM64 probe and private Arch boot passed. This is not compatible message queues. |
 | 189 | `msgsnd` | `syscall/189-msgsnd-host-id-guard` | Squash merged safeguard | Arbitrary guest queue IDs and buffers return `ENOSYS` before host access. ARM64 probe and private Arch boot passed. This is not compatible message queues. |
 | 190 | `semget` | `syscall/190-semget-20261118` | Squash merged safeguard | Guest keys now return `ENOSYS` before host-global Darwin semaphore access. ARM64 probe and private Arch boot passed; companion #191–193 still accept raw host IDs. |
+| 192 | `semtimedop` | `syscall/192-semtimedop-host-id-guard` | Squash merged safeguard | Refuses raw host semaphore IDs and unsupported finite waits before guest pointer or host IPC access. ARM64 probe and private Arch boot passed; no semaphore behavior is claimed. |
 | 194 | `shmget` | `syscall/194-shmget` | Squash merged safeguard | Guest keys now return `ENOSYS` before host-global Darwin shared-memory access. ARM64 probe and private Arch boot passed; companion #195–197 still need isolation. |
 
 ## Already merged before this batch
@@ -341,3 +342,5 @@ After rebasing onto concurrent `725b605` and `45f46d9` graphics/session commits,
 `semctl` (#191) now refuses every command before a raw host semaphore ID or guest array reaches Darwin, including destructive commands. Its ARM64 refusal probe, CLI build, and private Arch login/D-Bus boot passed in isolation; the merged CLI build and #190/#191 probes passed. #192–193 remain separate host-ID exposures until their own gates pass.
 
 `semop` (#193) now refuses a raw host semaphore ID before reading the guest operation array or calling Darwin. Its ARM64 no-mutation probe, CLI build, and private Arch login/D-Bus boot passed in isolation; the merged CLI build and #190/#191/#193 probes passed after resolving the adjacent #191 merge. #192 still needs its own gate.
+
+`semtimedop` (#192) now refuses raw host semaphore IDs and finite waits before Darwin's untimed `semop`. Its ARM64 refusal probe, CLI build, and private Arch login/D-Bus boot passed in isolation; the merged CLI build and #190–193 probes passed after resolving adjacent changes. The family still lacks a private semaphore backend.
