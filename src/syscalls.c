@@ -4473,7 +4473,11 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   // ---------- 43 statfs / 44 fstatfs ----------
   case 43: {
     struct statfs s;
-    if ((r = resolve(LX_AT_FDCWD, (const char*)a0, host, sizeof host, gabs, sizeof gabs)) < 0) return r;
+    // The resolver expects a host-readable string. Copy the guest pathname
+    // through checked memory first so a bad guest address returns EFAULT.
+    char guest_path[PATH_MAX];
+    if ((r = readlink_guest_path(a0, guest_path, sizeof guest_path)) < 0) return r;
+    if ((r = resolve(LX_AT_FDCWD, guest_path, host, sizeof host, gabs, sizeof gabs)) < 0) return r;
     if (statfs(host, &s) < 0) return herrno();
     if (!a1) return -LX_EFAULT;
     struct linux_statfs out;

@@ -14,9 +14,13 @@ static __attribute__((noreturn)) void done(int code) {
 }
 void _start(void) {
   static const char path[] = "/tmp";
+  static const char empty[] = "";
   static const char missing[] = "/does-not-exist";
   static struct { long long fields[15]; unsigned long long canary; } out;
   out.canary = 0x9a5bc7d1032246e8ULL;
+  if (sc3(43, 0, (long)&out, 0) != -14) done(7);
+  if (sc3(43, 1, (long)&out, 0) != -14) done(8);
+  if (sc3(43, (long)empty, (long)&out, 0) != -2) done(9);
   if (sc3(43, (long)path, 0, 0) != -14) done(1);
   if (sc3(43, (long)path, 1, 0) != -14) done(2);
   if (sc3(43, (long)missing, (long)&out, 0) != -2) done(3);

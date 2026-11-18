@@ -28,7 +28,7 @@ def main():
         if result.returncode or "GUEST_STATFS_OUTPUT_OK" not in result.stdout:
             raise RuntimeError(f"guest failed rc={result.returncode}\n"
                                f"{result.stdout}\n{result.stderr[-2000:]}")
-        print("GUEST_STATFS_OUTPUT_OK: EFAULT, ENOENT, bounded 120-byte output")
+        print("GUEST_STATFS_OUTPUT_OK: checked path EFAULT/ENOENT, bounded 120-byte output")
 
 
 if __name__ == "__main__":
