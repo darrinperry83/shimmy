@@ -2302,6 +2302,13 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     int lsig = (nr == 130) ? (int)a1 : (int)a2;
     long tgt  = (nr == 130) ? (long)(int)a0 : (long)(int)a0;
     if (lsig < 0 || lsig > 64) return -LX_EINVAL;
+    // Linux tkill requires a positive, existing thread ID even for signal
+    // zero. A guest ID is never a Darwin PID; do not infer liveness from a
+    // host PID or route an invalid target back to this process.
+    if (nr == 130) {
+      if (tgt <= 0) return -LX_EINVAL;
+      if (!guest_tid_known((int)tgt)) return -LX_ESRCH;
+    }
     if (lsig == 0) return 0;                                   // existence probe
     int hs = host_signo(lsig);
     if (hs < 0) return 0;                                      // RT/STKFLT/PWR: no host analogue
