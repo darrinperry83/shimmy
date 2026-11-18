@@ -3929,6 +3929,10 @@ int gmem_guest_range_mapped(uint64_t guestAddress,size_t length){
   pthread_once(&g_export_ranges_once,g_export_ranges_init);
   return rdguest_range_covered(&g_export_ranges,(uintptr_t)guestAddress,length)?0:-1;
 }
+int gmem_guest_range_writable(uint64_t guestAddress,size_t length){
+  pthread_once(&g_export_ranges_once,g_export_ranges_init);
+  return rdguest_range_writable(&g_export_ranges,(uintptr_t)guestAddress,length)?0:-1;
+}
 long gmem_mmap(unsigned long addr, size_t len, int prot, int flags, int fd, long off) {
   pthread_once(&g_export_ranges_once,g_export_ranges_init);
   gm_lock();

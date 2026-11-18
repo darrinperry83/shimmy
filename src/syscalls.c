@@ -4888,7 +4888,58 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   }
 
   // ---------- 65 readv / 66 writev ----------
-  case 65: return herr((long)readv((int)a0, (const struct iovec*)a1, (int)a2));
+  case 65: {
+    // Host readv cannot safely write through guest ELF/JIT pointers. Admit
+    // every destination before consuming fd data, read once into host-owned
+    // buffers, then copy only the returned prefix to checked guest ranges.
+    if (a2 > 1024) return -LX_EINVAL; // Linux UIO_MAXIOV
+    if (!a2) return herr((long)readv((int)a0, NULL, 0));
+    if (!a1) return -LX_EFAULT;
+    struct iovec guest[1024], host[1024];
+    size_t nvec = (size_t)a2;
+    if (gmem_guest_export_copyin(NULL, a1, guest, nvec * sizeof guest[0]) != 0)
+      return -LX_EFAULT;
+    size_t requested = 0;
+    for (size_t i = 0; i < nvec; ++i) {
+      if (guest[i].iov_len > SSIZE_MAX - requested) return -LX_EINVAL;
+      requested += guest[i].iov_len;
+    }
+    // A truncated datagram read would lose the rest of that message. Refuse
+    // large requests instead of treating an unknown fd as a byte stream.
+    if (requested > 1024 * 1024) return -LX_EOPNOTSUPP;
+    for (size_t i = 0; i < nvec; ++i)
+      if (guest[i].iov_len &&
+          gmem_guest_range_writable((uint64_t)(uintptr_t)guest[i].iov_base,
+                                    guest[i].iov_len) != 0)
+        return -LX_EFAULT;
+    if (!requested) return herr((long)readv((int)a0, NULL, 0));
+    char* staged = malloc(requested);
+    if (!staged) return -LX_ENOMEM;
+    size_t nhost = 0, offset = 0;
+    for (size_t i = 0; i < nvec; ++i) {
+      if (!guest[i].iov_len) continue;
+      host[nhost].iov_base = staged + offset;
+      host[nhost++].iov_len = guest[i].iov_len;
+      offset += guest[i].iov_len;
+    }
+    long r = herr((long)readv((int)a0, host, (int)nhost));
+    if (r > 0) {
+      size_t copied = 0;
+      for (size_t i = 0; i < nvec && copied < (size_t)r; ++i) {
+        size_t part = guest[i].iov_len;
+        if (part > (size_t)r - copied) part = (size_t)r - copied;
+        if (!part) continue;
+        if (gmem_guest_copyout_checked((uint64_t)(uintptr_t)guest[i].iov_base,
+                                       staged + copied, part) != 0) {
+          free(staged);
+          return copied ? (long)copied : -LX_EFAULT;
+        }
+        copied += part;
+      }
+    }
+    free(staged);
+    return r;
+  }
   case 66: {
     // The guest iovec layout matches Darwin's, but guest ELF/JIT payloads
     // cannot necessarily be read by the host writev kernel path. Snapshot

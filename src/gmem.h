@@ -40,6 +40,7 @@ int gmem_guest_copyout_checked(uint64_t guestAddress,const void *bytes,size_t le
 int gmem_guest_export_copyin(void *unused,uint64_t guestAddress,
                              void *snapshot,size_t length);
 int gmem_guest_range_mapped(uint64_t guestAddress,size_t length);
+int gmem_guest_range_writable(uint64_t guestAddress,size_t length);
 void gmem_guest_ranges_fork_child(void);
 
 // Bulk-load bracket: batches the per-thread write-protect toggles and coalesces icache
