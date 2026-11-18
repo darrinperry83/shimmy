@@ -43,6 +43,7 @@ void fx_note(const char* fmt, ...);
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/time.h>
+#include <sys/sysctl.h>
 #include <sys/timex.h>
 #include <sys/times.h>
 #include <sys/resource.h>
@@ -2328,13 +2329,32 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (setreuid((int)a0 == -1 ? (uid_t)-1 : r, (int)a1 == -1 ? (uid_t)-1 : ef) != 0) return eret();
     return 0;
   }
-  case 148:                                                    // getresuid
-    // RDUID0 has to be honoured HERE TOO, or a program that asks getresuid() instead of getuid()
-    // sees the real uid and the two answers disagree -- glibc's `id` reads both. See syscalls.c:174.
-    if (a0) *(unsigned*)a0 = g_uid0 ? guest_cred_uid(0) : getuid();
-    if (a1) *(unsigned*)a1 = g_uid0 ? guest_cred_uid(1) : geteuid();
-    if (a2) *(unsigned*)a2 = g_uid0 ? guest_cred_uid(2) : geteuid();
+  case 148: {                                                  // getresuid
+    if (!a0 || !a1 || !a2) return -LX_EFAULT;
+    uint32_t ids[3];
+    if (g_uid0) {
+      // The private guest credential model tracks the saved UID separately.
+      ids[0] = guest_cred_uid(0);
+      ids[1] = guest_cred_uid(1);
+      ids[2] = guest_cred_uid(2);
+    } else {
+      // Darwin's process record carries the saved UID. Its public getuid and
+      // geteuid calls alone would lose that value after setreuid.
+      struct kinfo_proc kp = {0};
+      size_t length = sizeof kp;
+      int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()};
+      if (sysctl(mib, 4, &kp, &length, NULL, 0) != 0) return eret();
+      if (length != sizeof kp) return -LX_EIO;
+      ids[0] = getuid();
+      ids[1] = geteuid();
+      ids[2] = kp.kp_eproc.e_pcred.p_svuid;
+    }
+    if (gmem_guest_copyout_checked(a0, &ids[0], sizeof ids[0]) != 0 ||
+        gmem_guest_copyout_checked(a1, &ids[1], sizeof ids[1]) != 0 ||
+        gmem_guest_copyout_checked(a2, &ids[2], sizeof ids[2]) != 0)
+      return -LX_EFAULT;
     return 0;
+  }
   case 149: {                                                  // setresgid
     if (g_uid0) return guest_cred_set_gid((int)a0, (int)a1, (int)a2);
     if ((int)a0 == -1 && (int)a1 == -1) return 0;
