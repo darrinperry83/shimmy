@@ -2059,7 +2059,29 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   }
 
   // ===== 213..241: memory ==================================================
-  case 213: return 0;                                          // readahead: advisory, ignore
+  case 213: {                                                  // readahead: regular-file async hint
+    int fd = (int)a0;
+    int64_t offset = (int64_t)a1;
+    size_t count = (size_t)a2;
+    if (fd < 0 || shim_fd_reserved(fd)) return -LX_EBADF;
+    int fl = fcntl(fd, F_GETFL);
+    if (fl < 0) return -LX_EBADF;
+    if ((fl & O_ACCMODE) == O_WRONLY) return -LX_EBADF;
+    struct stat st;
+    if (fstat(fd, &st) < 0) return eret();
+    if (!S_ISREG(st.st_mode)) return -LX_EINVAL;
+    if (offset < 0) return -LX_EINVAL;
+    // Linux's zero count means from offset to EOF. Nothing at/after EOF
+    // needs a read hint, but the fd/type/offset checks still apply.
+    if (offset >= st.st_size) return 0;
+    uint64_t available = (uint64_t)(st.st_size - offset);
+    uint64_t length = count && (uint64_t)count < available ? (uint64_t)count : available;
+    // Darwin radvisory.ra_count is int, so do not silently truncate a hint.
+    if (length > INT_MAX) return -LX_EOPNOTSUPP;
+    struct radvisory advice = { .ra_offset = (off_t)offset,
+                                .ra_count = (int)length };
+    return fcntl(fd, F_RDADVISE, &advice) < 0 ? eret() : 0;
+  }
   case 217: case 218: case 219: return -LX_ENOSYS;             // add_key/request_key/keyctl
   case 220: return -LX_ENOSYS;   // clone — handled in the trap handler (needs the register file)
   case 221: {                                                 // execve(path, argv, envp)
