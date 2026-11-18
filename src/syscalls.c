@@ -5272,16 +5272,12 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   //   kill(-1, sig)  "everything I may signal" -> every process this UID owns, on the real machine
   //   kill(-pg, sig) "that process group" -> a host process group the guest cannot have meant
   //
-  // A guest believes it is alone. It cannot name a group it did not create, so the honest delivery
-  // of all three is "this process" — which is exactly what the guest would observe on Linux, where
-  // its group contains only itself.
+  // Group/all-process selectors need a guest process-group registry. Sending
+  // only to this shim is not equivalent, and kill(-1, sig) on Linux excludes
+  // the caller. Refuse these forms rather than delivering a different signal.
   //
-  // Positive pids are the case that legitimately crosses: fork()/wait4() hand the guest REAL host
-  // pids, and signalling a child must keep working. So a positive target is allowed through only
-  // if we know it — our own pid, one of our guest tids (a thread, so: this process), or a host
-  // child we spawned. Anything else is -ESRCH. MEASURED before this change: kill(1, 0) from the
-  // guest returned EPERM, meaning it had reached launchd — the identical signature to the abort()
-  // bug, in a syscall that fix did not touch.
+  // Positive pids are allowed only for our virtual self PID or a child this
+  // shim spawned. In guest init, self is PID 1, not the Darwin getpid() value.
   case 129: {
     int ms = sig_l2m((int)a1);
     if (ms < 0) return -LX_EINVAL;
@@ -5289,8 +5285,8 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     // PROCESS; treating a thread id as a process id is the same conflation from the other side,
     // and it would make kill(1, sig) "succeed" purely because guest tid 1 is the main thread.
     long tgt = (long)(int)a0;
-    if (tgt <= 0) return herr(kill(getpid(), ms));            // 0 / -1 / -pgrp: us, never the host
-    if (tgt == (long)getpid())          return herr(kill(getpid(), ms));
+    if (tgt <= 0) return -LX_EOPNOTSUPP;
+    if (tgt == syscalls_guest_pid())    return herr(kill(getpid(), ms));
     if (guest_child_known((int)tgt))    return herr(kill((pid_t)tgt, ms));
     return -LX_ESRCH;                                         // a pid from a namespace we did not issue
   }
