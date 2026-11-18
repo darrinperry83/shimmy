@@ -212,6 +212,8 @@ An isolated #282 userfaultfd fault/copy/wake experiment passed ARM64 guest and p
 
 `renameat2` (#276) now rejects unsupported or conflicting flags before touching paths and snapshots both guest pathnames before host rename. The ARM64 guest probe covers invalid pointers and flags, NOREPLACE, EXCHANGE, and ordinary rename with final file contents. CLI build, focused probe, and isolated Arch login/D-Bus boot passed. WHITEOUT remains unsupported.
 
+`rt_sigprocmask` (#135) now requires the native 8-byte sigset size and checks guest input and output before changing its virtual mask. The focused #135 and neighboring #136 ARM64 probes, CLI build, and isolated Arch login/D-Bus boot passed; the combined integration build and probes also passed. Its mask is still process-wide rather than a complete Linux per-thread signal implementation.
+
 The combined integration head also passed a fresh private Arch login/D-Bus boot after the #424 merge; the exact clone and guest were cleaned. The `prlimit64` v2 branch remains withheld because its separate controlled Arch boot reached login without D-Bus settling, while a fresh baseline settled normally. The #425 io_uring and #77 tee opt-in branches remain isolated pending private descriptor and performance reviews.
 ## Batch integration proof
 

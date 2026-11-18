@@ -5325,19 +5325,24 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   // ---------- 135 rt_sigprocmask ----------
   case 135: {
     int howv = (int)a0;                         // SIG_BLOCK 0, SIG_UNBLOCK 1, SIG_SETMASK 2
-    if (a3 && a3 != 8) return -LX_EINVAL;
+    if (a3 != 8) return -LX_EINVAL;
+    if (a1 && (howv < 0 || howv > 2)) return -LX_EINVAL;
+    uint64_t set = 0;
+    if (a1 && gmem_guest_export_copyin(NULL, a1, &set, sizeof set) != 0)
+      return -LX_EFAULT;
     uint64_t old = __atomic_load_n(&g_sigmask, __ATOMIC_ACQUIRE);
+    // Check and write the old mask before mutating state. A bad output pointer
+    // must not leave a changed mask behind; stage input first for aliasing.
+    if (a2 && gmem_guest_copyout_checked(a2, &old, sizeof old) != 0)
+      return -LX_EFAULT;
     if (a1) {
-      uint64_t set = *(const uint64_t*)a1;
       set &= ~((1ULL << (9 - 1)) | (1ULL << (19 - 1)));
       if      (howv == 0) __atomic_fetch_or(&g_sigmask, set, __ATOMIC_ACQ_REL);
       else if (howv == 1) __atomic_fetch_and(&g_sigmask, ~set, __ATOMIC_ACQ_REL);
-      else if (howv == 2) __atomic_store_n(&g_sigmask, set, __ATOMIC_RELEASE);
-      else return -LX_EINVAL;
+      else                __atomic_store_n(&g_sigmask, set, __ATOMIC_RELEASE);
       virtual_signal_check_parent();
       virtual_signal_deliver_unblocked();
     }
-    if (a2) *(uint64_t*)a2 = old;
     return 0;
   }
 
