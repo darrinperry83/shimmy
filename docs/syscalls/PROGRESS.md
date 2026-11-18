@@ -77,6 +77,10 @@ This file records bounded behavior that has been implemented and tested. A dispa
 | 267 | `syncfs` | `syscall/267-syncfs` | Squash merged at `f0d7dd7`; honest unsupported | Invalid fd returns `EBADF`; valid fd returns `ENOSYS` because Darwin `sync()` cannot guarantee Linux per-superblock writeback completion/errors. ARM64 guest probe and private Arch boot gate pass. |
 | 228 | `mlock` | `syscall/228-mlock` | Squash merged at `61e605a`; bounded subset | Eager lock of mapped guest pages up to 1 MiB, sharing validated behavior with `mlock2(flags=0)`. Host lock limits can differ from guest RLIMIT/CAP limits. Both ARM64 guest probes and private Arch boot gate pass. |
 | 84 | `sync_file_range` | `syscall/84-sync-file-range` | Squash merged at `f9ea4b6`; bounded subset | A valid zero-flag request performs Linux's no-op; range, fd, and flag errors are checked. Write/wait modes remain unsupported and no range durability is claimed. ARM64 guest probe and private Arch boot gate pass. |
+| 229 | `munlock` | `syscall/229-munlock` | Squash merged at `b545e77`; bounded subset | Unlocks only mapped guest pages up to 1 MiB with Linux page rounding; invalid ranges are rejected. ARM64 lock/unlock probes and private Arch boot gate pass. Host lock accounting can differ from Linux. |
+| 271 | `process_vm_writev` | `syscall/271-process-vm-writev` | Squash merged at `b8c34c7`; bounded subset | Self-guest writes use checked local vectors, a source snapshot, and checked guest-memory copyout; partial remote faults return a byte count. Cross-process and overlapping vectors remain unsupported. ARM64 guest probe and private Arch boot gate pass. |
+| 278 | `getrandom` | `syscall/278-getrandom` | Squash merged at `5b94e37`; bounded subset | Default and nonblocking host CSPRNG copy into checked guest memory, with valid short reads above 256 bytes. Separate random/insecure modes remain unsupported. ARM64 guest probe and private Arch boot gate pass. |
+| 231 | `munlockall` | `syscall/231-munlockall` | Squash merged at `b71a6cf`; honest unsupported | Returns `ENOSYS` instead of claiming all guest locks were released. SysV/DRM/ALSA mappings escape the current ledger, so a complete unlock walk is not available. ARM64 guest probe and private Arch boot gate pass. |
 
 ## Already merged before this batch
 
@@ -101,6 +105,8 @@ The `migrate_pages`, `mlock2`, and `membarrier` squash merges passed a combined 
 The subsequent `copy_file_range` and `syncfs` merges passed a combined CLI build and their ARM64 guest probes. A separate fresh private Arch clone reached login with both D-Bus processes settled after these changes. The clone operation had the same protected-entry warnings; this does not prove GUI behavior, full filesystem semantics, or `syncfs` durability.
 
 The `mlock` and `sync_file_range` squash merges passed a combined CLI build, their ARM64 guest probes, and the existing `mlock2` regression probe. Another private Arch clone reached a fresh login prompt with both D-Bus processes settled. The clone operation again warned about protected fixture entries; no installed rootfs or live GUI was changed.
+
+The `munlock`, `process_vm_writev`, `getrandom`, and `munlockall` squash merges passed the combined CLI build and their focused ARM64 guest probes. Another private Arch clone reached a fresh login prompt with both D-Bus processes settled. The clone copy reported the same protected-entry warnings. This is a systemd smoke gate, not proof of full guest memory isolation or GUI behavior.
 
 ## Batch integration proof
 
