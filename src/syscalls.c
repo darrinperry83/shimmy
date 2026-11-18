@@ -5210,27 +5210,40 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
 
   // ---------- 115 clock_nanosleep ----------
   case 115: {
+    if ((int)a1 & ~LX_TIMER_ABSTIME) return -LX_EINVAL;
+    if ((int)a0 == LX_CLOCK_THREAD_CPUTIME_ID) return -LX_EINVAL;
+    // Sleeping wall time does not advance a CPU clock; accepting these IDs
+    // would return success before the requested CPU time had elapsed.
+    if ((int)a0 == LX_CLOCK_PROCESS_CPUTIME_ID ||
+        (int)a0 == LX_CLOCK_MONOTONIC_RAW ||
+        (int)a0 == LX_CLOCK_REALTIME_COARSE ||
+        (int)a0 == LX_CLOCK_MONOTONIC_COARSE) return -LX_EOPNOTSUPP;
     int mc = clockid_l2m((int)a0);
     if (mc < 0) return -LX_EINVAL;
-    const struct linux_timespec* req = (const struct linux_timespec*)a2;
-    if (!req) return -LX_EFAULT;
-    if (req->tv_nsec < 0 || req->tv_nsec >= 1000000000L || req->tv_sec < 0) return -LX_EINVAL;
-    struct timespec want = { (time_t)req->tv_sec, (long)req->tv_nsec };
+    struct linux_timespec req;
+    if (!a2 || gmem_guest_export_copyin(NULL, a2, &req, sizeof req) != 0)
+      return -LX_EFAULT;
+    if (req.tv_nsec < 0 || req.tv_nsec >= 1000000000L || req.tv_sec < 0)
+      return -LX_EINVAL;
+    struct timespec want = { (time_t)req.tv_sec, (long)req.tv_nsec };
     if ((int)a1 & LX_TIMER_ABSTIME) {
       struct timespec now;
-      clock_gettime((clockid_t)mc, &now);
+      if (clock_gettime((clockid_t)mc, &now) < 0) return herrno();
+      if (req.tv_sec < now.tv_sec ||
+          (req.tv_sec == now.tv_sec && req.tv_nsec <= now.tv_nsec)) return 0;
       want.tv_sec  -= now.tv_sec;
       want.tv_nsec -= now.tv_nsec;
       if (want.tv_nsec < 0) { want.tv_nsec += 1000000000L; want.tv_sec--; }
-      if (want.tv_sec < 0) return 0;            // deadline already passed
     }
     struct timespec rem;
     if (nanosleep(&want, &rem) < 0) {
-      if (errno == EINTR && !((int)a1 & LX_TIMER_ABSTIME) && a3) {
-        struct linux_timespec* lr = (struct linux_timespec*)a3;
-        lr->tv_sec = rem.tv_sec; lr->tv_nsec = rem.tv_nsec;
+      int saved = errno;
+      if (saved == EINTR && !((int)a1 & LX_TIMER_ABSTIME) && a3) {
+        struct linux_timespec remaining = {.tv_sec=rem.tv_sec, .tv_nsec=rem.tv_nsec};
+        if (gmem_guest_copyout_checked(a3, &remaining, sizeof remaining) != 0)
+          return -LX_EFAULT;
       }
-      return herrno();
+      return -linux_errno_from_host(saved);
     }
     return 0;
   }
