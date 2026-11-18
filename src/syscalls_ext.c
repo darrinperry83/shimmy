@@ -1335,6 +1335,100 @@ static long lx_process_vm_writev_self(unsigned long pid_arg, unsigned long local
   return (long)copied;
 }
 
+// The remote source is still a guest-owned mapping, not an arbitrary pointer
+// in the shared host address space. Validate all local destinations before
+// transfer, then read remote pages only through the checked guest ledger.
+static long lx_process_vm_readv_self(unsigned long pid_arg, unsigned long local_arg,
+                                    unsigned long local_count, unsigned long remote_arg,
+                                    unsigned long remote_count, unsigned long flags_arg) {
+  if (flags_arg) return -LX_EINVAL;
+  long pid = (long)(int)pid_arg;
+  if (pid <= 0) return -LX_ESRCH;
+  if (pid != syscalls_guest_pid())
+    return guest_child_known((int)pid) ? -LX_EOPNOTSUPP : -LX_ESRCH;
+  if (local_count > 1024 || remote_count > 1024) return -LX_EINVAL;
+  if (local_count > 16 || remote_count > 16) return -LX_EOPNOTSUPP;
+  if (!local_count || !remote_count) return 0;
+  if (!local_arg || !remote_arg) return -LX_EFAULT;
+  struct iovec local[16], remote[16];
+  if (gmem_guest_export_copyin(NULL, local_arg, local,
+                               local_count * sizeof local[0]) != 0 ||
+      gmem_guest_export_copyin(NULL, remote_arg, remote,
+                               remote_count * sizeof remote[0]) != 0) return -LX_EFAULT;
+  size_t local_bytes = 0, remote_bytes = 0;
+  for (unsigned long i = 0; i < local_count; ++i) {
+    size_t len = local[i].iov_len;
+    if (len > 1024ul * 1024 - local_bytes) return -LX_EOPNOTSUPP;
+    if (len && (uintptr_t)local[i].iov_base > UINTPTR_MAX - len) return -LX_EFAULT;
+    local_bytes += len;
+  }
+  for (unsigned long i = 0; i < remote_count; ++i) {
+    size_t len = remote[i].iov_len;
+    if (len > 1024ul * 1024 - remote_bytes) return -LX_EOPNOTSUPP;
+    if (len && (uintptr_t)remote[i].iov_base > UINTPTR_MAX - len) return -LX_EFAULT;
+    remote_bytes += len;
+  }
+  for (unsigned long i = 0; i < local_count; ++i)
+    for (unsigned long j = 0; j < remote_count; ++j) {
+      uintptr_t l = (uintptr_t)local[i].iov_base, r = (uintptr_t)remote[j].iov_base;
+      if (local[i].iov_len && remote[j].iov_len &&
+          l < r + remote[j].iov_len && r < l + local[i].iov_len)
+        return -LX_EOPNOTSUPP;
+    }
+  size_t scratch_size = local_bytes > 16384 ? local_bytes : 16384;
+  char *scratch = malloc(scratch_size);
+  if (!scratch) return -LX_ENOMEM;
+  // Local buffers are checked before any remote transfer, matching Linux's
+  // preflight rule. Writing their existing bytes tests write permission.
+  for (unsigned long i = 0; i < local_count; ++i) {
+    size_t len = local[i].iov_len;
+    uintptr_t addr = (uintptr_t)local[i].iov_base;
+    if (len && (gmem_guest_export_copyin(NULL, addr, scratch, len) != 0 ||
+                gmem_guest_copyout_checked(addr, scratch, len) != 0)) {
+      free(scratch);
+      return -LX_EFAULT;
+    }
+  }
+  size_t copied = 0, limit = local_bytes < remote_bytes ? local_bytes : remote_bytes;
+  unsigned long li = 0;
+  size_t local_off = 0;
+  for (unsigned long i = 0; i < remote_count && copied < limit; ++i) {
+    uintptr_t addr = (uintptr_t)remote[i].iov_base;
+    size_t remaining = remote[i].iov_len;
+    if (remaining > limit - copied) remaining = limit - copied;
+    while (remaining) {
+      size_t step = 16384 - (addr & 16383); // remote fault granularity
+      if (step > remaining) step = remaining;
+      if (gmem_guest_export_copyin(NULL, addr, scratch, step) != 0) {
+        free(scratch);
+        return copied ? (long)copied : -LX_EFAULT;
+      }
+      size_t consumed = 0;
+      while (consumed < step) {
+        while (li < local_count && local_off == local[li].iov_len) {
+          ++li;
+          local_off = 0;
+        }
+        if (li >= local_count) break;
+        size_t n = local[li].iov_len - local_off;
+        if (n > step - consumed) n = step - consumed;
+        uintptr_t dest = (uintptr_t)local[li].iov_base + local_off;
+        if (gmem_guest_copyout_checked(dest, scratch + consumed, n) != 0) {
+          free(scratch);
+          return copied ? (long)copied : -LX_EFAULT;
+        }
+        local_off += n;
+        consumed += n;
+        copied += n;
+      }
+      addr += consumed;
+      remaining -= consumed;
+    }
+  }
+  free(scratch);
+  return (long)copied;
+}
+
 // ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
@@ -2527,27 +2621,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   // getaddrinfo(AF_UNSPEC) sends its A and AAAA queries in one sendmmsg and treats a
   // failure as fatal. Leaving it -ENOSYS here made a Debian rootfs unable to resolve
   // any name at all. net_owns() claims it before this table is reached.
-  case 270: {                                                   // process_vm_readv (existing path)
-    // The guest shares OUR address space, so cross-"process" vm IO on ourselves is a memcpy.
-    const struct iovec* liov = (const struct iovec*)a1;
-    const struct iovec* riov = (const struct iovec*)a3;
-    unsigned long ln = a2, rn = a4;
-    if (!liov || !riov) return -LX_EFAULT;
-    unsigned long li = 0, ri = 0; size_t lo = 0, ro = 0; long total = 0;
-    while (li < ln && ri < rn) {
-      size_t lrem = liov[li].iov_len - lo, rrem = riov[ri].iov_len - ro;
-      size_t n = lrem < rrem ? lrem : rrem;
-      if (n) {
-        char* lp = (char*)liov[li].iov_base + lo;
-        char* rp = (char*)riov[ri].iov_base + ro;
-        if (nr == 270) memcpy(lp, rp, n); else memcpy(rp, lp, n);
-        total += (long)n; lo += n; ro += n;
-      }
-      if (lo == liov[li].iov_len) { li++; lo = 0; }
-      if (ro == riov[ri].iov_len) { ri++; ro = 0; }
-    }
-    return total;
-  }
+  case 270: return lx_process_vm_readv_self(a0, a1, a2, a3, a4, a5);
   case 271: return lx_process_vm_writev_self(a0, a1, a2, a3, a4, a5);
   case 272: {                                                   // kcmp
     // Only comparisons within this guest process have a reliable identity.
