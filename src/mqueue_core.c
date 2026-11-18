@@ -144,6 +144,19 @@ void mq_core_close(struct mq_core_handle* handle) {
   pthread_mutex_unlock(&g_mq_mu);
 }
 
+int mq_core_retain(struct mq_core_handle* handle, struct mq_core_handle** out) {
+  if (!handle || !out) return EFAULT;
+  *out = NULL;
+  struct mq_core_handle* copy = malloc(sizeof *copy);
+  if (!copy) return ENOMEM;
+  pthread_mutex_lock(&g_mq_mu);
+  copy->queue = handle->queue;
+  ++copy->queue->refs;
+  pthread_mutex_unlock(&g_mq_mu);
+  *out = copy;
+  return 0;
+}
+
 static int mq_deadline_valid(const struct timespec* deadline) {
   return !deadline ||
       (deadline->tv_sec >= 0 && deadline->tv_nsec >= 0 && deadline->tv_nsec < 1000000000L);

@@ -13,6 +13,8 @@ int mq_core_open(const char* name, int create, int exclusive,
                  struct mq_core_handle** out);
 int mq_core_unlink(const char* name);
 void mq_core_close(struct mq_core_handle* handle);
+// A second reference to the same open queue; caller closes it separately.
+int mq_core_retain(struct mq_core_handle* handle, struct mq_core_handle** out);
 int mq_core_send(struct mq_core_handle* handle, const void* data,
                  size_t length, unsigned priority);
 int mq_core_receive(struct mq_core_handle* handle, void* data,
