@@ -86,6 +86,7 @@ extern void rd_rtnl_dup(int oldfd, int newfd);
 #define LX_EIO 5
 #define LX_EBADF 9
 #define LX_EAGAIN 11
+#define LX_ECHILD 10
 #define LX_EDEADLK 35
 #define LX_ENOMEM 12
 #define LX_EACCES 13
@@ -5579,17 +5580,55 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
 
   // ---------- 260 wait4 ----------
   case 260: {
+    int lopt = (int)a2;
+    if (lopt & ~(1 | 2 | 8)) return -LX_EINVAL;
+    int mopt = 0;
+    if (lopt & 1) mopt |= WNOHANG;
+    if (lopt & 2) mopt |= WUNTRACED;
+    if (lopt & 8) mopt |= WCONTINUED;
+    // Probe the guest outputs before consuming a child's status. An EFAULT
+    // after wait4 has reaped the child cannot be retried by userspace.
+    int old_status = 0;
+    struct linux_rusage old_usage;
+    if (a1 && (gmem_guest_export_copyin(NULL, a1, &old_status, sizeof old_status) != 0 ||
+               gmem_guest_copyout_checked(a1, &old_status, sizeof old_status) != 0))
+      return -LX_EFAULT;
+    if (a3 && (gmem_guest_export_copyin(NULL, a3, &old_usage, sizeof old_usage) != 0 ||
+               gmem_guest_copyout_checked(a3, &old_usage, sizeof old_usage) != 0))
+      return -LX_EFAULT;
+    long selector = (long)(int)a0;
+    pid_t target;
+    if (selector > 0) {
+      if (!guest_child_known((int)selector)) return -LX_ECHILD;
+      target = (pid_t)selector;
+    } else if (selector == -1) {
+      // Darwin's P_ALL may include a shim-owned helper. Peek without reaping,
+      // then wait for that exact child only if the guest registry issued it.
+      siginfo_t si = {0};
+      int events = WEXITED | (lopt & 2 ? WSTOPPED : 0) |
+                   (lopt & 8 ? WCONTINUED : 0) | WNOWAIT |
+                   (lopt & 1 ? WNOHANG : 0);
+      if (waitid(P_ALL, 0, &si, events) != 0) return herrno();
+      if (!si.si_pid) return 0;
+      if (!guest_child_known(si.si_pid)) return -LX_EOPNOTSUPP;
+      target = si.si_pid;
+    } else {
+      // Group selectors need a guest process-group registry. Passing them to
+      // Darwin could wait for a different host group or reap the wrong child.
+      return -LX_EOPNOTSUPP;
+    }
     int st = 0;
-    int lopt = (int)a2, mopt = 0;
-    if (lopt & 1) mopt |= WNOHANG;              // WNOHANG
-    if (lopt & 2) mopt |= WUNTRACED;            // WUNTRACED
-    if (lopt & 8) mopt |= WCONTINUED;           // Linux WCONTINUED=8, macOS=0x10
     struct rusage ru;
-    pid_t p = wait4((pid_t)(long)a0, &st, mopt, a3 ? &ru : 0);
+    pid_t p = wait4(target, &st, mopt, a3 ? &ru : 0);
     if (p < 0) return herrno();
     if (p > 0) syscalls_signal_child_reaped(p);
-    if (a1) *(int*)a1 = st;                     // wait status encoding is compatible
-    if (a3 && p > 0) rusage_m2l(&ru, (struct linux_rusage*)a3);
+    if (p > 0 && a1 && gmem_guest_copyout_checked(a1, &st, sizeof st) != 0)
+      return -LX_EFAULT;
+    if (p > 0 && a3) {
+      struct linux_rusage out;
+      rusage_m2l(&ru, &out);
+      if (gmem_guest_copyout_checked(a3, &out, sizeof out) != 0) return -LX_EFAULT;
+    }
     return (long)p;
   }
 
