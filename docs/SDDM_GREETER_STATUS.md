@@ -215,3 +215,25 @@ KWin reached DRM mode and framebuffer probes, then SDDM logged `Wayland socket
 watcher timed out` and stopped it. No greeter UI appeared. The next issue is
 why KWin does not create its Wayland socket before SDDM's timeout; the earlier
 SDDM D-Bus registration hang also still needs a normal, override-free fix.
+
+### Wayland socket and SDDM IPC path corrected
+
+The timeout was a socket namespace mismatch. KWin bound
+`/run/user/962/wayland-0` in Shimmy's short shared host namespace, while SDDM
+watched the guest root's `/run/user/962`, where only `wayland-0.lock` appeared.
+Manually hard-linking the live socket into that directory in a disposable boot
+made SDDM find it and launch the greeter. `net.c` now publishes that same
+socket inode automatically on Wayland bind. A separate SDDM private socket was
+published in the guest root's `/tmp`, while the greeter's connect looked in the
+short shared namespace. A connect-time alias of the existing socket inode
+allowed the greeter to reach its daemon. Native networking tests passed 219
+checks; the on-screen disposable boot confirmed SDDM logged `Message received
+from greeter: Connect` and `Loading qrc:/theme/Main.qml...`.
+
+The greeter still crashed: rdmetal logged `mixed or unsupported framebuffer
+cannot be rendered by Metal or softpipe`, KWin reported `importing the supplied
+dmabufs failed`, and the greeter received a fatal Wayland protocol error.
+Earlier, KWin had submitted Metal-backed frames. This is now a buffer-format
+and import investigation, not the prior socket watcher or IPC failure. The
+clone still uses the temporary SDDM D-Bus registration bypass; remove it and
+verify an unmodified boot before calling the greeter complete.

@@ -110,6 +110,7 @@ enum {
 #define L_ENAMETOOLONG 36
 #define L_ENOSYS 38
 #define L_ENOTSOCK 88
+#define L_EADDRINUSE 98
 #define L_ENOTCONN 107
 #define L_ECONNREFUSED 111
 #define L_ENOBUFS 105
@@ -684,8 +685,66 @@ static long unix_path_to_host(const char* sp, size_t splen, int for_bind,
   else if (g_prefix_len && path[0] == '/') n = snprintf(out, osz, "%s%s", g_prefix, path);
   else n = snprintf(out, osz, "%s", path);
   if (n < 0 || (size_t)n >= osz) return -L_ENAMETOOLONG;
+  if (!for_bind && g_group_prefix_len && path[0] == '/' && !display_path) {
+    // A server may publish a pathname socket through a guest filesystem
+    // rename rather than bind it directly in RDSOCKETGROUP (Qt's private
+    // SDDM greeter socket does this). The guest-visible node is real, but its
+    // full rootfs path is too long for Darwin's sockaddr_un. Give that same
+    // socket inode a short alias in the shared namespace for connect().
+    struct stat grouped;
+    if (lstat(out, &grouped) < 0 && errno == ENOENT) {
+      const char *root = syscalls_get_root();
+      char visible[PATH_MAX];
+      int m = root && *root ? snprintf(visible, sizeof visible, "%s%s", root, path) : -1;
+      struct stat source;
+      if (m >= 0 && (size_t)m < sizeof visible &&
+          lstat(visible, &source) == 0 && S_ISSOCK(source.st_mode)) {
+        if (mkdir_parent(out) < 0) return lerr();
+        if (link(visible, out) < 0 &&
+            !(errno == EXDEV && symlink(visible, out) == 0) && errno != EEXIST)
+          return lerr();
+        struct stat alias;
+        if (stat(out, &alias) < 0 || !S_ISSOCK(alias.st_mode) ||
+            alias.st_dev != source.st_dev || alias.st_ino != source.st_ino)
+          return -L_EAGAIN;
+      }
+    }
+  }
   if (for_bind) mkdir_parent(out);
   return 0;
+}
+
+// AF_UNIX bind uses a short shared host path because Darwin's sun_path is
+// limited to 104 bytes. SDDM, however, watches the *guest* runtime directory
+// for KWin's Wayland socket, as it would on Linux. Publish the same socket
+// inode there so stat(2), directory watches and cross-process connect all see
+// one live listener. A symlink is needed when the rootfs is on another volume.
+static int guest_wayland_socket(const char* path) {
+  if (!path || strncmp(path, "/run/user/", 10)) return 0;
+  const char* p = path + 10;
+  if (*p < '0' || *p > '9') return 0;
+  while (*p >= '0' && *p <= '9') p++;
+  if (strncmp(p, "/wayland-", 9)) return 0;
+  p += 9;
+  if (*p < '0' || *p > '9') return 0;
+  while (*p >= '0' && *p <= '9') p++;
+  return *p == 0;
+}
+
+static long publish_guest_wayland_socket(const char* guest, const char* host) {
+  if (!guest_wayland_socket(guest)) return 0;
+  const char* root = syscalls_get_root();
+  if (!root || !*root) return -L_ENOENT;
+  char visible[PATH_MAX];
+  int n = snprintf(visible, sizeof visible, "%s%s", root, guest);
+  if (n < 0 || (size_t)n >= sizeof visible) return -L_ENAMETOOLONG;
+  if (!strcmp(visible, host)) return 0;
+  struct stat existing;
+  if (lstat(visible, &existing) == 0) return -L_EADDRINUSE;
+  if (errno != ENOENT) return lerr();
+  if (link(host, visible) == 0) return 0;
+  if (errno == EXDEV && symlink(host, visible) == 0) return 0;
+  return lerr();
 }
 
 // A path-only guest reference to a pathname socket in the guest namespace.
@@ -2516,6 +2575,25 @@ static long sys_bind(int fd, const void* uaddr, uint32_t len) {
     }
   }
   long out = lret(bind(fd, (struct sockaddr*)&hs, hlen));
+  if (out == 0 && uaddr && len > offsetof(struct lin_sockaddr_un, sun_path)) {
+    uint16_t fam; memcpy(&fam, uaddr, sizeof fam);
+    if (fam == L_AF_UNIX && hs.ss_family == AF_UNIX) {
+      const struct lin_sockaddr_un* lu = (const struct lin_sockaddr_un*)uaddr;
+      size_t bytes = len - offsetof(struct lin_sockaddr_un, sun_path);
+      if (bytes > sizeof lu->sun_path) bytes = sizeof lu->sun_path;
+      char guest[sizeof lu->sun_path + 1];
+      memcpy(guest, lu->sun_path, bytes);
+      guest[bytes] = 0;
+      long published = publish_guest_wayland_socket(
+          guest, ((const struct sockaddr_un*)&hs)->sun_path);
+      if (published < 0) {
+        // A bound socket invisible to the guest watcher is not a successful
+        // Linux bind. Remove the private pathname before reporting the error.
+        unlink(((const struct sockaddr_un*)&hs)->sun_path);
+        return published;
+      }
+    }
+  }
   if (out == 0 && hs.ss_family == AF_UNIX &&
       ((struct sockaddr_un*)&hs)->sun_path[0]) {
     struct stat path_stat, socket_stat;

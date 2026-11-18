@@ -490,6 +490,67 @@ static void t_epoll(void) {
   close((int)ep); close(sv[0]); close(sv[1]);
 }
 
+static void t_wayland_socket_visibility(void) {
+  SECTION("Wayland listener visible in guest runtime directory");
+  const char *guest = "/run/user/22001/wayland-0";
+  const char *visible = PREFIX "/run/user/22001/wayland-0";
+  const char *private = SCRATCH "/group/run/user/22001/wayland-0";
+  mkdir(PREFIX "/run", 0755);
+  mkdir(PREFIX "/run/user", 0755);
+  mkdir(PREFIX "/run/user/22001", 0700);
+  unlink(visible); unlink(private);
+  setenv("RDSOCKETGROUP", SCRATCH "/group", 1);
+  setenv("SHIMMY_NET_TEST_GUEST_ROOT", PREFIX, 1);
+  net_init();
+  struct lin_sockaddr_un sa; un_path(&sa, guest);
+  uint32_t salen = un_len(&sa, strlen(guest) + 1);
+  long server = SC3(N_socket, LAF_UNIX, LSOCK_STREAM, 0);
+  CHECK(server >= 0, "Wayland server socket -> %ld", server);
+  CHECK(SC3(N_bind, server, &sa, salen) == 0, "Wayland bind failed");
+  struct stat a, b;
+  CHECK(lstat(visible, &a) == 0 && S_ISSOCK(a.st_mode),
+        "guest runtime socket node is missing");
+  CHECK(lstat(private, &b) == 0 && a.st_dev == b.st_dev && a.st_ino == b.st_ino,
+        "visible socket does not reference the live private listener");
+  CHECK(SC2(N_listen, server, 1) == 0, "Wayland listen failed");
+  long client = SC3(N_socket, LAF_UNIX, LSOCK_STREAM, 0);
+  CHECK(client >= 0 && SC3(N_connect, client, &sa, salen) == 0,
+        "Wayland client could not connect through guest path");
+  OK("guest watcher and client see the same live Wayland socket");
+  close((int)client); close((int)server);
+  unlink(visible); unlink(private);
+  unsetenv("SHIMMY_NET_TEST_GUEST_ROOT");
+  unsetenv("RDSOCKETGROUP");
+}
+
+static void t_guest_published_socket_connect(void) {
+  SECTION("connect to socket published in guest root rather than group");
+  const char *guest = "/tmp/sddm--shimmy-test";
+  const char *visible = PREFIX "/tmp/sddm--shimmy-test";
+  const char *grouped = SCRATCH "/group/tmp/sddm--shimmy-test";
+  mkdir(PREFIX "/tmp", 0755);
+  unlink(visible); unlink(grouped);
+  int server = socket(AF_UNIX, SOCK_STREAM, 0);
+  struct sockaddr_un host = { .sun_family = AF_UNIX };
+  snprintf(host.sun_path, sizeof host.sun_path, "%s", visible);
+  CHECK(server >= 0 && bind(server, (struct sockaddr*)&host, sizeof host) == 0 &&
+        listen(server, 1) == 0, "native published listener failed");
+  setenv("SHIMMY_NET_TEST_GUEST_ROOT", PREFIX, 1);
+  struct lin_sockaddr_un sa; un_path(&sa, guest);
+  uint32_t salen = un_len(&sa, strlen(guest) + 1);
+  long client = SC3(N_socket, LAF_UNIX, LSOCK_STREAM, 0);
+  CHECK(client >= 0 && SC3(N_connect, client, &sa, salen) == 0,
+        "guest connect to published socket failed");
+  struct stat a, b;
+  CHECK(stat(visible, &a) == 0 && stat(grouped, &b) == 0 &&
+        a.st_dev == b.st_dev && a.st_ino == b.st_ino,
+        "group alias does not reference the guest-published listener");
+  OK("guest-published listener reachable through short shared namespace");
+  close((int)client); close(server);
+  unlink(visible); unlink(grouped);
+  unsetenv("SHIMMY_NET_TEST_GUEST_ROOT");
+}
+
 // ---------------------------------------------------------------------------
 static void t_ppoll(void) {
   SECTION("(f) ppoll / pselect6");
@@ -837,6 +898,8 @@ int main(void) {
   t_sockopt_af();
   t_acceptconn();
   t_cmsg();
+  t_wayland_socket_visibility();
+  t_guest_published_socket_connect();
 
   printf("\n================================\n");
   printf("%d checks passed, %d failed\n", g_pass, g_fail);

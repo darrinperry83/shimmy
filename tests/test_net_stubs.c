@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
+#include <stdlib.h>
 #include <sys/stat.h>
 
 int g_uid0 = 0;
@@ -10,7 +11,10 @@ unsigned guest_cred_uid(int which) { (void)which; return getuid(); }
 unsigned guest_cred_gid(int which) { (void)which; return getgid(); }
 int shim_fd_reserve(int fd) { return fd; }
 void shim_fd_unreserve(int fd) { (void)fd; }
-const char* syscalls_get_root(void) { return ""; }
+const char* syscalls_get_root(void) {
+  const char *root = getenv("SHIMMY_NET_TEST_GUEST_ROOT");
+  return root ? root : "";
+}
 long syscalls_guest_pid(void) { return getpid(); }
 int linux_errno_from_host(int error) { return error; }
 // The standalone net harness passes only its own valid host buffers. Guest
