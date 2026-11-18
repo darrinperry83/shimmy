@@ -2169,10 +2169,13 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return syscalls_signal_sigsuspend((const unsigned long long*)a0, (size_t)a1);
   }
   case 136:                                                    // rt_sigpending
-    if (!a0) return -LX_EFAULT;
     if (a1 != 8) return -LX_EINVAL;
-    *(uint64_t*)a0 = (uint64_t)syscalls_signal_pending();
-    return 0;
+    if (!a0) return -LX_EFAULT;
+    { // Only the shim's virtual standard-signal queue is modeled here.
+      uint64_t pending = (uint64_t)syscalls_signal_pending();
+      return gmem_guest_copyout_checked(a0, &pending, sizeof pending) == 0
+                 ? 0 : -LX_EFAULT;
+    }
   case 137: return -LX_EAGAIN;                                 // rt_sigtimedwait: timed out
   case 138: case 240: {                                        // rt_sigqueueinfo/rt_tgsigqueueinfo
     int lsig = (nr == 138) ? (int)a1 : (int)a2;
