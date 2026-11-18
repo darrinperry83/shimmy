@@ -70,15 +70,9 @@ if [ "$BOOT_INIT" = 1 ]; then
     echo "error: $ROOT/tmp must be a mode-1777 directory" >&2; exit 1;
   }
 
-  # Older installed roots have only tty1 enabled. Install the remaining gettys
-  # idempotently before PID 1 starts, preserving any administrator overrides.
-  mkdir -p "$ROOT/etc/systemd/system/getty.target.wants"
-  for tty in 2 3 4 5 6; do
-    unit="$ROOT/etc/systemd/system/getty.target.wants/getty@tty${tty}.service"
-    if [ ! -e "$unit" ] && [ ! -L "$unit" ]; then
-      ln -s /usr/lib/systemd/system/getty@.service "$unit"
-    fi
-  done
+  # getty@tty1 is enabled by the installed root; tty2..6 start on demand via logind's auto-VT
+  # (the shim publishes VT switches through /sys/class/tty/tty0/active, and logind starts
+  # getty@ttyN for the new active VT). No getty symlinks are added here.
 
   INIT="$ROOT/sbin/init"
   INIT_RESOLVED="$(readlink -f "$INIT" 2>/dev/null || true)"

@@ -1513,9 +1513,11 @@ static int proc_open(const char* g, long* out) {
     return 1;
   }
   if (strcmp(g, "/sys/class/tty/tty0/active") == 0) {
-    snprintf(buf, sizeof buf, "tty1\n");
-    int fd = mem_fd(buf, strlen(buf));
-    *out = fd < 0 ? herrno() : fd;
+    // logind opens this once and epolls it: the fd must change value AND wake the poller when the
+    // foreground console switches. A mem_fd is a static seekable snapshot (always readable under
+    // kqueue), so serve vt.c's pipe instead (see vt_console_active_open/publish).
+    int vfd = vt_console_active_open();
+    *out = vfd < 0 ? herrno() : vfd;
     return 1;
   }
   // /proc/sys/kernel/* — systemd/journald read these at startup; the OPEN-FAIL log showed
@@ -4956,6 +4958,7 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     pidfd_shim_closed((int)a0);
     snd_forget_fd((int)a0);
     evdev_forget_fd((int)a0);
+    vt_fd_closed((int)a0);               // drop a console's open count for honest VT_GETSTATE
     // A synthetic DRM render-node fd MUST leave the registry when it is closed. Without this the
     // fd number stays "owned" forever, so the next regular file to reuse that number (glibc's
     // dlopen of libGLESv2 did exactly this) is misclassified: its mmap() is routed to drm_mmap_bo
@@ -4999,6 +5002,11 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   case 62: {
     int w = lseek_whence_l2m((int)a2);
     if (w < 0) return -LX_EINVAL;
+    // The active-console sysfs file is backed by a pipe (for epoll wakeup), which has no offset.
+    // logind does lseek(fd, 0, SEEK_SET) before reading and treats a failure as fatal, so fake a
+    // successful seek-to-start; the pipe read already starts at the oldest pending line.
+    if (vt_console_active_owns_fd((int)a0))
+      return (w == SEEK_SET && a1 == 0) ? 0 : -LX_EINVAL;
     char dpath[GPATH_MAX] = {0};
     if (cgroup_dir_path((int)a0, dpath, sizeof dpath) != 0)
       (void)guest_path_of_fd((int)a0, dpath, sizeof dpath);

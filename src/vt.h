@@ -32,6 +32,9 @@ int  vt_node_number(const char* gpath);   // 1..6 for /dev/ttyN, else 0
 int  vt_open_node(const char* gpath);     // -> fresh slave fd (host fd) or negative errno
 int  vt_owns_fd(int fd);                  // is fd (or any dup of it) one of our pty slaves?
 int  vt_number_for_fd(int fd);            // guest tty number for a pty slave, or 0
+void vt_fd_closed(int fd);                // guest closed a console fd: drop its open count
+int  vt_console_active_open(void);        // -> fresh read-end fd for /sys/class/tty/tty0/active
+int  vt_console_active_owns_fd(int fd);   // is fd (or a dup) the active-console pipe read end?
 int  vt_claim_ctty(int fd);
 int  vt_get_foreground(int fd, int* pgid);
 int  vt_set_foreground(int fd, int pgid);

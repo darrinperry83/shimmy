@@ -61,6 +61,8 @@
 #define LX_K_UNICODE  0x03
 #define LX_KB_101     0x02
 #define LX_VT_AUTO    0x00
+#define LX_EINTR      4
+#define LX_EINVAL     22
 #define LX_ENOTTY     25
 
 struct lx_vt_mode { char mode, waitv; short relsig, acqsig, frsig; };
@@ -81,6 +83,24 @@ static vt_present_fn g_present;
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static int g_inited;
 static int g_enabled = -1;
+
+// VT_WAITACTIVE: a waiter sleeps on g_waitactive_cond until vt_set_active() flips g_active and
+// broadcasts. g_waitactive_lock guards BOTH the state change and the waiter's re-check, so a
+// switch can never slip between the waiter's "already active?" test and its cond_wait (lost wakeup).
+static pthread_mutex_t g_waitactive_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  g_waitactive_cond = PTHREAD_COND_INITIALIZER;
+
+// Per-VT "is a guest fd currently open on this console" counter, mirroring Linux's vt_in_use()
+// (vc port kref > 1). VT_GETSTATE reports a VT as allocated only while this is > 0 so logind's
+// vt_is_busy() does not think tty2..6 are busy and skip spawning getty@ttyN.
+static _Atomic int g_vt_open[VT_MAX_TEXT];
+
+// /sys/class/tty/tty0/active: logind opens this once and epolls it; a VT switch must both change
+// the value and wake the poller, exactly like a kernel sysfs attribute. A temp file is always
+// EOF-readable under kqueue (logind would spin) and never changes, so we serve a pipe: the shim
+// holds the write end and re-writes the current "ttyN\n" on every switch.
+static int g_console_active_r = -1;      // read end handed to the guest
+static int g_console_active_w = -1;      // write end held by the shim
 
 static uint8_t* g_fb;                    // RGBA surface for the active console
 static int g_fb_w, g_fb_h;
@@ -213,10 +233,65 @@ static int vt_make_pty(int* master_out, char* slave_out, size_t slave_cap) {
 
 static void vt_present_active(void);
 
+// Update /sys/class/tty/tty0/active: drain any stale line so the pipe holds only the latest value,
+// then append the current active console. Best-effort: the pipe may not exist yet, and a dead
+// reader (logind exited) makes the write EPIPE, which F_SETNOSIGPIPE turns into an ignored error.
+static void vt_console_active_publish(void) {
+    if (g_console_active_w < 0) return;
+    char drain[256];
+    while (read(g_console_active_r, drain, sizeof drain) > 0) {}
+    char line[16];
+    snprintf(line, sizeof line, "tty%d\n", (int)atomic_load(&g_active));
+    (void)write(g_console_active_w, line, strlen(line));
+}
+
+static void vt_console_active_make(void) {
+    if (g_console_active_r >= 0) return;
+    int p[2];
+    if (pipe(p) != 0) return;
+    int r = p[0], w = p[1];
+    fcntl(r, F_SETFL, fcntl(r, F_GETFL, 0) | O_NONBLOCK);  // drain() must never block
+    fcntl(w, F_SETNOSIGPIPE, 1);                           // a closed reader is not fatal
+    // systemd packs its own listen fds onto 3..8 at boot and would otherwise close these; keep
+    // the shim-held ends reserved at >=256 (dup() below still yields a non-CLOEXEC guest fd).
+    r = shim_fd_reserve(r);
+    w = shim_fd_reserve(w);
+    g_console_active_r = r;
+    g_console_active_w = w;
+    vt_console_active_publish();                           // seed with the current active console
+}
+
+int vt_console_active_open(void) {
+    pthread_mutex_lock(&g_lock);
+    vt_console_active_make();
+    int fd = g_console_active_r >= 0 ? dup(g_console_active_r) : -1;
+    pthread_mutex_unlock(&g_lock);
+    return fd;
+}
+
+int vt_console_active_owns_fd(int fd) {
+    if (fd < 0 || g_console_active_r < 0) return 0;
+    struct stat a, b;
+    if (fstat(fd, &a) != 0 || fstat(g_console_active_r, &b) != 0) return 0;
+    return a.st_dev == b.st_dev && a.st_ino == b.st_ino;
+}
+
+// Central active-console mutation: the state change and the waiter broadcast happen under one lock
+// so a VT_WAITACTIVE waiter can never miss the wakeup it is waiting for.
+static int vt_set_active(int n) {
+    int prev;
+    pthread_mutex_lock(&g_waitactive_lock);
+    prev = atomic_exchange(&g_active, n);
+    pthread_cond_broadcast(&g_waitactive_cond);
+    pthread_mutex_unlock(&g_waitactive_lock);
+    if (prev != n) vt_console_active_publish();
+    return prev;
+}
+
 void vt_switch_to(int n) {
     if (!vt_enabled()) return;
     if (n < 1 || n > VT_GRAPHICS) n = 1;
-    int prev = atomic_exchange(&g_active, n);
+    int prev = vt_set_active(n);
     if (prev != n) {
         fprintf(stderr, "[vt] switch to %s console (was %d)\n",
                 n == VT_GRAPHICS ? "GUI" : "text", prev);
@@ -229,7 +304,7 @@ void vt_graphics_frame(void) {
     // Auto-select the desktop only when it first appears. Subsequent frames must
     // not undo a user's explicit Ctrl+Alt+Fn switch to a text login.
     if (!atomic_exchange(&g_graphics_seen, 1) &&
-        atomic_exchange(&g_active, VT_GRAPHICS) != VT_GRAPHICS) {
+        vt_set_active(VT_GRAPHICS) != VT_GRAPHICS) {
         fprintf(stderr, "[vt] GUI frame detected -> input to GUI console\n");
     }
 }
@@ -593,6 +668,7 @@ int vt_open_node(const char* gpath) {
     if (fl < 0 || fcntl(fd, F_SETFL, fl & ~O_NONBLOCK) < 0) {
         int err = errno; close(fd); return -(long)linux_errno_from_host(err);
     }
+    atomic_fetch_add(&g_vt_open[n - 1], 1);
     return fd;
 }
 
@@ -606,6 +682,17 @@ int vt_number_for_fd(int fd) {
 }
 
 int vt_owns_fd(int fd) { return vt_number_for_fd(fd) != 0; }
+
+// Guest close(2) of a console fd drops that console's open count. The count is a best-effort
+// mirror of "a guest process has this tty open"; a dup'd fd still dev/ino-matches here, so the
+// counter can briefly read 0 while another dup stays open — harmless, because logind's autovt
+// start is idempotent (systemd no-ops an already-running getty@ttyN).
+void vt_fd_closed(int fd) {
+    int n = vt_number_for_fd(fd);
+    if (n < 1 || n > VT_MAX_TEXT) return;
+    int expect = atomic_load(&g_vt_open[n - 1]);
+    while (expect > 0 && !atomic_compare_exchange_weak(&g_vt_open[n - 1], &expect, expect - 1)) {}
+}
 
 void vt_stat_identity(const char* gpath, uint64_t* dev, uint64_t* ino) {
     int n = vt_node_number(gpath);
@@ -644,11 +731,39 @@ long vt_ioctl(int fd, unsigned long req, unsigned long arg) {
         struct lx_vt_stat* s = (struct lx_vt_stat*)arg;
         s->v_active = (unsigned short)vt_active();
         s->v_signal = 0;
-        s->v_state = (unsigned short)((1u << VT_MAX_TEXT) - 1);  // tty1..6 allocated
+        // Linux: bit 0 is /dev/tty0 (always open); bit N (N>=1) is ttyN "in use" (vt_in_use():
+        // the vc's tty port kref > 1, i.e. a process has it open). logind's vt_is_busy() reads
+        // exactly this mask from /dev/tty1 and SKIPS spawning autovt@ttyN (getty@ttyN) when bit N
+        // is set. Reporting all six as allocated would mark tty2..6 busy and suppress auto-VT, so
+        // report only consoles a guest has actually opened (g_vt_open). Under-reporting is harmless:
+        // manager_start_unit() of an already-running getty@ttyN is a no-op.
+        unsigned short state = 1;                                    // /dev/tty0
+        for (int i = 0; i < VT_MAX_TEXT; i++)
+            if (atomic_load(&g_vt_open[i]) > 0)
+                state = (unsigned short)(state | (1u << (i + 1)));
+        s->v_state = state;
         return 0;
     }
     case LX_VT_ACTIVATE:    vt_switch_to((int)arg); return 0;
-    case LX_VT_WAITACTIVE:  return 0;
+    case LX_VT_WAITACTIVE: {
+        // Linux vt_waitactive(): return immediately if the VT is already active, otherwise sleep
+        // until a VT switch makes it active (loop to tolerate a switch to some other VT first), and
+        // report -EINTR if the wait was interrupted. arg is the VT number directly (like VT_ACTIVATE,
+        // a bare _IO), so it is read as an int, not a guest pointer. The GUI console (7) blocks like
+        // a text VT; anything outside 1..7 is refused before it can crash the state machine.
+        int n = (int)arg;
+        if (n < 1 || n > VT_GRAPHICS) return -LX_EINVAL;
+        pthread_mutex_lock(&g_waitactive_lock);
+        while (atomic_load(&g_active) != n) {
+            int rc = pthread_cond_wait(&g_waitactive_cond, &g_waitactive_lock);
+            if (rc != 0) {
+                pthread_mutex_unlock(&g_waitactive_lock);
+                return rc == EINTR ? -LX_EINTR : -(long)linux_errno_from_host(rc);
+            }
+        }
+        pthread_mutex_unlock(&g_waitactive_lock);
+        return 0;
+    }
     case LX_VT_RELDISP:     return 0;
     case LX_VT_DISALLOCATE: return 0;
     case LX_VT_RESIZE:      return 0;

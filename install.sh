@@ -120,16 +120,11 @@ install -d -m 0777 "$ROOTFS/tmp"
 chmod 1777 "$ROOTFS/tmp"
 install -d "$ROOTFS/etc/systemd/system"
 
-# Each Shimmy VT needs its own getty. A stock Arch root only enables tty1 and
-# relies on kernel/logind auto-VT activation for the others, which our virtual
-# console does not yet provide.
-install -d "$ROOTFS/etc/systemd/system/getty.target.wants"
-for tty in 2 3 4 5 6; do
-  unit="$ROOTFS/etc/systemd/system/getty.target.wants/getty@tty${tty}.service"
-  if [ ! -e "$unit" ] && [ ! -L "$unit" ]; then
-    ln -s /usr/lib/systemd/system/getty@.service "$unit"
-  fi
-done
+# getty@tty1 is enabled by the stock Arch root (getty.target.wants/getty@tty1.service).
+# tty2..6 are deliberately NOT pre-enabled: systemd-logind starts getty@ttyN on demand when
+# the user switches to that VT (auto-VT). The shim's virtual console now implements that via
+# the /sys/class/tty/tty0/active pipe plus the honest VT_GETSTATE / blocking VT_WAITACTIVE
+# ioctls in src/vt.c, so no hand-added getty symlinks are needed here.
 
 # --- 5. configure the guest the standard Arch way -----------------------------
 echo "==> configuring the guest (DNS, /dev placeholders)"
