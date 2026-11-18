@@ -184,6 +184,8 @@ The next keyring dependency models thread, process, and session ring subscriptio
 
 An inactive cross-process POSIX mqueue store now supports private named queues, bounded priority-ordered messages, and unlink while a backing descriptor remains open. Its native ARM64 fork/re-exec test passes and the combined CLI build succeeds. The store is not exposed as a guest queue descriptor; poll readiness, fd inheritance, crash recovery, credentials, and notifications remain unresolved. Syscalls 180–185 remain unsupported.
 
+A harmless ARM64 negative security probe confirms a guest can invoke native Darwin `getpid` with `svc #0x80` outside `route_syscall()`. A dispatcher-only seccomp filter could therefore be bypassed; #277 filter installation remains disabled. The probe passed against the isolated CLI build. This finding also requires a broader guest isolation review before making security claims about the in-process runtime.
+
 ## Batch integration proof
 
 At the isolated integration head, `./build.sh cli`, `tests/run-inotify-rm-watch.sh`, `python3 tests/run-get-robust-list.py`, and `python3 tests/run-fchmodat2.py --sysroot <installed-Arch-root>` all passed on 2026-11-18. These are focused tests, not a systemd/desktop regression run.
