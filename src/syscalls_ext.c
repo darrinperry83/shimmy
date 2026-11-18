@@ -1567,7 +1567,22 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     // macOS fsync does not push the drive cache; F_FULLFSYNC does. fdatasync only owes us
     // metadata-lite durability, so plain fsync is the right (and much cheaper) mapping.
     return ok0(fsync((int)a0));
-  case 84: return ok0(fsync((int)a0));                         // sync_file_range -> fsync
+  case 84: {                                                  // sync_file_range
+    /* A zero-flags request performs no writeback on Linux.  Do not map a
+     * range request to whole-file fsync: its wait/write/error contract is
+     * different and is not implemented by this host bridge. */
+    int fd = (int)a0;
+    if (fd < 0 || shim_fd_reserved(fd)) return -LX_EBADF;
+    struct stat st;
+    if (fstat(fd, &st) < 0) return eret();
+    int64_t offset = (int64_t)a1, nbytes = (int64_t)a2;
+    unsigned flags = (unsigned)a3;
+    if (flags & ~7u || offset < 0 || nbytes < 0 ||
+        (nbytes && offset > INT64_MAX - nbytes)) return -LX_EINVAL;
+    if (!S_ISREG(st.st_mode) && !S_ISBLK(st.st_mode) &&
+        !S_ISDIR(st.st_mode) && !S_ISLNK(st.st_mode)) return -LX_ESPIPE;
+    return flags == 0 ? 0 : -LX_EOPNOTSUPP;
+  }
   case 85: return timerfd_create_shim((int)a0, (int)a1);
   case 86: return timerfd_settime_shim((int)a0, (int)a1, (const linux_itimerspec*)a2, (linux_itimerspec*)a3);
   case 87: return timerfd_gettime_shim((int)a0, (linux_itimerspec*)a1);
