@@ -1814,9 +1814,18 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   case 40: {
     // mount(source, target, fstype, mountflags, data)
     (void)a0; (void)a3; (void)a4;
-    const char *target = (const char*)a1;
-    const char *fstype = (const char*)a2;
-    if (!target) return -LX_EFAULT;
+    // Even the synthetic mount subset must not dereference raw guest
+    // pointers or acknowledge an invalid target as a successful mount.
+    char guest_target[PATH_MAX], guest_fstype[PATH_MAX];
+    e = copy_guest_cstr(a1, guest_target, sizeof guest_target);
+    if (e < 0) return e;
+    const char *target = guest_target;
+    const char *fstype = NULL;
+    if (a2) {
+      e = copy_guest_cstr(a2, guest_fstype, sizeof guest_fstype);
+      if (e < 0) return e;
+      fstype = guest_fstype;
+    }
     if (fstype && strcmp(fstype, "tmpfs") == 0) {
       // systemd's mount_nofollow() passes /proc/self/fd/N, not the pathname.
       // Match that fd against the actual guest runtime directory inode; PID1
