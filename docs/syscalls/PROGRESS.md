@@ -81,6 +81,11 @@ This file records bounded behavior that has been implemented and tested. A dispa
 | 271 | `process_vm_writev` | `syscall/271-process-vm-writev` | Squash merged at `b8c34c7`; bounded subset | Self-guest writes use checked local vectors, a source snapshot, and checked guest-memory copyout; partial remote faults return a byte count. Cross-process and overlapping vectors remain unsupported. ARM64 guest probe and private Arch boot gate pass. |
 | 278 | `getrandom` | `syscall/278-getrandom` | Squash merged at `5b94e37`; bounded subset | Default and nonblocking host CSPRNG copy into checked guest memory, with valid short reads above 256 bytes. Separate random/insecure modes remain unsupported. ARM64 guest probe and private Arch boot gate pass. |
 | 231 | `munlockall` | `syscall/231-munlockall` | Squash merged at `b71a6cf`; honest unsupported | Returns `ENOSYS` instead of claiming all guest locks were released. SysV/DRM/ALSA mappings escape the current ledger, so a complete unlock walk is not available. ARM64 guest probe and private Arch boot gate pass. |
+| 71 | `sendfile` | `syscall/71-sendfile` | Squash merged at `135f194`; bounded subset | Validates guest explicit offsets, regular-file source, fd modes and append/same-file errors; bounded buffered copy updates explicit offsets by transferred bytes. Socket partial-write and concurrent shared-fd behavior need more work. ARM64 guest probe and private Arch boot gate pass. |
+| 227 | `msync` | `syscall/227-msync` | Squash merged at `855e1b6`; bounded subset | Validates Linux flags, alignment and mapped guest range up to 16 MiB; `MS_SYNC` uses host `msync`, async/zero flags are no-op, invalidation remains unsupported. ARM64 guest probe and private Arch boot gate pass; power-loss durability is unproven. |
+| 270 | `process_vm_readv` | `syscall/270-process-vm-readv` | Squash merged at `3cdd854`; bounded subset | Self-guest reads use checked vectors and guest-memory range checks, with partial remote-fault byte counts. Other processes and overlapping vectors remain unsupported. ARM64 guest probe and private Arch boot gate pass. |
+| 450 | `set_mempolicy_home_node` | `syscall/450-set-mempolicy-home-node` | Squash merged at `827551a`; default-policy ABI subset | Validates alignment, flags, node and length; zero length succeeds and nonempty ranges return `ENOENT` because no per-VMA BIND/PREFERRED_MANY policy exists. No home-node change is claimed. ARM64 probe and private Arch boot gate pass. |
+| 69 | `preadv` | `syscall/69-preadv` | Squash merged at `2f49696`; bounded subset | Checked guest vectors and copyout for regular files up to 1 MiB, including full 64-bit ARM64 offset and short read behavior. Nonregular fds and broader Linux semantics remain unsupported. ARM64 guest probe and private Arch boot gate pass. |
 
 ## Already merged before this batch
 
@@ -107,6 +112,8 @@ The subsequent `copy_file_range` and `syncfs` merges passed a combined CLI build
 The `mlock` and `sync_file_range` squash merges passed a combined CLI build, their ARM64 guest probes, and the existing `mlock2` regression probe. Another private Arch clone reached a fresh login prompt with both D-Bus processes settled. The clone operation again warned about protected fixture entries; no installed rootfs or live GUI was changed.
 
 The `munlock`, `process_vm_writev`, `getrandom`, and `munlockall` squash merges passed the combined CLI build and their focused ARM64 guest probes. Another private Arch clone reached a fresh login prompt with both D-Bus processes settled. The clone copy reported the same protected-entry warnings. This is a systemd smoke gate, not proof of full guest memory isolation or GUI behavior.
+
+The `sendfile`, `msync`, `process_vm_readv`, `set_mempolicy_home_node`, and `preadv` squash merges passed a combined CLI build and their focused ARM64 probes. A fresh private Arch clone reached login with both D-Bus processes settled. The clone copy again warned about protected fixture entries, and this smoke test does not prove a live GUI, power-loss durability, or complete cross-process memory semantics.
 
 ## Batch integration proof
 
