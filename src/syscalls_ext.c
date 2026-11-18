@@ -3505,9 +3505,11 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (nice == -1 && errno) return eret();
     attr.size = sizeof(attr);
     attr.nice = nice;
-    memcpy((void *)a1, &attr, sizeof(attr));
-    if (size > sizeof(attr)) memset((char *)a1 + sizeof(attr), 0, size - sizeof(attr));
-    return 0;
+    // Build the entire declared v0-plus-extension result before guest copyout.
+    // A later unmapped page must not leave a partially written sched_attr.
+    uint8_t out[4096] = {0};
+    memcpy(out, &attr, sizeof attr);
+    return gmem_guest_copyout_checked(a1, out, size) == 0 ? 0 : -LX_EFAULT;
   }
   case 276: {                                                   // renameat2
     unsigned flags = (unsigned)a4;
