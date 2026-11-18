@@ -2364,15 +2364,24 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     // current virtual signal path can promise. Never signal the host shim.
     return lsig == 0 ? 0 : -LX_EOPNOTSUPP;
   }
-  case 240: {                                                  // rt_tgsigqueueinfo (separate gap)
+  case 240: {                                                  // rt_tgsigqueueinfo
     int lsig = (int)a2;
-    if (lsig == 0) return 0;
-    int hs = host_signo(lsig);
-    if (hs < 0) return 0;
-    // Same namespace trap as tkill above: never hand a guest pid/tid to the host kill().
-    pid_t p = (pid_t)(int)a0;
-    if (p <= 0 || p == getpid() || guest_tid_known((int)p)) return ok0(kill(getpid(), hs));
-    return -LX_ESRCH;
+    if (lsig < 0 || lsig > 64) return -LX_EINVAL;
+    // Linux copies siginfo before resolving the target. The guest payload
+    // cannot be discarded or treated as a host siginfo_t.
+    unsigned char info[128];
+    if (!a3 || gmem_guest_export_copyin(NULL, a3, info, sizeof info) != 0)
+      return -LX_EFAULT;
+    long tgid = (long)(int)a0, tid = (long)(int)a1;
+    if (tgid <= 0 || tid <= 0) return -LX_EINVAL;
+    if (tgid != syscalls_guest_pid())
+      return guest_child_known((int)tgid) ? -LX_EOPNOTSUPP : -LX_ESRCH;
+    if (tid != guest_tid())
+      return guest_tid_known((int)tid) ? -LX_EOPNOTSUPP : -LX_ESRCH;
+    // Self signal-zero checks existence without delivery. Nonzero signaling
+    // needs guest thread queues, siginfo and handler frames. Never kill the
+    // host shim in place of that contract.
+    return lsig == 0 ? 0 : -LX_EOPNOTSUPP;
   }
   case 140: {                                                  // setpriority
     // Guest PIDs, process groups and users are not host namespaces. Never
