@@ -20,12 +20,17 @@ bool is_float_vec(const spirv_cross::CompilerMSL &compiler,
 bool supported_resources(const spirv_cross::CompilerMSL &compiler,
                          spv::ExecutionModel stage, bool textured, bool v6) {
     const auto resources=compiler.get_shader_resources();
-    if(!resources.uniform_buffers.empty()||!resources.storage_buffers.empty()||
+    if(!resources.storage_buffers.empty()||
        !resources.subpass_inputs.empty()||!resources.storage_images.empty()||
        !resources.atomic_counters.empty()||
        !resources.push_constant_buffers.empty()||!resources.separate_images.empty()||
        !resources.separate_samplers.empty()||!resources.gl_plain_uniforms.empty()||
        !resources.acceleration_structures.empty())return false;
+    /* The real Qt vertex shader carries exactly one uniform buffer: the
+     * qt_Matrix MVP (a single mat4, 64 bytes). The fragment stage carries none. */
+    if(resources.uniform_buffers.size() > 1) return false;
+    if(stage != spv::ExecutionModelVertex && !resources.uniform_buffers.empty())
+       return false;
     if(stage==spv::ExecutionModelVertex){
         if(v6){
             /* Real Qt shape: position(float2)@0 + color(vec4)@1 + opacity(float)@2
@@ -304,6 +309,8 @@ int rdgpu_draw_execute_with_depth(const void *packet,size_t bytes,
     std::string vertexMSL,fragmentMSL,vertexEntry,fragmentEntry;
     try {
         spirv_cross::CompilerMSL vertex(vs),fragment(fs);
+        for (const auto &ub : vertex.get_shader_resources().uniform_buffers)
+           vertex.set_decoration(ub.id, spv::DecorationBinding, 1u);
         if(vertex.get_execution_model()!=spv::ExecutionModelVertex||
            fragment.get_execution_model()!=spv::ExecutionModelFragment||
            !supported_resources(vertex,spv::ExecutionModelVertex,textured,v6)||
@@ -469,6 +476,8 @@ int rdgpu_draw_execute_with_depth(const void *packet,size_t bytes,
                         [encoder setDepthStencilState:[device newDepthStencilStateWithDescriptor:ds]];
                     }
                     [encoder setVertexBuffer:vertex offset:0 atIndex:0];
+                    if(uniform_bytes)
+                       [encoder setVertexBytes:uniform_data length:uniform_bytes atIndex:1];
                     MTLScissorRect scissor={scissor_x,scissor_y,
                                             scissor_width,scissor_height};
                     [encoder setScissorRect:scissor];
