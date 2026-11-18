@@ -970,21 +970,32 @@ static long do_prctl(int opt, unsigned long a1, unsigned long a2,
   switch (opt) {
     case LX_PR_SET_NAME: {
       if (!a1) return -LX_EFAULT;
-      memset(g_procname, 0, sizeof g_procname);
-      memcpy(g_procname, (const char*)a1, strnlen((const char*)a1, sizeof g_procname - 1));
+      char next[sizeof g_procname] = {0};
+      // Linux truncates at 15 bytes without requiring a NUL in guest memory.
+      // Finish checked copy-in before changing the visible process name.
+      for (size_t i = 0; i < sizeof next - 1; ++i) {
+        if (gmem_guest_export_copyin(NULL, a1 + i, next + i, 1) != 0)
+          return -LX_EFAULT;
+        if (!next[i]) break;
+      }
+      memcpy(g_procname, next, sizeof g_procname);
       pthread_setname_np(g_procname);            // macOS can only name the calling thread
       return 0;
     }
-    case LX_PR_GET_NAME:
+    case LX_PR_GET_NAME: {
       if (!a1) return -LX_EFAULT;
-      memset((void*)a1, 0, 16);
-      memcpy((void*)a1, g_procname, strnlen(g_procname, 15));
-      return 0;
+      char out[sizeof g_procname] = {0};
+      memcpy(out, g_procname, strnlen(g_procname, sizeof out - 1));
+      return gmem_guest_copyout_checked(a1, out, sizeof out) == 0 ? 0 : -LX_EFAULT;
+    }
     case LX_PR_SET_PDEATHSIG:
       return syscalls_signal_set_pdeathsig((int)a1);
     case LX_PR_GET_PDEATHSIG:
       if (!a1) return -LX_EFAULT;
-      *(int*)a1 = syscalls_signal_get_pdeathsig(); return 0;
+      {
+        int sig = syscalls_signal_get_pdeathsig();
+        return gmem_guest_copyout_checked(a1, &sig, sizeof sig) == 0 ? 0 : -LX_EFAULT;
+      }
     case LX_PR_SET_DUMPABLE:   g_dumpable = (int)a1; return 0;
     case LX_PR_GET_DUMPABLE:   return g_dumpable;
     case LX_PR_SET_KEEPCAPS:   return 0;
