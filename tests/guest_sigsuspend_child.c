@@ -20,6 +20,7 @@ int main(void) {
   if (sigprocmask(SIG_BLOCK, &blocked, NULL)) return 2;
   if (syscall(SYS_rt_sigsuspend, &empty, 7) != -1 || errno != EINVAL) return 3;
   if (syscall(SYS_rt_sigsuspend, NULL, 8) != -1 || errno != EFAULT) return 4;
+  if (syscall(SYS_rt_sigsuspend, (void *)(uintptr_t)1, 8) != -1 || errno != EFAULT) return 11;
   pid_t child = fork();
   if (child < 0) return 5;
   if (child == 0) {

@@ -65,7 +65,7 @@ long syscalls_signal_set_pdeathsig(int linux_signo);
 int  syscalls_signal_get_pdeathsig(void);
 void syscalls_signal_after_fork(void);
 unsigned long long syscalls_signal_pending(void);
-long syscalls_signal_sigsuspend(const unsigned long long* mask, size_t size);
+long syscalls_signal_sigsuspend(unsigned long long mask);
 void syscalls_signal_child_reaped(long pid);
 void syscalls_signal_exec_snapshot(char* out, size_t cap, int forked_child);
 void syscalls_signal_exec_restore(const char* snapshot);

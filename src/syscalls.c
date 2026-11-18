@@ -2775,10 +2775,8 @@ void syscalls_signal_child_reaped(long pid) {
   if (pid > 0 && g_sigchld_notified_pid == (pid_t)pid)
     g_sigchld_notified_pid = 0;
 }
-long syscalls_signal_sigsuspend(const unsigned long long* mask, size_t size) {
-  if (!mask) return -LX_EFAULT;
-  if (size != 8) return -LX_EINVAL;
-  uint64_t temporary = (uint64_t)*mask &
+long syscalls_signal_sigsuspend(unsigned long long mask) {
+  uint64_t temporary = (uint64_t)mask &
       ~((1ULL << (9 - 1)) | (1ULL << (19 - 1)));
   uint64_t previous = __atomic_exchange_n(&g_sigmask, temporary, __ATOMIC_ACQ_REL);
   for (;;) {

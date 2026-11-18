@@ -222,6 +222,8 @@ An isolated #282 userfaultfd fault/copy/wake experiment passed ARM64 guest and p
 
 `sigaltstack` (#132) now stores its shadow state per guest host thread and stages checked guest stack input/output before updating it. Its ARM64 error and thread-isolation probes, CLI build, private Arch login/D-Bus boot, and integration probes passed. Actual alternate-stack signal delivery, `SS_AUTODISARM`, and fork/exec edges remain unsupported or unproven.
 
+`rt_sigsuspend` (#133) now copies the eight-byte guest mask safely before the virtual signal wait. Its ARM64 child-wake/error probe, CLI build, private Arch login/D-Bus boot, and rebuilt integration probe passed. An initial integration probe accidentally ran a stale pre-merge binary and faulted on the old raw dereference; rebuilding before the rerun resolved that test setup error. The virtual signal mask and guest handler delivery remain incomplete.
+
 `setitimer` (#103) now copies guest input safely, validates Linux timeval fields, treats null new value as a zero timer, and copies old value to guest memory safely. Its ARM64 guest probe, CLI build, private Arch login/D-Bus boot, and combined #102/#103 integration probes passed. Timer and signal scheduling beyond this call remain unverified.
 
 `clock_gettime` (#113) now uses checked guest copyout for the 16-byte result. Supported clock mappings remain unchanged. Its ARM64 guest probe, CLI build, private Arch login/D-Bus boot, and combined #113/#114 integration probes passed; this does not establish clock mapping parity across all Linux IDs.

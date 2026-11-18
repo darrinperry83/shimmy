@@ -2350,7 +2350,12 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   }
   case 132: return do_sigaltstack(a0, a1);
   case 133: {                                                  // rt_sigsuspend
-    return syscalls_signal_sigsuspend((const unsigned long long*)a0, (size_t)a1);
+    if (!a0) return -LX_EFAULT;
+    if (a1 != 8) return -LX_EINVAL;
+    uint64_t mask;
+    if (gmem_guest_export_copyin(NULL, a0, &mask, sizeof mask) != 0)
+      return -LX_EFAULT;
+    return syscalls_signal_sigsuspend(mask);
   }
   case 136:                                                    // rt_sigpending
     if (a1 != 8) return -LX_EINVAL;
