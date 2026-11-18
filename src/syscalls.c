@@ -5355,10 +5355,18 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   case 137: {
     if (!a0) return -LX_EFAULT;
     if (a3 != 8) return -LX_EINVAL;
-    uint64_t wanted = *(const uint64_t*)a0;
+    uint64_t wanted;
+    if (gmem_guest_export_copyin(NULL, a0, &wanted, sizeof wanted) != 0)
+      return -LX_EFAULT;
     // SIGKILL and SIGSTOP cannot be caught, blocked or synchronously waited for.
     wanted &= ~((1ULL << (9 - 1)) | (1ULL << (19 - 1)));
-    const struct linux_timespec* to = (const struct linux_timespec*)a2;
+    struct linux_timespec timeout;
+    const struct linux_timespec* to = NULL;
+    if (a2) {
+      if (gmem_guest_export_copyin(NULL, a2, &timeout, sizeof timeout) != 0)
+        return -LX_EFAULT;
+      to = &timeout;
+    }
     if (to && (to->tv_sec < 0 || to->tv_nsec < 0 || to->tv_nsec >= 1000000000L))
       return -LX_EINVAL;
     struct timespec begin;
@@ -5368,8 +5376,14 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
       int signo = virtual_signal_take(wanted);
       if (signo) {
         if (a1) {
-          memset((void*)a1, 0, 128); // Linux aarch64 siginfo_t
-          *(int*)a1 = signo;
+          unsigned char info[128] = {0}; // Linux aarch64 siginfo_t
+          memcpy(info, &signo, sizeof signo);
+          if (gmem_guest_copyout_checked(a1, info, sizeof info) != 0) {
+            // A bad destination must not silently consume the signal. This
+            // standard-signal queue coalesces repeated instances by design.
+            __atomic_fetch_or(&g_sigpending, 1ULL << (signo - 1), __ATOMIC_ACQ_REL);
+            return -LX_EFAULT;
+          }
         }
         return signo;
       }
