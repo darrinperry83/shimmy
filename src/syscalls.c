@@ -2418,6 +2418,40 @@ static long do_futex(unsigned long uaddr, int op, unsigned int val,
   }
 }
 
+// futex_wait(2), aarch64 #455.  Reuse the existing private 32-bit
+// FUTEX_WAIT_BITSET queue: both ABIs wait for an absolute deadline and wake
+// only when the caller's bitset intersects the wake mask.
+static long do_futex_wait2(unsigned long uaddr, unsigned long val,
+                           unsigned long mask, unsigned int flags,
+                           unsigned long timeout_addr, int clockid) {
+  enum { FU2_SIZE_MASK = 3, FU2_SIZE_U32 = 2, FU2_NUMA = 4,
+         FU2_MPOL = 8, FU2_PRIVATE = 128 };
+  if (flags & ~(FU2_SIZE_MASK | FU2_NUMA | FU2_MPOL | FU2_PRIVATE)) return -LX_EINVAL;
+  if ((flags & FU2_SIZE_MASK) != FU2_SIZE_U32 ||
+      val > UINT32_MAX || mask > UINT32_MAX || !mask) return -LX_EINVAL;
+  if (uaddr & (sizeof(uint32_t) - 1)) return -LX_EINVAL;
+  if (!uaddr) return -LX_EFAULT;
+  if (!(flags & FU2_PRIVATE) || (flags & (FU2_NUMA | FU2_MPOL))) return -95; // EOPNOTSUPP
+
+  uint32_t snapshot;
+  if (gmem_guest_export_copyin(NULL, uaddr, &snapshot, sizeof snapshot) != 0)
+    return -LX_EFAULT;
+  struct linux_timespec timeout;
+  const struct linux_timespec* to = NULL;
+  if (timeout_addr) {
+    if (clockid != LX_CLOCK_MONOTONIC && clockid != LX_CLOCK_REALTIME)
+      return -LX_EINVAL;
+    if (gmem_guest_export_copyin(NULL, timeout_addr, &timeout, sizeof timeout) != 0)
+      return -LX_EFAULT;
+    if (timeout.tv_sec < 0 || timeout.tv_nsec < 0 || timeout.tv_nsec >= 1000000000L)
+      return -LX_EINVAL;
+    to = &timeout;
+  }
+  int op = FUTEX_WAIT_BITSET | FUTEX_PRIVATE_FLAG;
+  if (clockid == LX_CLOCK_REALTIME && to) op |= FUTEX_CLOCK_REALTIME;
+  return do_futex(uaddr, op, (uint32_t)val, to, 0, (uint32_t)mask);
+}
+
 // ===========================================================================================
 // Virtual standard signals. Linux signal masks are still process-wide in this shim;
 // real per-thread delivery and realtime queues need separate work. A blocked self-signal
@@ -4950,6 +4984,9 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
 
   // ---------- 454 futex_wake (futex2) ----------
   case 454: return do_futex_wake2(a0, a1, (int)a2, (unsigned int)a3);
+
+  // ---------- 455 futex_wait (futex2) ----------
+  case 455: return do_futex_wait2(a0, a1, a2, (unsigned int)a3, a4, (int)a5);
 
   // ---------- 99 set_robust_list ----------
   case 99: return guest_set_robust_list(a0, a1);
