@@ -1748,13 +1748,25 @@ void net_fd_closed(int fd) {
 }
 
 static long sys_epoll_create1(int flags) {
+  // Linux accepts only EPOLL_CLOEXEC. Reject other bits before creating a
+  // host kqueue, so an invalid guest call cannot allocate a descriptor.
+  if (flags & ~L_EPOLL_CLOEXEC) return -L_EINVAL;
   int kq = kqueue();
   if (kq < 0) return lerr();
   if (notifydbg_on()) {
     static int kqseq;
     notifydbg("pid=%d EPOLL_CREATE kq=%d seq=%d\n", (int)getpid(), kq, ++kqseq);
   }
-  apply_fd_flags(kq, 0, (flags & L_EPOLL_CLOEXEC) != 0);
+  // Darwin kqueue() may start with FD_CLOEXEC set. Linux requires the plain
+  // call to return it clear and EPOLL_CLOEXEC to return it set.
+  int fd_flags = fcntl(kq, F_GETFD);
+  if (fd_flags < 0 || fcntl(kq, F_SETFD,
+      (fd_flags & ~FD_CLOEXEC) |
+      ((flags & L_EPOLL_CLOEXEC) ? FD_CLOEXEC : 0)) < 0) {
+    long error = lerr();
+    close(kq);
+    return error;
+  }
   pthread_mutex_lock(&g_lock);
   ep_drop(kq);
   ep_get(kq);
