@@ -4401,7 +4401,10 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
 
   // ---------- 35 unlinkat ----------
   case 35: {
-    if ((r = resolve_f((int)a0, (const char*)a1, RSV_NOFOLLOW, host, sizeof host, gabs, sizeof gabs)) < 0)
+    char guest_path[PATH_MAX];
+    if ((r = readlink_guest_path(a1, guest_path, sizeof guest_path)) < 0)
+      return r;
+    if ((r = resolve_f((int)a0, guest_path, RSV_NOFOLLOW, host, sizeof host, gabs, sizeof gabs)) < 0)
       return r;
     if (cgroup_under(gabs)) {
       if (a2 & LX_AT_REMOVEDIR) {                            // rmdir of a child cgroup
