@@ -2254,11 +2254,11 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return ok0(munlock((void*)base, (size_t)rounded));
   }
   case 230: return ok0(mlockall((int)a0));                      // mlockall (MCL_* match)
-  case 231:
-    // macOS munlockall() is itself ENOSYS. "Unlock everything" is vacuously true when we
-    // never honored mlockall, so report success rather than leaking a host -ENOSYS.
-    munlockall();
-    return 0;
+  case 231:                                                    // munlockall
+    // Darwin's munlockall() is ENOSYS, while guest mlock()/mlock2() can
+    // succeed. We cannot safely claim all guest locks were released: the
+    // guest range ledger omits SysV SHM and some device-backed mappings.
+    return -LX_ENOSYS;
   case 232: {
     // mincore() is a POINTER-VALIDITY ORACLE, not just a residency query, and the difference
     // between Linux and macOS here is load-bearing.
