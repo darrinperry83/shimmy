@@ -4887,29 +4887,61 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     return r;
   }
 
-  // ---------- 65 readv / 66 writev ----------  (struct iovec layout matches)
+  // ---------- 65 readv / 66 writev ----------
   case 65: return herr((long)readv((int)a0, (const struct iovec*)a1, (int)a2));
   case 66: {
-    long r = herr((long)writev((int)a0, (const struct iovec*)a1, (int)a2));
+    // The guest iovec layout matches Darwin's, but guest ELF/JIT payloads
+    // cannot necessarily be read by the host writev kernel path. Snapshot
+    // every byte we will submit into admitted host memory before writing.
+    // One host writev keeps pipe/socket record and atomic-write behavior.
+    if (a2 > 1024) return -LX_EINVAL; // Linux UIO_MAXIOV
+    if (!a2) return herr((long)writev((int)a0, NULL, 0));
+    if (!a1) return -LX_EFAULT;
+    struct iovec guest[1024], host[1024];
+    size_t nvec = (size_t)a2;
+    if (gmem_guest_export_copyin(NULL, a1, guest, nvec * sizeof guest[0]) != 0)
+      return -LX_EFAULT;
+    size_t requested = 0;
+    for (size_t i = 0; i < nvec; ++i) {
+      if (guest[i].iov_len > SSIZE_MAX - requested) return -LX_EINVAL;
+      requested += guest[i].iov_len;
+    }
+    // A partial datagram/seqpacket send would change the message itself.
+    // Refuse the bound for every fd instead of guessing that it is a stream.
+    if (requested > 1024 * 1024) return -LX_EOPNOTSUPP;
+    size_t count = requested;
+    if (!count) return herr((long)writev((int)a0, NULL, 0));
+    char* staged = malloc(count);
+    if (!staged) return -LX_ENOMEM;
+    size_t gathered = 0, nhost = 0;
+    for (size_t i = 0; i < nvec && gathered < count; ++i) {
+      size_t part = guest[i].iov_len;
+      if (part > count - gathered) part = count - gathered;
+      if (!part) continue;
+      if (gmem_guest_export_copyin(NULL, (uint64_t)(uintptr_t)guest[i].iov_base,
+                                   staged + gathered, part) != 0) {
+        free(staged);
+        return -LX_EFAULT;
+      }
+      host[nhost].iov_base = staged + gathered;
+      host[nhost++].iov_len = part;
+      gathered += part;
+    }
+    long r = herr((long)writev((int)a0, host, (int)nhost));
     if (getenv("RDWRDUMP") && (int)a0 < 32 && r > 0) {
       const char* dump_path = getenv("RDWRDUMPFILE");
       FILE* df = fopen(dump_path ? dump_path : "/tmp/rd_wrdump.txt", "a");
       if (df) {
         fprintf(df, "writev fd=%ld n=%ld: \"", a0, r);
-        const struct iovec* iv = (const struct iovec*)a1;
-        long remaining = r;
-        for (long i = 0; i < (long)a2 && remaining > 0; i++) {
-          size_t n = iv[i].iov_len < (size_t)remaining ? iv[i].iov_len : (size_t)remaining;
-          for (size_t j = 0; j < n; j++) {
-            unsigned char c = ((const unsigned char*)iv[i].iov_base)[j];
-            fputc(c >= 0x20 && c < 0x7f ? c : '.', df);
-          }
-          remaining -= (long)n;
+        for (long i = 0; i < r; ++i) {
+          unsigned char c = (unsigned char)staged[i];
+          fputc(c >= 0x20 && c < 0x7f ? c : '.', df);
         }
         fprintf(df, "\"\n");
         fclose(df);
       }
     }
+    free(staged);
     return r;
   }
 
