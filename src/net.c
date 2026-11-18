@@ -2183,14 +2183,76 @@ static long sys_ppoll_guest(uint64_t fds_addr, unsigned long nfds,
   return result;
 }
 
-static long sys_pselect6(int nfds, fd_set* r, fd_set* w, fd_set* e, const struct lin_timespec* uts) {
-  // Linux fd_set is a 1024-bit array of longs; Darwin's is a 1024-bit array of int32. Same bytes.
+static long sys_pselect6(int nfds, uint64_t raddr, uint64_t waddr, uint64_t eaddr,
+                         uint64_t timeout_addr, uint64_t sigarg_addr) {
+  // Linux fd_set is a bitmap of 64-bit words; Darwin's is a bitmap of 32-bit
+  // words. Their byte layout is identical on this little-endian arm64 host.
   if (nfds < 0) return -L_EINVAL;
-  if (nfds > FD_SETSIZE) nfds = FD_SETSIZE;
+  // The host cannot represent more than FD_SETSIZE descriptors. Truncating
+  // nfds would silently miss events on the omitted descriptors.
+  if (nfds > FD_SETSIZE) return -L_EOPNOTSUPP;
   struct timespec ts, *tsp = NULL;
-  if (uts) { ts.tv_sec = (time_t)uts->tv_sec; ts.tv_nsec = (long)uts->tv_nsec; tsp = &ts; }
+  struct lin_timespec original_timeout = {0};
+  if (timeout_addr) {
+    if (gmem_guest_export_copyin(NULL, timeout_addr, &original_timeout,
+                                 sizeof original_timeout) != 0)
+      return -L_EFAULT;
+    if (original_timeout.tv_sec < 0 || original_timeout.tv_nsec < 0 ||
+        original_timeout.tv_nsec >= 1000000000LL)
+      return -L_EINVAL;
+    if (gmem_guest_copyout_checked(timeout_addr, &original_timeout,
+                                   sizeof original_timeout) != 0)
+      return -L_EFAULT;
+    ts.tv_sec = (time_t)original_timeout.tv_sec;
+    ts.tv_nsec = (long)original_timeout.tv_nsec;
+    tsp = &ts;
+  }
+  if (sigarg_addr) {
+    struct { uint64_t mask; uint64_t size; } arg;
+    if (gmem_guest_export_copyin(NULL, sigarg_addr, &arg, sizeof arg) != 0)
+      return -L_EFAULT;
+    if (arg.mask) {
+      if (arg.size != sizeof(uint64_t)) return -L_EINVAL;
+      uint64_t mask;
+      if (gmem_guest_export_copyin(NULL, arg.mask, &mask, sizeof mask) != 0)
+        return -L_EFAULT;
+      // The guest signal mask is currently process-wide. Neither the virtual
+      // mask nor kqueue can atomically apply a per-thread mask for this wait.
+      return -L_EOPNOTSUPP;
+    }
+  }
+  size_t bytes = ((size_t)nfds + 63) / 64 * sizeof(uint64_t);
+  fd_set rfds = {0}, wfds = {0}, efds = {0};
+  if ((bytes && raddr && gmem_guest_export_copyin(NULL, raddr, &rfds, bytes) != 0) ||
+      (bytes && waddr && gmem_guest_export_copyin(NULL, waddr, &wfds, bytes) != 0) ||
+      (bytes && eaddr && gmem_guest_export_copyin(NULL, eaddr, &efds, bytes) != 0))
+    return -L_EFAULT;
+  // Check writable result sets before waiting, avoiding a late EFAULT after
+  // a ready event has been consumed from an emulated descriptor.
+  if ((bytes && raddr && gmem_guest_copyout_checked(raddr, &rfds, bytes) != 0) ||
+      (bytes && waddr && gmem_guest_copyout_checked(waddr, &wfds, bytes) != 0) ||
+      (bytes && eaddr && gmem_guest_copyout_checked(eaddr, &efds, bytes) != 0))
+    return -L_EFAULT;
   double t0 = polllog_on() ? now_ms() : 0;
-  long rr = lret(pselect(nfds, r, w, e, tsp, NULL));   // sigmask deliberately ignored
+  struct timespec start = {0}, end = {0};
+  if (timeout_addr) clock_gettime(CLOCK_MONOTONIC, &start);
+  long rr = lret(pselect(nfds, raddr ? &rfds : NULL, waddr ? &wfds : NULL,
+                         eaddr ? &efds : NULL, tsp, NULL));
+  if (timeout_addr) {
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    int64_t sec = original_timeout.tv_sec - (end.tv_sec - start.tv_sec);
+    int64_t nsec = original_timeout.tv_nsec - (end.tv_nsec - start.tv_nsec);
+    if (nsec < 0) { --sec; nsec += 1000000000LL; }
+    struct lin_timespec remaining = rr == 0 || sec < 0 ?
+        (struct lin_timespec){0, 0} : (struct lin_timespec){sec, nsec};
+    if (gmem_guest_copyout_checked(timeout_addr, &remaining, sizeof remaining) != 0)
+      return -L_EFAULT;
+  }
+  if (rr >= 0 &&
+      ((bytes && raddr && gmem_guest_copyout_checked(raddr, &rfds, bytes) != 0) ||
+       (bytes && waddr && gmem_guest_copyout_checked(waddr, &wfds, bytes) != 0) ||
+       (bytes && eaddr && gmem_guest_copyout_checked(eaddr, &efds, bytes) != 0)))
+    return -L_EFAULT;
   if (polllog_on()) fprintf(stderr, "[polllog] t=%.2f pselect6 nfds=%d req=%.2fms act=%.2fms ret=%ld\n",
                             now_ms(), nfds,
                             tsp ? (double)ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6 : -1.0,
@@ -3089,8 +3151,7 @@ long net_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigned 
       return sys_pipe2((int*)a0, (int)(long)a1);
 
     case LSYS_pselect6:
-      return sys_pselect6((int)(long)a0, (fd_set*)a1, (fd_set*)a2, (fd_set*)a3,
-                          (const struct lin_timespec*)a4);    // a5: sigmask — ignored
+      return sys_pselect6((int)(long)a0, a1, a2, a3, a4, a5);
     case LSYS_ppoll:
       return sys_ppoll_guest(a0, a1, a2, a3, (size_t)a4);
 
