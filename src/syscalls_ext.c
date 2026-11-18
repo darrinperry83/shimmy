@@ -1880,8 +1880,17 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
                           : preadv((int)a0, (const struct iovec*)a1, (int)a2, pos);
     return r < 0 ? eret() : r;
   }
-  case 287: {                                                   // pwritev2 (flags ignored)
-    ssize_t r = pwritev((int)a0, (const struct iovec*)a1, (int)a2, (off_t)a3);
+  case 287: {                                                   // pwritev2: unflagged subset
+    // On native arm64 Linux, pos_from_hilo() receives the full 64-bit offset
+    // in x3; shifting the x4 high argument twice by 32 discards it.  Offset -1
+    // means writev at the fd's current position (including pipes), whereas
+    // pwritev(-1) fails.  Never silently ignore a per-write durability,
+    // append, atomic, or nonblocking flag: the host pwritev cannot honor it.
+    if (a5) return -LX_EOPNOTSUPP;
+    uint64_t pos = (uint64_t)a3;
+    ssize_t r = (pos == UINT64_MAX)
+      ? writev((int)a0, (const struct iovec*)a1, (int)a2)
+      : pwritev((int)a0, (const struct iovec*)a1, (int)a2, (off_t)pos);
     return r < 0 ? eret() : r;
   }
   case 288: case 289: case 290: return -LX_ENOSYS;              // pkey_* (glibc falls back)
