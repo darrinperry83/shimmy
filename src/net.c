@@ -3369,9 +3369,30 @@ long net_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigned 
                         (const void*)a4, (uint32_t)a5);
     case LSYS_recvfrom:
       return sys_recvfrom((int)(long)a0, (void*)a1, (size_t)a2, (int)(long)a3, a4, a5);
-    case LSYS_setsockopt:
-      return do_setsockopt((int)(long)a0, (int)(long)a1, (int)(long)a2,
-                           (const void*)a3, (uint32_t)a4);
+    case LSYS_setsockopt: {
+      // The option decoder and host setsockopt must never dereference guest
+      // memory directly. Bound and snapshot the full payload before either
+      // can change socket state.
+      uint32_t len = (uint32_t)a4;
+      if (len > 65536) return -L_EOPNOTSUPP;
+      if (len && !a3) return -L_EFAULT;
+      unsigned char empty = 0;
+      void* option = NULL;
+      if (len) {
+        option = malloc(len);
+        if (!option) return -L_ENOMEM;
+        if (gmem_guest_export_copyin(NULL, a3, option, len) != 0) {
+          free(option);
+          return -L_EFAULT;
+        }
+      } else if (a3) {
+        option = &empty; // preserve non-NULL optval with zero optlen
+      }
+      long r = do_setsockopt((int)(long)a0, (int)(long)a1, (int)(long)a2,
+                             option, len);
+      if (len) free(option);
+      return r;
+    }
     case LSYS_getsockopt:
       return do_getsockopt((int)(long)a0, (int)(long)a1, (int)(long)a2,
                            (void*)a3, (uint32_t*)a4);
