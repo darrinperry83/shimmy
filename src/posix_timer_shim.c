@@ -96,3 +96,23 @@ long posix_timer_shim_create(uint64_t clockid, uint64_t sigevent_addr,
   pthread_mutex_unlock(&g_timer_mu);
   return 0;
 }
+
+long posix_timer_shim_delete(uint64_t timer_id) {
+  // Linux timer_t is an int. The registry belongs to this guest process;
+  // a fork child starts with an empty table and cannot delete its parent's IDs.
+  int32_t id = (int32_t)timer_id;
+  pthread_once(&g_timer_once, timer_init_once);
+  if (g_atfork_error) return -LX_EAGAIN;
+  pthread_mutex_lock(&g_timer_mu);
+  struct lx_posix_timer** link = &g_timers;
+  while (*link && (*link)->id != id) link = &(*link)->next;
+  if (!*link) {
+    pthread_mutex_unlock(&g_timer_mu);
+    return -LX_EINVAL;
+  }
+  struct lx_posix_timer* timer = *link;
+  *link = timer->next;
+  pthread_mutex_unlock(&g_timer_mu);
+  free(timer);
+  return 0;
+}
