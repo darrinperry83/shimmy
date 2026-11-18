@@ -128,3 +128,11 @@ authentication message remained queued on the parent auth socket and no KWin
 process appeared. This rules out an indefinitely missed native `poll()` wake
 as the sole cause of that run's stall. The instrumented `src/net.c` code was
 reverted after the trace; this is diagnostic evidence, not a greeter fix.
+
+In a separate disposable-root A/B boot, `dbus.service` launched the root's
+installed `dbus-daemon --system --nofork --nopidfile --address=systemd:` in
+place of `dbus-broker-launch`. The daemon stayed up, but SDDM again left its
+44-byte helper authentication message unread and never spawned KWin during
+the observation. The clone-only service override was removed afterward.
+This does not prove the D-Bus exchange is correct, but replacing the broker
+alone does not resolve the observed SDDM parent wait.
