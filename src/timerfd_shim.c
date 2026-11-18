@@ -180,7 +180,12 @@ long timerfd_create_shim(int clockid, int flags) {
   if (clockid != 0 && clockid != 1 && clockid != 7) return -22;
   if (flags & ~(L_NONBLOCK | L_CLOEXEC)) return -22;
   pthread_mutex_lock(&lock);
-  if (count >= MAX_TIMERFD) { pthread_mutex_unlock(&lock); return -24; }
+  // count is the high-water mark, not the number of live timers. A close
+  // leaves a reusable slot even when that mark has reached MAX_TIMERFD.
+  int index = count;
+  for (int i = 0; i < count; i++)
+    if (slots[i].fd == -1) { index = i; break; }
+  if (index >= MAX_TIMERFD) { pthread_mutex_unlock(&lock); return -24; }
   int pair[2];
   if (socketpair(AF_UNIX, SOCK_DGRAM, 0, pair) < 0) {
     int rc = -errno;
@@ -206,8 +211,6 @@ long timerfd_create_shim(int clockid, int flags) {
   // `count`, so 32 create/close cycles (systemd churns a restart timer + watchdog per unit) filled
   // the registry and timerfd_create started returning -EMFILE ("Failed to install restart timer:
   // Too many open files" / mount tasks "Too many open files").
-  int index = count;
-  for (int i = 0; i < count; i++) if (slots[i].fd == -1) { index = i; break; }
   struct timer_slot* slot = &slots[index];
   memset(slot, 0, sizeof *slot);
   slot->fd = pair[0]; slot->writer = pair[1]; slot->clockid = clockid;
@@ -284,11 +287,12 @@ long timerfd_gettime_shim(int fd, linux_itimerspec* current) {
   pthread_mutex_unlock(&lock);
   return 0;
 }
-void timerfd_shim_closed(int fd) {
+int timerfd_shim_closed(int fd) {
   pthread_mutex_lock(&lock);
   struct timer_slot* slot = lookup(fd);
   if (slot) {
     trace_timer("close", fd, 0, 0);
+    shim_fd_unreserve(fd);
     slot->fd = -1;
     if (slot->writer >= 0) { shim_fd_unreserve(slot->writer); close(slot->writer); slot->writer = -1; }
     if (fork_child_mode) pthread_cond_broadcast(&changed);
@@ -299,4 +303,5 @@ void timerfd_shim_closed(int fd) {
     slot->worker_started = 0;
   }
   pthread_mutex_unlock(&lock);
+  return slot != NULL;
 }

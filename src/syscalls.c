@@ -4865,6 +4865,12 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     // open(/dev/console) blocks forever waiting for a master that will never come back. Refuse
     // vacuously (as close_range already does) so the guest believes the close succeeded.
     if (shim_fd_reserved((int)a0)) {
+      // Timerfd read ends are reserved to protect the parent's fd table
+      // across vfork, but remain guest-owned for an ordinary close.
+      if (!guest_is_vfork_child() && timerfd_shim_closed((int)a0)) {
+        net_fd_closed((int)a0);
+        return herr(close((int)a0));
+      }
       // A signalfd read end is reserved only to survive the shared host fd
       // table of a vfork child. An ordinary guest close owns this descriptor:
       // retire its backend and epoll interest before closing the read end.
