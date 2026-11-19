@@ -167,6 +167,13 @@ elif [ "$INSTALL_DESKTOP" = "1" ]; then
   echo "==> installing desktop '$DESKTOP' (standard Arch install)"
   run_pacman -S --noconfirm $DESKTOP_PKGS
   run_pacman -S --noconfirm $EXTRA_PKGS 2>/dev/null || true
+  # Enable the display manager (the standard `systemctl enable <dm>` step, done offline so it does
+  # not need a running dbus). KDE ships plasma-login-manager, whose plasmalogin.service declares
+  # Alias=display-manager.service; the symlink below is exactly what `systemctl enable plasmalogin`
+  # creates.
+  if [ "$DESKTOP" = "kde" ] || [ "$DESKTOP" = "plasma" ]; then
+    ln -sf /usr/lib/systemd/system/plasmalogin.service "$ROOTFS/etc/systemd/system/display-manager.service"
+  fi
 else
   echo "==> bare rootfs profile '$ROOTFS_PROFILE' — no desktop installed (boots to TTY)"
 fi
