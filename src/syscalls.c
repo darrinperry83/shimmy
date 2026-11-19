@@ -3741,7 +3741,7 @@ static const char* const CGROUP_FILES[] = {
   "cgroup.controllers", "cgroup.subtree_control", "cgroup.procs", "cgroup.events",
   "cgroup.max.depth", "cgroup.max.descendants", "cgroup.stat", "cgroup.freeze",
   "cgroup.type", "cgroup.threads", "cgroup.kill",
-  "cpu.max", "cpu.weight", "cpu.stat", "cpu.pressure",
+  "cpu.max", "cpu.weight", "cpu.idle", "cpu.stat", "cpu.pressure",
   "cpuset.cpus", "cpuset.mems", "cpuset.cpus.effective", "cpuset.mems.effective",
   "io.max", "io.stat", "io.pressure",
   "memory.current", "memory.max", "memory.min", "memory.low", "memory.high",
@@ -3967,6 +3967,8 @@ const char* cgroup_file_content(const char* g, char* buf, size_t cap) {
     snprintf(buf, cap, "max 100000\n");
   else if (strcmp(base, "cpu.weight") == 0)
     snprintf(buf, cap, "100\n");
+  else if (strcmp(base, "cpu.idle") == 0)
+    snprintf(buf, cap, "0\n");
   else if (strcmp(base, "cpu.stat") == 0)
     snprintf(buf, cap, "usage_usec 0\nuser_usec 0\nsystem_usec 0\n");
   else if (strcmp(base, "pids.max") == 0)
