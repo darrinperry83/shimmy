@@ -33,6 +33,17 @@ long net_open_bound_socket_opath(const char* guest_path, int cloexec);
 // fills host_out on success, 0 if the path is not a bound socket (caller falls back
 // to the ordinary rootfs resolver). Never fabricates a mapping for a nonexistent path.
 int net_unix_socket_host_path(const char* guest_path, char* host_out, size_t host_cap);
+// Map a guest-absolute pathname to its relocated host path in the socket group
+// namespace WITHOUT requiring a live socket to exist. Used by the file-syscall
+// layer for systemd's socket-activation mkdir_parents(): the parent directory of
+// an AF_UNIX socket must live beside the socket (the group), not in the rootfs.
+// Returns 1 + fills host_out on success; 0 if the path is not a relocated
+// pathname socket (abstract/display socket, or no group prefix).
+int net_unix_socket_group_path(const char* guest_path, char* host_out, size_t host_cap);
+// Create a directory (and its parents) in the socket group namespace for a
+// guest-absolute AF_UNIX socket path. Returns 1 if the directory exists there
+// afterwards, 0 if the path is not applicable or creation failed.
+int net_unix_socket_group_mkdir(const char* guest_path, mode_t mode);
 // Path metadata for a reference token (1=found, 0=ordinary fd).
 int net_opath_socket_stat(int fd, struct stat* out);
 int net_opath_socket_is(int fd);

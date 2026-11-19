@@ -111,6 +111,7 @@ enum {
 #define L_ENOSYS 38
 #define L_ENOTSOCK 88
 #define L_EADDRINUSE 98
+#define L_EADDRNOTAVAIL 99
 #define L_ENOTCONN 107
 #define L_ECONNREFUSED 111
 #define L_ENOBUFS 105
@@ -401,6 +402,10 @@ static size_t g_prefix_len;
 // Display sockets stay per process because fork children restart their compositors.
 static char g_group_prefix[512];
 static size_t g_group_prefix_len;
+// Per-boot TCP/UDP listen-port offset. Guest listen binds move to
+// <guest_port> + g_port_offset so a previous boot's lingering service (e.g.
+// sshd) cannot hold a host port the new boot needs. Zero means "no offset".
+static uint16_t g_port_offset;
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 
 // Darwin cannot open a socket pathname, even with O_EVTONLY. Keep both the
@@ -770,6 +775,29 @@ static int unix_socket_host_path(const char* guest_path, char* host_out, size_t 
 
 int net_unix_socket_host_path(const char* guest_path, char* host_out, size_t host_cap) {
   return unix_socket_host_path(guest_path, host_out, host_cap, NULL);
+}
+
+int net_unix_socket_group_path(const char* guest_path, char* host_out, size_t host_cap) {
+  if (!guest_path || guest_path[0] != '/' || !host_out || !host_cap) return 0;
+  char host[PATH_MAX]; int abstract = 0;
+  long e = unix_path_to_host(guest_path, strlen(guest_path) + 1, 0,
+                             host, sizeof host, &abstract);
+  if (e < 0 || abstract) return 0;
+  if (strlen(host) + 1 > host_cap) return 0;
+  strcpy(host_out, host);
+  return 1;
+}
+
+int net_unix_socket_group_mkdir(const char* guest_path, mode_t mode) {
+  (void)mode;
+  char host[PATH_MAX];
+  if (!net_unix_socket_group_path(guest_path, host, sizeof host)) return 0;
+  // systemd's socket activation wants the directory 0700; bind()'s own
+  // mkdir_parent() uses 0755. Match the bind side so a later bind can always
+  // traverse it, and never let a stray symlink escape the group.
+  if (mkdir_p(host) < 0) return 0;
+  struct stat st;
+  return (lstat(host, &st) == 0 && S_ISDIR(st.st_mode));
 }
 
 // A path-only guest reference to a pathname socket in the guest namespace.
@@ -2794,6 +2822,26 @@ static long sys_bind(int fd, const void* uaddr, uint32_t len) {
     }
   }
   if (r < 0) return r;
+  // Relocate guest TCP/UDP listen ports into the per-boot port space so a
+  // lingering process from a previous boot cannot hold a host port the guest
+  // needs (sshd's port 22 is the canonical case). Autobind (port 0) stays 0.
+  if (g_port_offset && uaddr && len >= 2) {
+    uint16_t fam; memcpy(&fam, uaddr, 2);
+    if ((fam == L_AF_INET && hs.ss_family == AF_INET) ||
+        (fam == L_AF_INET6 && hs.ss_family == AF_INET6)) {
+      uint16_t port = hs.ss_family == AF_INET
+                          ? ntohs(((struct sockaddr_in*)&hs)->sin_port)
+                          : ntohs(((struct sockaddr_in6*)&hs)->sin6_port);
+      if (port) {
+        uint32_t np = (uint32_t)port + g_port_offset;
+        if (np > 65535) return -L_EADDRNOTAVAIL;
+        if (hs.ss_family == AF_INET)
+          ((struct sockaddr_in*)&hs)->sin_port = htons((uint16_t)np);
+        else
+          ((struct sockaddr_in6*)&hs)->sin6_port = htons((uint16_t)np);
+      }
+    }
+  }
   // journald/udevd bind their Unix sockets at /run/systemd/journal/{stdout,dev-log,socket} (and
   // /run/udev/control). A stale 0-byte REGULAR file left in the rootfs from a previous boot shadows
   // the bind (EADDRINUSE); remove it so the socket node can be created. Never touch a real socket.
@@ -3449,6 +3497,20 @@ void net_init(void) {
     if (g_uid0 && guest_cred_registry_init(g_group_prefix, guest_cred_uid(1), guest_cred_gid(1)) < 0 &&
         getenv("RDCREDLOG"))
       fprintf(stderr, "[cred] guest credential record unavailable for pid=%d\n", (int)getpid());
+  }
+
+  // Isolate guest TCP/UDP listen sockets from the host port namespace. The boot
+  // token is shared by every shim process of one guest boot (carried across
+  // exec) and differs between boots, so two boots never collide on a host port,
+  // and a single-command shim run gets its own space too. 0x8000..0xBFFF keeps
+  // the mapped ports out of the privileged and macOS-ephemeral ranges.
+  {
+    const char* boot = getenv("RDSHIM_BOOT");
+    uint64_t h = 0xcbf29ce484222325ULL;
+    if (boot) for (const unsigned char* p = (const unsigned char*)boot; *p; p++) {
+      h ^= *p; h *= 0x100000001b3ULL;
+    }
+    g_port_offset = (uint16_t)(0x8000 | (h & 0x3fff));
   }
 }
 

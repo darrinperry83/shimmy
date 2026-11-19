@@ -1468,9 +1468,12 @@ static int proc_open(const char* g, long* out) {
   }
   if (strcmp(g, "/proc/self/mounts") == 0) {
     // /etc/mtab normally points here. Package managers inspect this table before
-    // committing a transaction; only the guest-visible root and proc are listed.
+    // committing a transaction; only the guest-visible root, proc and the /run
+    // tmpfs are listed. /run must be tmpfs (not ext4) so systemd's rm_rf()
+    // protection treats /run/credentials as a temporary filesystem.
     snprintf(buf, sizeof buf, "rootfs / ext4 rw,relatime 0 0\n"
-                              "proc /proc proc rw,nosuid,nodev,noexec,relatime 0 0\n");
+                              "proc /proc proc rw,nosuid,nodev,noexec,relatime 0 0\n"
+                              "tmpfs /run tmpfs rw,nosuid,nodev,relatime 0 0\n");
     int fd = mem_fd(buf, strlen(buf));
     *out = fd < 0 ? herrno() : fd;
     return 1;
@@ -2011,6 +2014,11 @@ static int64_t fs_magic_for(const char* g) {
     return 0x63677270;                          // CGROUP2_SUPER_MAGIC
   if (g && strncmp(g, "/sys", 4) == 0 && (g[4] == '/' || g[4] == 0)) return 0x62656572;  // SYSFS_MAGIC
   if (g && strncmp(g, "/proc", 5) == 0 && (g[5] == '/' || g[5] == 0)) return 0x9fa0;     // PROC_SUPER_MAGIC
+  // /run (and /run/credentials) is a synthesized tmpfs, not a disk filesystem.
+  // systemd's rm_rf() refuses to clean a "physical" filesystem (is_physical_fs()
+  // is !is_temporary_fs && !is_cgroup_fs), so reporting ext4 here makes
+  // systemd-tmpfiles abort with "Attempted to remove disk file system ...".
+  if (g && strncmp(g, "/run", 4) == 0 && (g[4] == '/' || g[4] == 0)) return 0x01021994; // TMPFS_MAGIC
   return 0xEF53;                               // claim ext2/3/4; nothing sane keys off this
 }
 static void statfs_m2l(const struct statfs* s, struct linux_statfs* l, const char* gpath) {
@@ -4607,11 +4615,23 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     }
     {
       long mr = herr(mkdir(host, (mode_t)a2));
+      int made_in_group = 0;
+      // systemd's socket activation calls mkdir_parents() on an AF_UNIX socket's
+      // parent directory before bind(). That socket lives in the relocated socket
+      // group, not the rootfs, so a read-only rootfs (e.g. /etc/pacman.d/gnupg on a
+      // ro /etc) must not abort the whole socket unit. Create the directory beside
+      // the socket instead.
+      if (mr < 0 && (errno == EACCES || errno == EROFS) && guest_path[0] == '/' &&
+          net_unix_socket_group_mkdir(guest_path, (mode_t)a2)) {
+        mr = 0;
+        made_in_group = 1;
+      }
       // Darwin creates this with the host user's UID. Under RDUID0 that is
       // not the guest creator: an untracked inode otherwise appears owned by
       // root. D-Bus checks its newly created XDG_RUNTIME_DIR/dbus-1 against
       // the non-root guest UID and refuses to start if this record is absent.
-      if (mr == 0 && g_uid0 && (guest_cred_uid(1) || guest_cred_gid(1))) {
+      if (mr == 0 && !made_in_group && g_uid0 &&
+          (guest_cred_uid(1) || guest_cred_gid(1))) {
         struct stat created;
         if (lstat(host, &created) < 0 ||
             guest_ownership_set(&created, guest_cred_uid(1), guest_cred_gid(1)) < 0) {
