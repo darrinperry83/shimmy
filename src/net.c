@@ -1844,6 +1844,32 @@ static long sys_epoll_ctl(int epfd, int op, int fd, struct lin_epoll_event* uev)
   return r;
 }
 
+// A bound AF_UNIX socket that has been connect()ed from a DIFFERENT process can
+// have a connection parked in its kernel accept queue that macOS kqueue/poll()
+// never reports (gpg-agent's pselect6 on S.gpg-agent is exactly this). The
+// kernel exposes that state via proc_pidfdinfo's SO_ACCEPTCONN + soi_qlen, so
+// poll/pselect/epoll ask the queue directly instead of accept()ing the client.
+static int socket_is_listening(int fd) {
+  struct stat st;
+  if (fstat(fd, &st) != 0 || !S_ISSOCK(st.st_mode)) return 0;
+  struct socket_fdinfo info;
+  int got = proc_pidfdinfo(getpid(), fd, PROC_PIDFDSOCKETINFO, &info, sizeof info);
+  return got == sizeof info && (info.psi.soi_options & SO_ACCEPTCONN);
+}
+
+// 1 if fd is a listening socket with at least one connection already in its
+// accept queue; 0 otherwise. Detection only: it never recv()s or accept()s, so
+// a pending connection stays parked in the kernel queue and remains visible to
+// whichever service later inherits the listener.
+static int socket_listen_pending(int fd) {
+  struct stat st;
+  if (fstat(fd, &st) != 0 || !S_ISSOCK(st.st_mode)) return 0;
+  struct socket_fdinfo info;
+  int got = proc_pidfdinfo(getpid(), fd, PROC_PIDFDSOCKETINFO, &info, sizeof info);
+  if (got != sizeof info || !(info.psi.soi_options & SO_ACCEPTCONN)) return 0;
+  return info.psi.soi_qlen > 0;
+}
+
 static long sys_epoll_wait_ts(int epfd, struct lin_epoll_event* uev, int maxevents,
                              const struct timespec* tsp, const char* wait_name,
                              double requested_ms) {
@@ -1948,12 +1974,12 @@ epoll_retry:
           // PID 1 may pass this listener to a newly activated service; an
           // accepted connection parked in our process-local queue would be
           // invisible to that service and its client would time out.
-          struct socket_fdinfo info;
-          int got = proc_pidfdinfo(getpid(), rfd, PROC_PIDFDSOCKETINFO,
-                                   &info, sizeof info);
-          if (got == sizeof info && (info.psi.soi_options & SO_ACCEPTCONN)) {
-            has_data = info.psi.soi_qlen > 0;
-          } else {
+          if (socket_listen_pending(rfd)) {
+            has_data = 1;
+          } else if (!socket_is_listening(rfd)) {
+            // Not a listener: a bound datagram socket that received from a
+            // different process is the peekable case. recv() on a listener
+            // returns ENOTCONN and never touches the accept queue anyway.
             char tmp;
             has_data = recv(rfd, &tmp, 1, MSG_PEEK | MSG_DONTWAIT) > 0;
           }
@@ -2269,6 +2295,18 @@ static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_
       if (eligible && poll_has_shim_eventfd(hf, nfds)) slice = (int)requested;
     }
   }
+  // A listening socket in the set needs a bounded wait: macOS poll() misses a
+  // connection parked in its accept queue, and with timeout == -1 it would
+  // block forever and never run the listen-queue re-check below. Slice so the
+  // re-check runs periodically, but leave non-listening sets on their current
+  // single-poll path.
+  int has_listener = 0;
+  for (unsigned long i = 0; i < nfds; i++)
+    if (ufds[i].fd >= 0 && (ufds[i].events & L_POLLIN) && socket_is_listening(ufds[i].fd)) {
+      has_listener = 1;
+      break;
+    }
+  if (has_listener && !slice) slice = 250;
   double deadline = slice && timeout >= 0 ? now_ms() + timeout : 0;
   unsigned internal_wakes = 0;
   int r;
@@ -2284,6 +2322,17 @@ static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_
     }
     for (unsigned long i = 0; i < nfds; i++) hf[i].revents = 0;
     r = poll(hf, (nfds_t)nfds, wait_ms);
+    // Report a connection macOS poll() missed on a listening socket as POLLIN
+    // so the guest accepts it this round instead of timing out.
+    if (r >= 0 && has_listener) {
+      for (unsigned long i = 0; i < nfds; i++) {
+        if (ufds[i].fd >= 0 && (ufds[i].events & L_POLLIN) &&
+            !(hf[i].revents & POLLIN) && socket_listen_pending(ufds[i].fd)) {
+          hf[i].revents |= POLLIN;
+          r++;
+        }
+      }
+    }
     if (r != 0 || !slice || timeout == 0) break;
     if (timeout >= 0 && now_ms() >= deadline) break;
     internal_wakes++;
@@ -2408,8 +2457,59 @@ static long sys_pselect6(int nfds, uint64_t raddr, uint64_t waddr, uint64_t eadd
   double t0 = polllog_on() ? now_ms() : 0;
   struct timespec start = {0}, end = {0};
   if (timeout_addr) clock_gettime(CLOCK_MONOTONIC, &start);
-  long rr = lret(pselect(nfds, raddr ? &rfds : NULL, waddr ? &wfds : NULL,
-                         eaddr ? &efds : NULL, tsp, NULL));
+  // Keep the requested sets pristine: pselect() overwrites each set with the
+  // ready descriptors, so a sliced wait must restore them between iterations.
+  fd_set req_rfds = rfds, req_wfds = wfds, req_efds = efds;
+  // A listening socket in the read set needs a bounded wait: macOS pselect()
+  // misses a connection parked in its accept queue, and with no timeout it
+  // would block forever and never run the listen-queue re-check below.
+  int has_listener = 0;
+  if (bytes && raddr) {
+    for (int fd = 0; fd < nfds; fd++)
+      if (FD_ISSET(fd, &req_rfds) && socket_is_listening(fd)) { has_listener = 1; break; }
+  }
+  int timeout_ms = -1;
+  if (tsp) {
+    if (original_timeout.tv_sec >= INT_MAX / 1000)
+      timeout_ms = INT_MAX;
+    else
+      timeout_ms = (int)(original_timeout.tv_sec * 1000 +
+                         (original_timeout.tv_nsec + 999999) / 1000000);
+  }
+  const int slice_ms = 250;
+  double deadline = (has_listener && timeout_ms >= 0) ? now_ms() + timeout_ms : 0;
+  long rr = 0;
+  for (;;) {
+    struct timespec slice = {0, 0}, *wp = tsp;
+    if (has_listener && (timeout_ms < 0 || timeout_ms > slice_ms)) {
+      int wait_ms = timeout_ms < 0 ? slice_ms : timeout_ms;
+      if (timeout_ms >= 0) {
+        double remain = deadline - now_ms();
+        wait_ms = remain <= 0 ? 0 : (remain < slice_ms ? (int)remain + 1 : slice_ms);
+      }
+      slice.tv_sec = wait_ms / 1000;
+      slice.tv_nsec = (long)(wait_ms % 1000) * 1000000L;
+      wp = &slice;
+    }
+    rfds = req_rfds; wfds = req_wfds; efds = req_efds;
+    int n = pselect(nfds, raddr ? &rfds : NULL, waddr ? &wfds : NULL,
+                    eaddr ? &efds : NULL, wp, NULL);
+    if (n < 0) { rr = lerr(); break; }
+    // Report a connection macOS pselect() missed on a listening socket as
+    // readable so the guest accepts it this round instead of timing out.
+    if (has_listener && raddr) {
+      for (int fd = 0; fd < nfds; fd++) {
+        if (FD_ISSET(fd, &req_rfds) && !FD_ISSET(fd, &rfds) &&
+            socket_listen_pending(fd)) {
+          FD_SET(fd, &rfds);
+          n++;
+        }
+      }
+    }
+    rr = n;
+    if (n != 0 || !has_listener || timeout_ms == 0) break;
+    if (timeout_ms >= 0 && now_ms() >= deadline) break;
+  }
   if (timeout_addr) {
     clock_gettime(CLOCK_MONOTONIC, &end);
     int64_t sec = original_timeout.tv_sec - (end.tv_sec - start.tv_sec);
