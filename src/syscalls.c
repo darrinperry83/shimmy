@@ -1177,10 +1177,19 @@ static void proc_meminfo(char* b, size_t cap) {
            kb, kb / 2, kb / 2);
 }
 
-// /proc/uptime — uptime(1), systemd CPU accounting, and any tool measuring elapsed guest time.
-// Rebased to guest boot via the same epoch as clock_gettime(CLOCK_MONOTONIC).
+// /proc/uptime — uptime(1), systemd CPU accounting, and any tool measuring elapsed host time.
+// Matches the sysinfo(2) handler below: CLOCK_MONOTONIC counts since boot on macOS.
 static void proc_uptime(char* b, size_t cap) {
-  double total = (double)syscalls_guest_monotonic_ns() / 1e9;
+  struct timespec up;
+  if (clock_gettime(CLOCK_MONOTONIC, &up) != 0) { up.tv_sec = 0; up.tv_nsec = 0; }
+  double total = (double)up.tv_sec + (double)up.tv_nsec / 1e9;
+  if (total <= 0.0) {
+    struct timeval bt; size_t len = sizeof bt;
+    if (sysctlbyname("kern.boottime", &bt, &len, NULL, 0) == 0) {
+      struct timeval now; gettimeofday(&now, NULL);
+      total = (double)(now.tv_sec - bt.tv_sec) + (double)(now.tv_usec - bt.tv_usec) / 1e6;
+    }
+  }
   if (total < 0.0) total = 0.0;
   double idle = total * 0.85;                    // plausible idle split (mostly-idle desktop)
   snprintf(b, cap, "%.2f %.2f\n", total, idle);
@@ -1194,17 +1203,15 @@ static void proc_loadavg(char* b, size_t cap) {
 }
 
 // /proc/stat — a minimal but parseable system-wide CPU accounting line plus the standard
-// trailers top(1)/vmstat(8)/node_exporter read. `cpu` carries the aggregate jiffies; btime is
-// the wall-clock guest boot time (realtime minus guest uptime), so systemd's "kernel boot" age
-// matches clock_gettime(CLOCK_MONOTONIC).
+// trailers top(1)/vmstat(8)/node_exporter read. `cpu` carries the aggregate jiffies.
 static void proc_stat_system(char* b, size_t cap) {
-  uint64_t ns = syscalls_guest_monotonic_ns();
-  unsigned long secs = (unsigned long)(ns / 1000000000ULL);
-  unsigned long jiffies = secs * 100 + (unsigned long)((ns % 1000000000ULL) / 10000000ULL);
+  struct timespec up;
+  if (clock_gettime(CLOCK_MONOTONIC, &up) != 0) { up.tv_sec = 0; up.tv_nsec = 0; }
+  unsigned long jiffies = (unsigned long)up.tv_sec * 100 + (unsigned long)(up.tv_nsec / 10000000);
   unsigned long idle = jiffies * 85 / 100;
   unsigned long busy = jiffies - idle;
   unsigned long user = busy / 3, system = busy / 3, nice = busy - user - system;
-  long btime = (long)time(NULL) - (long)secs;
+  long btime = (long)time(NULL) - (long)up.tv_sec;
   snprintf(b, cap,
     "cpu  %lu %lu %lu %lu 0 0 0 0 0 0\n"
     "intr 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n"
@@ -2271,16 +2278,7 @@ static struct fu_bucket* fu_bucket(unsigned long uaddr) {
 }
 
 static void ts_now(int lclock, struct timespec* t) {
-  if (lclock == LX_CLOCK_REALTIME) {
-    clock_gettime(CLOCK_REALTIME, t);
-  } else {
-    // A futex absolute monotonic deadline is expressed in the guest's monotonic time base, so
-    // "now" must be read in that same (guest-boot-rebased) base or the deadline subtraction
-    // below would be off by the host uptime. REALTIME deadlines stay on the wall clock.
-    uint64_t ns = syscalls_guest_monotonic_ns();
-    t->tv_sec  = (time_t)(ns / 1000000000ULL);
-    t->tv_nsec = (long)(ns % 1000000000ULL);
-  }
+  clock_gettime(lclock == LX_CLOCK_REALTIME ? CLOCK_REALTIME : CLOCK_MONOTONIC, t);
 }
 
 // Diagnostic watchdog: every 2s, name every waiter still parked and how long it has been there,
@@ -3473,37 +3471,6 @@ static long do_fcntl(int fd, int cmd, unsigned long arg) {
 // misc helpers
 // ===========================================================================================
 
-// Guest monotonic/boottime time bases. The guest's CLOCK_MONOTONIC* and CLOCK_BOOTTIME count
-// from GUEST boot (~0 at the first read), but macOS CLOCK_UPTIME_RAW/CLOCK_MONOTONIC_RAW count
-// from the host Mac's boot. A lazily-captured epoch rebases each host clock to guest boot:
-// the first read on a given clock records the host value, and every later read returns the
-// elapsed time since that instant. Both clocks get their own epoch because macOS CLOCK_MONOTONIC_RAW
-// (used for BOOTTIME) does not advance across host suspend while CLOCK_UPTIME_RAW does, so they
-// can diverge and must not share a single epoch. The epoch is captured with pthread_once (the
-// shim is multi-threaded) and inherited through the shim's exec-mediated fork, so every guest
-// process in a boot sees one consistent time base.
-static pthread_once_t g_guest_mono_epoch_once = PTHREAD_ONCE_INIT;
-static uint64_t      g_guest_mono_epoch_ns;
-static void capture_guest_mono_epoch(void) {
-  g_guest_mono_epoch_ns = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
-}
-static pthread_once_t g_guest_boot_epoch_once = PTHREAD_ONCE_INIT;
-static uint64_t      g_guest_boot_epoch_ns;
-static void capture_guest_boot_epoch(void) {
-  g_guest_boot_epoch_ns = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW);
-}
-static uint64_t since_guest_epoch(uint64_t now, uint64_t epoch) {
-  return now > epoch ? now - epoch : 0;   // clamp a (borrow-adjacent) negative to 0
-}
-uint64_t syscalls_guest_monotonic_ns(void) {
-  pthread_once(&g_guest_mono_epoch_once, capture_guest_mono_epoch);
-  return since_guest_epoch(clock_gettime_nsec_np(CLOCK_UPTIME_RAW), g_guest_mono_epoch_ns);
-}
-uint64_t syscalls_guest_boottime_ns(void) {
-  pthread_once(&g_guest_boot_epoch_once, capture_guest_boot_epoch);
-  return since_guest_epoch(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW), g_guest_boot_epoch_ns);
-}
-
 static int clockid_l2m(int lc) {
   switch (lc) {
     case LX_CLOCK_REALTIME:
@@ -3516,31 +3483,6 @@ static int clockid_l2m(int lc) {
     case LX_CLOCK_THREAD_CPUTIME_ID:  return CLOCK_THREAD_CPUTIME_ID;
     default:                          return -1;
   }
-}
-
-// Fill *t with the guest-visible value for a Linux clock id, rebasing the monotonic family to
-// guest boot. Returns 0, or a negative Linux errno.
-static long guest_clock_gettime(int lc, struct timespec* t) {
-  uint64_t ns;
-  switch (lc) {
-    case LX_CLOCK_MONOTONIC:
-    case LX_CLOCK_MONOTONIC_RAW:
-    case LX_CLOCK_MONOTONIC_COARSE:
-      ns = syscalls_guest_monotonic_ns();
-      break;
-    case LX_CLOCK_BOOTTIME:
-      ns = syscalls_guest_boottime_ns();
-      break;
-    default: {
-      int mc = clockid_l2m(lc);
-      if (mc < 0) return -LX_EINVAL;
-      if (clock_gettime((clockid_t)mc, t) < 0) return -linux_errno_from_host(errno);
-      return 0;
-    }
-  }
-  t->tv_sec  = (time_t)(ns / 1000000000ULL);
-  t->tv_nsec = (long)(ns % 1000000000ULL);
-  return 0;
 }
 
 static int lseek_whence_l2m(int w) {
@@ -5938,12 +5880,11 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
 
   // ---------- 113 clock_gettime ----------
   case 113: {
-    int lc = (int)a0;
-    if (clockid_l2m(lc) < 0) return -LX_EINVAL;   // clockid first (Linux returns EINVAL before EFAULT)
+    int mc = clockid_l2m((int)a0);
+    if (mc < 0) return -LX_EINVAL;
     if (!a1) return -LX_EFAULT;
     struct timespec t;
-    long e = guest_clock_gettime(lc, &t);
-    if (e < 0) return e;
+    if (clock_gettime((clockid_t)mc, &t) < 0) return herrno();
     struct linux_timespec lt = {.tv_sec=t.tv_sec, .tv_nsec=t.tv_nsec};
     return gmem_guest_copyout_checked(a1, &lt, sizeof lt) == 0 ? 0 : -LX_EFAULT;
   }
@@ -5981,7 +5922,7 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     struct timespec want = { (time_t)req.tv_sec, (long)req.tv_nsec };
     if ((int)a1 & LX_TIMER_ABSTIME) {
       struct timespec now;
-      if (guest_clock_gettime((int)a0, &now) < 0) return -LX_EINVAL;
+      if (clock_gettime((clockid_t)mc, &now) < 0) return herrno();
       if (req.tv_sec < now.tv_sec ||
           (req.tv_sec == now.tv_sec && req.tv_nsec <= now.tv_nsec)) return 0;
       want.tv_sec  -= now.tv_sec;
@@ -6266,7 +6207,9 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     // Preserve the existing synthetic fields, but never write them through a
     // guest address without the guest-memory ledger checking the destination.
     struct linux_sysinfo si = {0};
-    si.uptime = (int64_t)(syscalls_guest_monotonic_ns() / 1000000000ULL);
+    struct timespec up;
+    clock_gettime(CLOCK_MONOTONIC, &up);
+    si.uptime = up.tv_sec;
     uint64_t memsize = 0; size_t msz = sizeof memsize;
     if (sysctlbyname("hw.memsize", &memsize, &msz, 0, 0) != 0) memsize = 8ULL << 30;
     double la[3] = {0, 0, 0};

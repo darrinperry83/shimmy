@@ -574,23 +574,6 @@ static long lx_io_pgetevents(uint64_t handle, long min_nr, long nr,
 static long eret(void) { return -linux_errno_from_host(errno); }
 static long ok0(int r)  { return r == 0 ? 0 : eret(); }
 
-// Fill *t with the guest-visible value for a raw Linux aarch64 clock id. Monotonic (1/4/6) and
-// boottime (7) are rebased to guest boot via the shared epoch helpers, matching the core
-// clock_gettime handler. Returns 0 or a negative Linux errno.
-static long ext_guest_clock_gettime(long lc, struct timespec* t) {
-  uint64_t ns;
-  switch (lc) {
-    case 1: case 4: case 6: ns = syscalls_guest_monotonic_ns(); break;
-    case 7:                 ns = syscalls_guest_boottime_ns();  break;
-    default:
-      if (clock_gettime((clockid_t)lc, t) != 0) return eret();
-      return 0;
-  }
-  t->tv_sec  = (time_t)(ns / 1000000000ULL);
-  t->tv_nsec = (long)(ns % 1000000000ULL);
-  return 0;
-}
-
 // macOS __PAGEZERO spans the whole low 4 GB; nothing the guest can dereference lives there.
 #define FOUR_GB 0x100000000UL
 
@@ -4212,13 +4195,9 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   // ===== 403..456: the *_time64 tail and post-5.x additions ================
   // aarch64 is 64-bit-time from birth, so these normally never appear; map the cheap ones
   // anyway so a mis-built guest degrades gracefully instead of dying.
-  case 403: {                                                   // clock_gettime64
-    if (!a1) return -LX_EFAULT;
-    struct timespec t;
-    long e = ext_guest_clock_gettime((long)a0, &t);
-    if (e < 0) return e;
-    return gmem_guest_copyout_checked(a1, &t, sizeof t) == 0 ? 0 : -LX_EFAULT;
-  }
+  case 403:                                                     // clock_gettime64
+    return ok0(clock_gettime((clockid_t)((a0 == 1 || a0 == 4 || a0 == 6) ? CLOCK_UPTIME_RAW :
+                                         a0 == 7 ? CLOCK_MONOTONIC_RAW : a0), (struct timespec*)a1));
   case 406:                                                     // clock_getres_time64
     return ok0(clock_getres((clockid_t)a0, (struct timespec*)a1));
   case 407: {                                                   // clock_nanosleep_time64
@@ -4228,8 +4207,8 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     struct timespec rel = *req;
     if ((int)a1 & 1) {                                          // TIMER_ABSTIME
       struct timespec now;
-      long e = ext_guest_clock_gettime((long)a0, &now);
-      if (e < 0) return e;
+      if (clock_gettime((clockid_t)((a0 == 1 || a0 == 4 || a0 == 6) ? CLOCK_UPTIME_RAW :
+                                   a0 == 7 ? CLOCK_MONOTONIC_RAW : a0), &now) != 0) return eret();
       rel.tv_sec  = req->tv_sec - now.tv_sec;
       rel.tv_nsec = req->tv_nsec - now.tv_nsec;
       if (rel.tv_nsec < 0) { rel.tv_nsec += 1000000000; rel.tv_sec--; }

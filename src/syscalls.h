@@ -106,19 +106,6 @@ int  shim_fd_reserve(int fd);   // returns the (possibly relocated) fd
 void shim_fd_unreserve(int fd);
 int  shim_fd_reserved(int fd);
 
-// ---------------------------------------------------------------------------------------------
-// GUEST CLOCK TIME BASES
-//
-// The guest's CLOCK_MONOTONIC* and CLOCK_BOOTTIME must count from GUEST boot (~0 at the first
-// read), not host boot. macOS CLOCK_UPTIME_RAW/CLOCK_MONOTONIC_RAW count from the host Mac's
-// boot, so a guest that boots on a Mac with ~5 days of uptime would otherwise see a ~5-day
-// "kernel uptime" and systemd's OnBootSec= timers would fire immediately. Each helper returns
-// the host monotonic clock minus a lazily-captured guest-boot epoch, in nanoseconds, clamped to
-// 0. The epoch is captured once per clock on first use (pthread_once) and is inherited across
-// the shim's exec-mediated fork, so every guest process shares one guest-boot time base.
-uint64_t syscalls_guest_monotonic_ns(void);   // Linux CLOCK_MONOTONIC* (host CLOCK_UPTIME_RAW)
-uint64_t syscalls_guest_boottime_ns(void);    // Linux CLOCK_BOOTTIME  (host CLOCK_MONOTONIC_RAW)
-
 #ifdef __cplusplus
 }
 #endif

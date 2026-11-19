@@ -23,7 +23,6 @@
 #include "gpu.h"                          // gpuwin_next_event — host input
 #include "capresent.h"                    // WLSRV_CALAYER — the IOSurface/CALayer alternative
 #include "multiwindow_gate.h"
-#include "syscalls.h"                     // syscalls_guest_monotonic_ns — presentation clock
 
 #include <errno.h>
 #include <fcntl.h>
@@ -3498,20 +3497,20 @@ static void handle(uint32_t id, uint16_t op, const uint8_t* a, size_t len) {
       // Answer immediately: the nested compositor's render loop blocks on frame feedback.
       //
       // The timestamp MUST be a valid CLOCK_MONOTONIC value in the SAME time base the guest's
-      // std::chrono::steady_clock reads (Linux CLOCK_MONOTONIC -> host CLOCK_UPTIME_RAW rebased
-      // to guest boot; see syscalls_guest_monotonic_ns in syscalls.c). KWin's
-      // WaylandOutput::framePresented() subtracts the wl_callback.done time from this timestamp
-      // to derive the presentation safety margin, and RenderLoop::notifyVblank() records it as
-      // lastPresentationTimestamp. A hardcoded 0 leaves lastPresentationTimestamp at 0 forever,
-      // so every later scheduleRepaint() computes pageflipsSince = (now-0)/vblank = huge and
-      // mis-schedules the compositor. Sending the real guest monotonic time keeps the nested
-      // render loop on an honest vblank cadence.
-      uint64_t now_ns = syscalls_guest_monotonic_ns();
-      uint64_t sec = now_ns / 1000000000ULL;
+      // std::chrono::steady_clock reads (Linux CLOCK_MONOTONIC -> host CLOCK_UPTIME_RAW; see
+      // clockid_l2m in syscalls.c). KWin's WaylandOutput::framePresented() subtracts the
+      // wl_callback.done time from this timestamp to derive the presentation safety margin, and
+      // RenderLoop::notifyVblank() records it as lastPresentationTimestamp. A hardcoded 0 leaves
+      // lastPresentationTimestamp at 0 forever, so every later scheduleRepaint() computes
+      // pageflipsSince = (now-0)/vblank = huge and mis-schedules the compositor. Sending the real
+      // monotonic time keeps the nested render loop on an honest vblank cadence.
+      struct timespec now;
+      clock_gettime(CLOCK_UPTIME_RAW, &now);
+      uint64_t sec = (uint64_t)now.tv_sec;
       struct ev e; ev_begin(&e, cb, 1);                     // wp_presentation_feedback.presented
       ev_u32(&e, (uint32_t)(sec >> 32));                    // tv_sec_hi
       ev_u32(&e, (uint32_t)(sec & 0xffffffffu));            // tv_sec_lo
-      ev_u32(&e, (uint32_t)(now_ns % 1000000000ULL));       // tv_nsec
+      ev_u32(&e, (uint32_t)now.tv_nsec);                    // tv_nsec
       ev_u32(&e, 16666666);                                 // refresh_nsec (60 Hz)
       ev_u32(&e, 0); ev_u32(&e, 1);                         // seq_hi, seq_lo
       ev_u32(&e, 0);                                        // flags

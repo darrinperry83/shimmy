@@ -66,17 +66,14 @@ static struct timespec from_ns(int64_t n) {
 }
 static int64_t now_ns(int clockid) {
   struct timespec now;
-  if (clockid == 0) {                                          // CLOCK_REALTIME
-    clock_gettime(CLOCK_REALTIME, &now);
-    return ns(now);
-  }
-  // The guest vDSO maps Linux CLOCK_MONOTONIC to macOS CLOCK_UPTIME_RAW, and CLOCK_BOOTTIME to
-  // CLOCK_MONOTONIC_RAW. Absolute timerfd deadlines must share the SAME (guest-boot-rebased)
-  // epoch as the guest's clock_gettime, or an OnBootSec=15min timer armed at an absolute
-  // monotonic deadline ~15min reads "now" as ~5 days and fires immediately.
-  // clockid_l2m(): Linux BOOTTIME (7) advances across suspend, unlike MONOTONIC (1).
-  return (int64_t)(clockid == 7 ? syscalls_guest_boottime_ns()
-                                : syscalls_guest_monotonic_ns());
+  // The guest vDSO maps Linux CLOCK_MONOTONIC to macOS CLOCK_UPTIME_RAW.
+  // Absolute timerfd deadlines must use the same epoch or frame timers fire
+  // several seconds late on macOS (the two host clocks differ on this machine).
+  // Match clockid_l2m(): Linux BOOTTIME (7) advances across suspend, unlike
+  // MONOTONIC (1). Absolute deadlines must share clock_gettime's epoch.
+  clock_gettime(clockid == 0 ? CLOCK_REALTIME :
+                clockid == 7 ? CLOCK_MONOTONIC_RAW : CLOCK_UPTIME_RAW, &now);
+  return ns(now);
 }
 static void fire(void* context) {
   struct timer_slot* slot = context;
