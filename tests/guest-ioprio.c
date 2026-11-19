@@ -19,13 +19,12 @@ static __attribute__((noreturn)) void done(int code) {
 #define PRIO(c, d) ((c) << 13 | (d))
 void _start(void) {
   long pid = sc(172, 0, 0, 0, 0, 0);   /* getpid */
-  /* BE and IDLE at the default priority are accepted no-ops. */
+  /* BE and IDLE at any priority are accepted no-ops (BE priority is a nice hint). */
   if (sc(30, 1, pid, PRIO(IOPRIO_CLASS_BE, 0), 0, 0) != 0) done(1);
   if (sc(30, 1, pid, PRIO(IOPRIO_CLASS_IDLE, 0), 0, 0) != 0) done(2);
-  /* RT is a real scheduling promise the shim cannot keep. */
+  if (sc(30, 1, pid, PRIO(IOPRIO_CLASS_BE, 7), 0, 0) != 0) done(6);
+  /* RT is a real-time scheduling promise the shim cannot keep. */
   if (sc(30, 1, pid, PRIO(IOPRIO_CLASS_RT, 0), 0, 0) != -95) done(3);  /* -EOPNOTSUPP */
-  /* A raised priority is likewise refused. */
-  if (sc(30, 1, pid, PRIO(IOPRIO_CLASS_BE, 4), 0, 0) != -95) done(4);
   /* get returns the default (0). */
   if (sc(31, 1, pid, 0, 0, 0) != 0) done(5);
   done(0);
