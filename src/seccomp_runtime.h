@@ -5,8 +5,12 @@
 #include <stdint.h>
 
 /* Upper bound on a program length, shared with the install path (seccomp(2) and
- * prctl(PR_SET_SECCOMP)). */
-#define SHIM_SECCOMP_MAX_INSNS 256u
+ * prctl(PR_SET_SECCOMP)). Must be large enough for systemd's generated filters:
+ * SystemCallFilter=@system-service (polkit.service, upower.service, ...) compiles
+ * to several hundred classic-BPF instructions, so 256 rejected the whole filter
+ * with EINVAL and the service died at "step SECCOMP". Match the verifier's own
+ * SHIM_BPF_MAX_INSNS ceiling (seccomp_bpf.c). */
+#define SHIM_SECCOMP_MAX_INSNS 4096u
 
 /* Immutable, process-private policy. Installed via guest_seccomp_install() and
  * enforced by shim_seccomp_state_check() before every guest syscall. */

@@ -530,6 +530,7 @@ static long lx_io_pgetevents(uint64_t handle, long min_nr, long nr,
 // SET_MODE_STRICT and later modes are rejected with EINVAL.
 #define LX_SECCOMP_SET_MODE_STRICT 0
 #define LX_SECCOMP_SET_MODE_FILTER 1
+#define LX_SECCOMP_GET_ACTION_AVAIL 2
 #define LX_SECCOMP_FILTER_FLAG_TSYNC (1u << 0)
 #define LX_SECCOMP_MODE_FILTER       2
 
@@ -3822,6 +3823,23 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   }
   case 277: {  /* seccomp(operation, flags, args) */
     unsigned operation = (unsigned)a0, flags = (unsigned)a1;
+    if (operation == LX_SECCOMP_GET_ACTION_AVAIL) {
+      // libseccomp probes the kernel before loading a filter whose default
+      // action is not universally supported (e.g. SCMP_ACT_KILL_PROCESS for
+      // SystemCallFilter=@system-service). Answer honestly for the actions the
+      // shim's evaluator implements; refuse the rest so callers do not rely on
+      // a LOG/TRAP/NOTIFY action we would then have to emulate.
+      uint32_t action = 0;
+      if (!a2) return -LX_EFAULT;
+      if (gmem_guest_export_copyin(NULL, a2, &action, sizeof action) != 0)
+        return -LX_EFAULT;
+      if (action == SHIM_SECCOMP_RET_ALLOW ||
+          action == SHIM_SECCOMP_RET_KILL_THREAD ||
+          action == SHIM_SECCOMP_RET_KILL_PROCESS ||
+          (action & 0xffff0000u) == SHIM_SECCOMP_RET_ERRNO)
+        return 0;
+      return -LX_EOPNOTSUPP;
+    }
     if (operation != LX_SECCOMP_SET_MODE_FILTER) return -LX_EINVAL;  // STRICT etc unsupported
     if (flags & ~(unsigned)LX_SECCOMP_FILTER_FLAG_TSYNC) return -LX_EINVAL;
     // TSYNC is accepted but not synchronized across already-live threads: the
