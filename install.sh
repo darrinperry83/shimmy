@@ -127,11 +127,20 @@ install -d "$ROOTFS/etc/systemd/system"
 # ioctls in src/vt.c, so no hand-added getty symlinks are needed here.
 
 # --- 5. configure the guest the standard Arch way -----------------------------
-echo "==> configuring the guest (DNS, /dev placeholders)"
+echo "==> configuring the guest (DNS, machine-id, /dev placeholders)"
 # DNS: the tarball's resolv.conf points at a not-yet-running systemd-resolved;
 # give pacman a working resolver, exactly as a chroot bootstrap would.
 rm -f "$ROOTFS/etc/resolv.conf"
 printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > "$ROOTFS/etc/resolv.conf"
+# The tarball ships an empty /etc/machine-id; dbus-broker refuses to start without
+# one, which stalls userdbd/logind. Generate it once here (the standard first-boot
+# step), keeping the file read-only like a committed machine-id.
+if [ ! -s "$ROOTFS/etc/machine-id" ]; then
+  chmod 644 "$ROOTFS/etc/machine-id" 2>/dev/null || true
+  (printf '%s\n' "$(python3 -c 'import uuid; print(uuid.uuid4().hex)' 2>/dev/null || \
+     openssl rand -hex 16 2>/dev/null || uuidgen | tr -d '-')") > "$ROOTFS/etc/machine-id"
+  chmod 444 "$ROOTFS/etc/machine-id"
+fi
 # /dev/shm + /dev/dri placeholders (keymap shm_open + the DRM render node)
 mkdir -p "$ROOTFS/dev/shm" "$ROOTFS/dev/dri"
 
