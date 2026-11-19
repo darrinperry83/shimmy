@@ -474,7 +474,16 @@ void syscalls_set_exe(const char* guest_path) {
 // PID 1's thread group, and a vfork child re-exec's (re-running main -> syscalls_set_exe) before it
 // can be observed. exec() also re-runs main(), so a forked+exec'd getty/dbus lands here with its
 // own argv[0] and g_is_init=0.
-void syscalls_set_init(int v) { g_is_init = v; }
+void syscalls_set_init(int v) {
+  g_is_init = v;
+  if (!v && g_uid0) {
+    // fork() gives the child a NEW pid but does not re-run main()/net init, so no
+    // .rdx-cred-<pid> record exists for it yet. Publish one now, inheriting the
+    // parent's virtual uid/gid, so SO_PEERCRED (journald, D-Bus SASL EXTERNAL)
+    // can identify the child instead of failing closed with ENOPROTOOPT.
+    (void)guest_cred_registry_update(g_guest_uid[1], g_guest_gid[1]);
+  }
+}
 
 // ===========================================================================================
 // Path resolution
