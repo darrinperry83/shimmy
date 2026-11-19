@@ -1926,11 +1926,16 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     // a request for RT, BE, or IDLE while ignoring its scheduling effect.
     int which = (int)a0, who = (int)a1, prio = (int)a2;
     int cls = (prio >> 13) & 7;
-    if (cls > 3 || (cls == 0 && (prio & 7))) return -LX_EINVAL;
+    int data = prio & 0x1fff;
+    if (cls > 3 || (cls == 0 && data)) return -LX_EINVAL;
     if (which < 1 || which > 3) return -LX_EINVAL;
     if (which != 1) return -LX_EOPNOTSUPP; // group/user fanout needs task state
     if (who < 0 || (who && who != syscalls_guest_pid())) return -LX_ESRCH;
-    if (prio != 0) return -LX_EOPNOTSUPP;
+    // NONE(0) and BE(2)/IDLE(3) at the kernel-default priority are the guest's
+    // natural state — Darwin has no guest-visible block scheduler, so acknowledging
+    // them is truthful. RT(1) and any raised priority promise a scheduling effect
+    // the shim cannot keep, so those stay EOPNOTSUPP.
+    if (cls == 1 || data != 0) return -LX_EOPNOTSUPP;
     return 0;
   }
   case 31: {                                                    // ioprio_get: raw self priority
