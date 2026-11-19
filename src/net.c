@@ -516,9 +516,11 @@ static int mkdir_p(const char* dir) {
     if (*p != '/') continue;
     *p = 0;
     if (mkdir(tmp, 0755) < 0 && errno != EEXIST) { *p = '/'; return -1; }
+    chmod(tmp, 0755);   // an existing component may be 0600/0700; make it traversable
     *p = '/';
   }
   if (mkdir(tmp, 0755) < 0 && errno != EEXIST) return -1;
+  chmod(tmp, 0755);
   return 0;
 }
 static int mkdir_parent(const char* path) {
@@ -559,7 +561,7 @@ static int group_guest_path_safe(const char* path) {
       struct stat st;
       if (lstat(prefix, &st) == 0) {
         if (!S_ISDIR(st.st_mode)) return 0;
-      } else if (errno != ENOENT) return 0;
+      } else if (errno != ENOENT && errno != EACCES) return 0;
       p = slash + 1;
       if (!*p) return 0;
     } else break;
