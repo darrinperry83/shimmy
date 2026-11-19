@@ -18,6 +18,9 @@ void _start(void) {
   if (sc5(40, 0, 0, (long)fstype, 0, 0) != -14) done(1);
   if (sc5(40, 0, 1, (long)fstype, 0, 0) != -14) done(2);
   if (sc5(40, 0, (long)target, 1, 0, 0) != -14) done(3);
-  if (sc5(40, 0, (long)target, (long)fstype, 0, 0) != 0) done(4);
+  /* A valid mount(tmpfs, /tmp) is now honestly refused: /tmp is a real host-backed
+   * directory, not a synthesized tmpfs, so the shim returns EPERM (see commit that
+   * dropped the tmp.mount mask) rather than a no-op success. */
+  if (sc5(40, 0, (long)target, (long)fstype, 0, 0) != -1) done(4);
   done(0);
 }
