@@ -71,6 +71,12 @@ int  syscalls_signal_get_pdeathsig(void);
 void syscalls_signal_after_fork(void);
 unsigned long long syscalls_signal_pending(void);
 long syscalls_signal_sigsuspend(unsigned long long mask);
+// Temporarily install `mask` as the process-wide guest signal mask and return the
+// previous mask. SIGKILL/SIGSTOP bits are cleared, matching rt_sigprocmask. Used by
+// pselect6/ppoll so a per-wait mask is in effect only during the wait.
+unsigned long long syscalls_signal_mask_swap(unsigned long long mask);
+// Restore a previously-swapped mask and deliver any now-unblocked pending signals.
+void syscalls_signal_mask_restore(unsigned long long previous);
 void syscalls_signal_child_reaped(long pid);
 void syscalls_signal_exec_snapshot(char* out, size_t cap, int forked_child);
 void syscalls_signal_exec_restore(const char* snapshot);

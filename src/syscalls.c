@@ -2859,6 +2859,15 @@ unsigned long long syscalls_signal_pending(void) {
   virtual_signal_check_parent();
   return __atomic_load_n(&g_sigpending, __ATOMIC_ACQUIRE);
 }
+unsigned long long syscalls_signal_mask_swap(unsigned long long mask) {
+  uint64_t temporary = (uint64_t)mask &
+      ~((1ULL << (9 - 1)) | (1ULL << (19 - 1)));
+  return __atomic_exchange_n(&g_sigmask, temporary, __ATOMIC_ACQ_REL);
+}
+void syscalls_signal_mask_restore(unsigned long long previous) {
+  __atomic_store_n(&g_sigmask, (uint64_t)previous, __ATOMIC_RELEASE);
+  virtual_signal_deliver_unblocked();
+}
 static int virtual_signal_take(uint64_t wanted) {
   for (;;) {
     uint64_t old = __atomic_load_n(&g_sigpending, __ATOMIC_ACQUIRE);

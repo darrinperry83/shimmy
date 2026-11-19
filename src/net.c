@@ -2198,7 +2198,8 @@ static int poll_has_shim_eventfd(const struct pollfd* fds, unsigned long count) 
   return 0;
 }
 
-static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_timespec* uts) {
+static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_timespec* uts,
+                      uint64_t sigmask) {
   if (nfds > 4096) return -L_EINVAL;
   int timeout = -1;                                    // NULL timespec == block forever
   if (uts) {
@@ -2216,7 +2217,31 @@ static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_
   }
   if (nfds == 0) {
     double t0 = polllog_on() ? now_ms() : 0;
-    long rr = lret(poll(NULL, 0, timeout));
+    long rr;
+    if (sigmask) {
+      // Slice so a pending masked signal is observed (mirror pselect6/sigsuspend).
+      const int slice_ms = 100;
+      double deadline = timeout >= 0 ? now_ms() + timeout : 0;
+      rr = 0;
+      for (;;) {
+        if (syscalls_signal_pending() & sigmask) { rr = -L_EINTR; break; }
+        int wait_ms = timeout;
+        if (timeout < 0 || timeout > slice_ms) {
+          if (timeout < 0) wait_ms = slice_ms;
+          else {
+            double remain = deadline - now_ms();
+            wait_ms = remain <= 0 ? 0 : (remain < slice_ms ? (int)remain + 1 : slice_ms);
+          }
+        }
+        int r = poll(NULL, 0, wait_ms);
+        if (r < 0) { rr = lret(r); break; }
+        if (syscalls_signal_pending() & sigmask) { rr = -L_EINTR; break; }
+        if (timeout == 0) break;
+        if (timeout >= 0 && now_ms() >= deadline) break;
+      }
+    } else {
+      rr = lret(poll(NULL, 0, timeout));
+    }
     if (polllog_on()) fprintf(stderr, "[polllog] t=%.2f ppoll n=0 req=%dms act=%.2fms ret=%ld\n",
                               now_ms(), timeout, now_ms() - t0, rr);
     return rr;
@@ -2242,6 +2267,7 @@ static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_
     double deadline = timeout >= 0 ? now_ms() + timeout : 0;
     int total = 0;
     for (;;) {
+      if (sigmask && (syscalls_signal_pending() & sigmask)) { free(hf); return -L_EINTR; }
       for (unsigned long i = 0; i < nfds; i++) ufds[i].revents = 0;
       for (unsigned long i = 0; i < nfds; i++) hf[i].revents = 0;
       int ready = 0;
@@ -2254,6 +2280,7 @@ static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_
       int w = timeout < 0 ? slice_ms : (timeout > slice_ms ? slice_ms : timeout);
       int r = poll(hf, (nfds_t)nfds, w);
       if (r < 0 && errno != EINTR) { free(hf); return lerr(); }
+      if (sigmask && (syscalls_signal_pending() & sigmask)) { free(hf); return -L_EINTR; }
       if (r > 0) {
         for (unsigned long i = 0; i < nfds; i++)
           if (hf[i].fd >= 0 && hf[i].revents) {
@@ -2307,10 +2334,13 @@ static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_
       break;
     }
   if (has_listener && !slice) slice = 250;
+  if (sigmask) slice = (slice && slice < 100) ? slice : 100;
   double deadline = slice && timeout >= 0 ? now_ms() + timeout : 0;
   unsigned internal_wakes = 0;
-  int r;
+  int r = 0;
+  int sig_eintr = 0;
   for (;;) {
+    if (sigmask && (syscalls_signal_pending() & sigmask)) { sig_eintr = 1; break; }
     int wait_ms = timeout;
     if (slice && (timeout < 0 || timeout > slice)) {
       if (timeout < 0) wait_ms = slice;
@@ -2333,10 +2363,12 @@ static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_
         }
       }
     }
+    if (sigmask && (syscalls_signal_pending() & sigmask)) { sig_eintr = 1; break; }
     if (r != 0 || !slice || timeout == 0) break;
     if (timeout >= 0 && now_ms() >= deadline) break;
     internal_wakes++;
   }
+  if (sig_eintr) { free(hf); return -L_EINTR; }
   if (slice && getenv("IDLE_REPOLL_TRACE") && internal_wakes)
     fprintf(stderr, "[idle-repoll] pid=%d n=%lu slice=%d internal=%u out=%d\n",
             getpid(), nfds, slice, internal_wakes, r);
@@ -2365,9 +2397,9 @@ static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_
 }
 
 // ppoll's fifth argument is the Linux kernel sigset size (8 on arm64), not
-// a sixth argument as with pselect6. The shim's virtual signal mask is
-// process-wide, so we cannot atomically install a per-thread mask while
-// sleeping in the host poll. Refuse that form before consuming fd events.
+// a sixth argument as with pselect6. The provided mask replaces the shim's
+// process-wide virtual mask only for the duration of the wait, then is
+// restored, mirroring sigsuspend.
 static long sys_ppoll_guest(uint64_t fds_addr, unsigned long nfds,
                             uint64_t timeout_addr, uint64_t mask_addr,
                             size_t sigsetsize) {
@@ -2380,15 +2412,23 @@ static long sys_ppoll_guest(uint64_t fds_addr, unsigned long nfds,
       return -L_EINVAL;
     timeout_p = &timeout;
   }
+  uint64_t mask = 0;
+  int has_mask = 0;
   if (mask_addr) {
     if (sigsetsize != sizeof(uint64_t)) return -L_EINVAL;
-    uint64_t mask;
     if (gmem_guest_export_copyin(NULL, mask_addr, &mask, sizeof mask) != 0)
       return -L_EFAULT;
-    (void)mask;
-    return -L_EOPNOTSUPP;
+    has_mask = 1;
   }
-  if (!nfds) return sys_ppoll(NULL, 0, timeout_p);
+  if (!nfds) {
+    if (has_mask) {
+      uint64_t prev = syscalls_signal_mask_swap(mask);
+      long result = sys_ppoll(NULL, 0, timeout_p, mask);
+      syscalls_signal_mask_restore(prev);
+      return result;
+    }
+    return sys_ppoll(NULL, 0, timeout_p, 0);
+  }
   if (!fds_addr) return -L_EFAULT;
   size_t bytes = nfds * sizeof(struct pollfd);
   struct pollfd* local = malloc(bytes);
@@ -2397,7 +2437,10 @@ static long sys_ppoll_guest(uint64_t fds_addr, unsigned long nfds,
     free(local);
     return -L_EFAULT;
   }
-  long result = sys_ppoll(local, nfds, timeout_p);
+  uint64_t prev = 0;
+  if (has_mask) prev = syscalls_signal_mask_swap(mask);
+  long result = sys_ppoll(local, nfds, timeout_p, has_mask ? mask : 0);
+  if (has_mask) syscalls_signal_mask_restore(prev);
   if (result >= 0 && gmem_guest_copyout_checked(fds_addr, local, bytes) != 0)
     result = -L_EFAULT;
   free(local);
@@ -2428,18 +2471,17 @@ static long sys_pselect6(int nfds, uint64_t raddr, uint64_t waddr, uint64_t eadd
     ts.tv_nsec = (long)original_timeout.tv_nsec;
     tsp = &ts;
   }
+  uint64_t mask = 0;
+  int has_mask = 0;
   if (sigarg_addr) {
     struct { uint64_t mask; uint64_t size; } arg;
     if (gmem_guest_export_copyin(NULL, sigarg_addr, &arg, sizeof arg) != 0)
       return -L_EFAULT;
     if (arg.mask) {
       if (arg.size != sizeof(uint64_t)) return -L_EINVAL;
-      uint64_t mask;
       if (gmem_guest_export_copyin(NULL, arg.mask, &mask, sizeof mask) != 0)
         return -L_EFAULT;
-      // The guest signal mask is currently process-wide. Neither the virtual
-      // mask nor kqueue can atomically apply a per-thread mask for this wait.
-      return -L_EOPNOTSUPP;
+      has_mask = 1;
     }
   }
   size_t bytes = ((size_t)nfds + 63) / 64 * sizeof(uint64_t);
@@ -2462,7 +2504,10 @@ static long sys_pselect6(int nfds, uint64_t raddr, uint64_t waddr, uint64_t eadd
   fd_set req_rfds = rfds, req_wfds = wfds, req_efds = efds;
   // A listening socket in the read set needs a bounded wait: macOS pselect()
   // misses a connection parked in its accept queue, and with no timeout it
-  // would block forever and never run the listen-queue re-check below.
+  // would block forever and never run the listen-queue re-check below. A
+  // signal mask needs the same bounded wait so a guest signal that becomes
+  // pending while masked is observed periodically; mirror sigsuspend's 100ms
+  // slice rather than the coarser listener slice.
   int has_listener = 0;
   if (bytes && raddr) {
     for (int fd = 0; fd < nfds; fd++)
@@ -2476,12 +2521,19 @@ static long sys_pselect6(int nfds, uint64_t raddr, uint64_t waddr, uint64_t eadd
       timeout_ms = (int)(original_timeout.tv_sec * 1000 +
                          (original_timeout.tv_nsec + 999999) / 1000000);
   }
-  const int slice_ms = 250;
-  double deadline = (has_listener && timeout_ms >= 0) ? now_ms() + timeout_ms : 0;
+  const int must_slice = has_listener || has_mask;
+  const int slice_ms = has_mask ? 100 : 250;
+  double deadline = (must_slice && timeout_ms >= 0) ? now_ms() + timeout_ms : 0;
   long rr = 0;
+  uint64_t previous_mask = 0;
+  if (has_mask) previous_mask = syscalls_signal_mask_swap(mask);
   for (;;) {
+    // A signal that became pending while blocked by the wait mask must
+    // interrupt the wait (Linux pselect6 semantics in the shim's virtual
+    // signal model). syscalls_signal_pending() also re-checks the parent.
+    if (has_mask && (syscalls_signal_pending() & mask)) { rr = -L_EINTR; break; }
     struct timespec slice = {0, 0}, *wp = tsp;
-    if (has_listener && (timeout_ms < 0 || timeout_ms > slice_ms)) {
+    if (must_slice && (timeout_ms < 0 || timeout_ms > slice_ms)) {
       int wait_ms = timeout_ms < 0 ? slice_ms : timeout_ms;
       if (timeout_ms >= 0) {
         double remain = deadline - now_ms();
@@ -2506,10 +2558,12 @@ static long sys_pselect6(int nfds, uint64_t raddr, uint64_t waddr, uint64_t eadd
         }
       }
     }
+    if (has_mask && (syscalls_signal_pending() & mask)) { rr = -L_EINTR; break; }
     rr = n;
-    if (n != 0 || !has_listener || timeout_ms == 0) break;
+    if (n != 0 || !must_slice || timeout_ms == 0) break;
     if (timeout_ms >= 0 && now_ms() >= deadline) break;
   }
+  if (has_mask) syscalls_signal_mask_restore(previous_mask);
   if (timeout_addr) {
     clock_gettime(CLOCK_MONOTONIC, &end);
     int64_t sec = original_timeout.tv_sec - (end.tv_sec - start.tv_sec);
