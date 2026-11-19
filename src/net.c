@@ -889,6 +889,51 @@ static size_t unix_path_to_guest(const char* hp, char* out, size_t osz) {
 }
 
 // ---------------------------------------------------------------------------
+// per-boot TCP/UDP port namespace
+// ---------------------------------------------------------------------------
+// g_port_offset maps a guest TCP/UDP port N to host port N + g_port_offset so each
+// guest boot's listen sockets land in an isolated host-port band. The translation is
+// symmetric and lives at the syscall boundary:
+//   * guest -> host (bind/connect/sendto/sendmsg): ADD g_port_offset;
+//   * host -> guest (accept/getsockname/getpeername/recvfrom/recvmsg): SUBTRACT it.
+
+// Outbound port: guest N -> host N + g_port_offset. Port 0 (autobind) stays 0.
+static long port_add_offset(uint16_t* p) {
+  if (!g_port_offset || !*p) return 0;
+  uint32_t np = (uint32_t)*p + g_port_offset;
+  if (np > 65535) return -L_EADDRNOTAVAIL;
+  *p = (uint16_t)np;
+  return 0;
+}
+
+// Inbound port: host N + g_port_offset -> guest N. Only ports inside the mapped band
+// [g_port_offset, 0xBFFF] are shifted back, so a genuine host port (privileged or
+// ephemeral) is reported verbatim rather than corrupted. The lower bound also guards
+// against underflow: a mapped port is always >= g_port_offset.
+static uint16_t port_sub_offset(uint16_t p) {
+  if (g_port_offset && p >= g_port_offset && p <= 0xBFFF) p = (uint16_t)(p - g_port_offset);
+  return p;
+}
+
+// Apply the outbound offset to an AF_INET/AF_INET6 sockaddr in place.
+static long sockaddr_add_port_offset(struct sockaddr_storage* hs) {
+  if (hs->ss_family == AF_INET) {
+    struct sockaddr_in* s = (struct sockaddr_in*)hs;
+    uint16_t p = ntohs(s->sin_port);
+    long r = port_add_offset(&p);
+    if (r < 0) return r;
+    s->sin_port = htons(p);
+  } else if (hs->ss_family == AF_INET6) {
+    struct sockaddr_in6* s = (struct sockaddr_in6*)hs;
+    uint16_t p = ntohs(s->sin6_port);
+    long r = port_add_offset(&p);
+    if (r < 0) return r;
+    s->sin6_port = htons(p);
+  }
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
 // sockaddr: guest (Linux) <-> host (Darwin)
 // ---------------------------------------------------------------------------
 static long sa_to_host(const void* lsa, uint32_t llen, int for_bind,
@@ -978,12 +1023,14 @@ static long sa_to_guest(const struct sockaddr* hs, socklen_t hslen, void* out, u
     len = 2 + plen;
   } else if (hs->sa_family == AF_INET) {
     const struct sockaddr_in* hi = (const struct sockaddr_in*)hs;
-    memcpy(buf + 2, &hi->sin_port, 2);
+    uint16_t port = htons(port_sub_offset(ntohs(hi->sin_port)));
+    memcpy(buf + 2, &port, 2);
     memcpy(buf + 4, &hi->sin_addr, 4);
     len = 16;
   } else if (hs->sa_family == AF_INET6) {
     const struct sockaddr_in6* h6 = (const struct sockaddr_in6*)hs;
-    memcpy(buf + 2, &h6->sin6_port, 2);
+    uint16_t port = htons(port_sub_offset(ntohs(h6->sin6_port)));
+    memcpy(buf + 2, &port, 2);
     memcpy(buf + 4, &h6->sin6_flowinfo, 4);
     memcpy(buf + 8, &h6->sin6_addr, 16);
     memcpy(buf + 24, &h6->sin6_scope_id, 4);
@@ -2825,22 +2872,9 @@ static long sys_bind(int fd, const void* uaddr, uint32_t len) {
   // Relocate guest TCP/UDP listen ports into the per-boot port space so a
   // lingering process from a previous boot cannot hold a host port the guest
   // needs (sshd's port 22 is the canonical case). Autobind (port 0) stays 0.
-  if (g_port_offset && uaddr && len >= 2) {
-    uint16_t fam; memcpy(&fam, uaddr, 2);
-    if ((fam == L_AF_INET && hs.ss_family == AF_INET) ||
-        (fam == L_AF_INET6 && hs.ss_family == AF_INET6)) {
-      uint16_t port = hs.ss_family == AF_INET
-                          ? ntohs(((struct sockaddr_in*)&hs)->sin_port)
-                          : ntohs(((struct sockaddr_in6*)&hs)->sin6_port);
-      if (port) {
-        uint32_t np = (uint32_t)port + g_port_offset;
-        if (np > 65535) return -L_EADDRNOTAVAIL;
-        if (hs.ss_family == AF_INET)
-          ((struct sockaddr_in*)&hs)->sin_port = htons((uint16_t)np);
-        else
-          ((struct sockaddr_in6*)&hs)->sin6_port = htons((uint16_t)np);
-      }
-    }
+  {
+    long or = sockaddr_add_port_offset(&hs);
+    if (or < 0) return or;
   }
   // journald/udevd bind their Unix sockets at /run/systemd/journal/{stdout,dev-log,socket} (and
   // /run/udev/control). A stale 0-byte REGULAR file left in the rootfs from a previous boot shadows
@@ -2950,6 +2984,10 @@ static long sys_connect(int fd, const void* uaddr, uint32_t len) {
     }
   }
   if (r < 0) return r;
+  {
+    long or = sockaddr_add_port_offset(&hs);
+    if (or < 0) return or;
+  }
   long out = lret(connect(fd, (struct sockaddr*)&hs, hlen));
   // Linux abstract sockets have no filesystem pathname. A missing listener
   // yields ECONNREFUSED; the Darwin pathname used to carry the abstract name
@@ -3039,6 +3077,10 @@ static long sys_sendto(int fd, const void* buf, size_t len, int lflags,
     struct sockaddr_storage hs; socklen_t hlen = 0;
     long r = sa_to_host(uaddr, alen, 0, &hs, &hlen);
     if (r < 0) return r;
+    {
+      long or = sockaddr_add_port_offset(&hs);
+      if (or < 0) return or;
+    }
     // sd_notify() sends via sendmsg/sendto WITHOUT connect(); autobind here so the datagram carries
     // the sender's pid path and the receiver can synthesise SCM_CREDENTIALS.
     if (hs.ss_family == AF_UNIX && ((struct sockaddr_un*)&hs)->sun_path[0])
@@ -3125,6 +3167,10 @@ static long sys_sendmsg(int fd, const struct lin_msghdr* lm, int lflags) {
   if (lm->msg_name && lm->msg_namelen) {
     long r = sa_to_host((const void*)lm->msg_name, lm->msg_namelen, 0, &hs, &hslen);
     if (r < 0) return r;
+    {
+      long or = sockaddr_add_port_offset(&hs);
+      if (or < 0) return or;
+    }
     hm.msg_name = &hs; hm.msg_namelen = hslen;
     // sd_notify() sends via sendmsg without connect(); autobind so the datagram carries the sender
     // pid path (recoverable as SCM_CREDENTIALS on the receive side).
