@@ -1896,9 +1896,17 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     char guest_path[PATH_MAX];
     e = copy_guest_cstr(a1, guest_path, sizeof guest_path);
     if (e < 0) return e;
-    e = resolve_path_nf(guest_path, host, sizeof host,
-                        ((unsigned)a2 & 0x02000000u) != 0);     // IN_DONT_FOLLOW
+    char gabs[PATH_MAX];
+    e = syscalls_resolve(LX_AT_FDCWD, guest_path,
+                         ((unsigned)a2 & 0x02000000u) != 0,     // IN_DONT_FOLLOW
+                         host, sizeof host, gabs, sizeof gabs);
     if (e < 0) return e;
+    // A cgroup v2 directory has no host vnode (it is synthesized in-memory), so a real kqueue
+    // watch cannot back it. systemd watches every unit cgroup to detect external deletion; accept
+    // it as an honest no-op watch that never fires instead of returning ENOENT/EPERM for each
+    // service at boot.
+    if (gabs[0] == '/' && cgroup_path_kind(gabs) == 1)
+      return inotify_watch_add_noop((int)a0, gabs, (unsigned)a2);
     return inotify_watch_add((int)a0, host, (unsigned)a2);
   }
   case 28: return inotify_watch_remove((int)a0, (int)a1);       // inotify_rm_watch
@@ -3629,25 +3637,38 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   }
   case 262: case 263: return -LX_EPERM;                         // fanotify_init/mark
   case 264: {                                                  // name_to_handle_at(dfd, path, handle, mount_id, flags)
-    // The shim has no exportable file handles or matching open_by_handle_at.
-    // An empty handle and host st_dev are not a valid Linux success result.
     if (!a2 || !a3) return -LX_EFAULT;
     if (a4 & ~((uint64_t)LX_AT_SYMLINK_FOLLOW | LX_AT_EMPTY_PATH | LX_AT_HANDLE_FID))
       return -LX_EINVAL;
     unsigned int capacity;
-    int mount_id_probe;
-    if (gmem_guest_export_copyin(NULL, a2, &capacity, sizeof capacity) != 0 ||
-        gmem_guest_export_copyin(NULL, a3, &mount_id_probe, sizeof mount_id_probe) != 0)
+    if (gmem_guest_export_copyin(NULL, a2, &capacity, sizeof capacity) != 0)
       return -LX_EFAULT;
-    (void)capacity;
-    (void)mount_id_probe;
     char guest_path[PATH_MAX];
     long e = copy_guest_cstr(a1, guest_path, sizeof guest_path);
     if (e < 0) return e;
     if (!guest_path[0]) return (a4 & LX_AT_EMPTY_PATH) ? -LX_EOPNOTSUPP : -LX_ENOENT;
-    char host[PATH_MAX]; int hdirfd = -100;
-    e = resolve_at((int)a0, guest_path, host, sizeof host, &hdirfd);
+    char host[PATH_MAX], gabs[PATH_MAX];
+    int hdirfd = -100;
+    e = resolve_at_nf_g((int)a0, guest_path, host, sizeof host, &hdirfd,
+                        (a4 & LX_AT_SYMLINK_FOLLOW) ? 0 : 1, gabs, sizeof gabs);
     if (e < 0) return e;
+    // The shim's cgroup v2 tree is synthesized in-memory; there is no host kernfs inode to export
+    // a real handle from. Return a stable 8-byte ID derived from the guest path instead: systemd
+    // reads the first 8 bytes of f_handle as the cgroup ID (the kernfs inode number on Linux) to
+    // detect cgroup identity, so a reproducible path-derived value satisfies it honestly. No real
+    // file handle is implied; open_by_handle_at on it remains EOPNOTSUPP.
+    if (gabs[0] == '/' && cgroup_path_kind(gabs)) {
+      if (capacity < 8) return -LX_EOVERFLOW;                  // no room for the 8-byte ID
+      uint64_t id = cgroup_handle_id(gabs);
+      struct { unsigned int handle_bytes; int handle_type; unsigned char f_handle[8]; } fh;
+      fh.handle_bytes = 8;
+      fh.handle_type = 1;
+      for (int i = 0; i < 8; i++) fh.f_handle[i] = (unsigned char)(id >> (8 * i));
+      if (gmem_guest_copyout_checked(a2, &fh, sizeof fh) != 0) return -LX_EFAULT;
+      int mount_id = 1;                                        // stable synthetic mount id
+      if (gmem_guest_copyout_checked(a3, &mount_id, sizeof mount_id) != 0) return -LX_EFAULT;
+      return 0;
+    }
     struct stat st;
     if (fstatat(hdirfd, host, &st, (a4 & LX_AT_SYMLINK_FOLLOW) ? 0 : AT_SYMLINK_NOFOLLOW) < 0)
       return eret();

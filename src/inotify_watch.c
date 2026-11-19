@@ -339,6 +339,41 @@ long inotify_watch_add(int fd, const char *host_path, unsigned mask) {
   return w->wd;
 }
 
+// Accept a watch on a path with no host backing store (a shim-synthesized path such as a child
+// cgroup dir). The watch gets a real descriptor and never fires: host_fd stays -1, so no kevent is
+// registered and the worker can never match it. systemd treats inotify_add_watch ENOENT/EPERM on
+// its cgroup dir as fatal enough to spam every unit at boot; returning a valid, inert wd keeps it
+// quiet without fabricating any event.
+long inotify_watch_add_noop(int fd, const char *logical_path, unsigned mask) {
+  pthread_mutex_lock(&lock);
+  struct instance *i = instance_for_fd(fd);
+  if (!i) {
+    int error = fcntl(fd, F_GETFD) < 0 ? EBADF : EINVAL;
+    pthread_mutex_unlock(&lock);
+    return -error;
+  }
+  // Same ownership/backend guards as inotify_watch_add.
+  if (i->owner_pid != getpid()) { pthread_mutex_unlock(&lock); return -EOPNOTSUPP; }
+  if (i->backend_failed) { pthread_mutex_unlock(&lock); return -EIO; }
+  int watch_count = 0;
+  for (struct watch *w = i->watches; w; w = w->next) watch_count++;
+  if (watch_count >= 128) { pthread_mutex_unlock(&lock); return -ENOSPC; }
+  struct watch *w = calloc(1, sizeof *w);
+  if (!w) { pthread_mutex_unlock(&lock); return -ENOMEM; }
+  w->path = strdup(logical_path ? logical_path : "");
+  if (!w->path) { free(w); pthread_mutex_unlock(&lock); return -ENOMEM; }
+  w->wd = i->next_wd++;
+  w->mask = mask;
+  w->is_dir = 1;
+  w->host_fd = -1;                 // no host vnode to monitor: never fires
+  w->snapshot_ready = 0;
+  w->names = NULL;
+  w->next = i->watches;
+  i->watches = w;
+  pthread_mutex_unlock(&lock);
+  return w->wd;
+}
+
 long inotify_watch_remove(int fd, int wd) {
   pthread_mutex_lock(&lock);
   struct instance *i = instance_for_fd(fd);
@@ -355,11 +390,13 @@ long inotify_watch_remove(int fd, int wd) {
   // The writer is nonblocking. Linux can discard notifications when its queue is full;
   // removal itself must still complete.
   emit_event(i, wd, L_IN_IGNORED);
-  struct kevent change;
-  EV_SET(&change, w->host_fd, EVFILT_VNODE, EV_DELETE, 0, 0, NULL);
-  (void)kevent(i->kq, &change, 1, NULL, 0, NULL);
-  if (i->unreserve_fd) i->unreserve_fd(w->host_fd);
-  close(w->host_fd);
+  if (w->host_fd >= 0) {
+    struct kevent change;
+    EV_SET(&change, w->host_fd, EVFILT_VNODE, EV_DELETE, 0, 0, NULL);
+    (void)kevent(i->kq, &change, 1, NULL, 0, NULL);
+    if (i->unreserve_fd) i->unreserve_fd(w->host_fd);
+    close(w->host_fd);
+  }
   free_names(w->names);
   free(w->path);
   free(w);
@@ -431,8 +468,10 @@ int inotify_watch_close(int fd) {
   while (i->watches) {
     struct watch *w = i->watches;
     i->watches = w->next;
-    if (i->unreserve_fd) i->unreserve_fd(w->host_fd);
-    close(w->host_fd);
+    if (w->host_fd >= 0) {
+      if (i->unreserve_fd) i->unreserve_fd(w->host_fd);
+      close(w->host_fd);
+    }
     free_names(w->names); free(w->path); free(w);
   }
   if (i->unreserve_fd) {

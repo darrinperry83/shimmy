@@ -3713,7 +3713,8 @@ static const char* const CGROUP_FILES[] = {
   "cpuset.cpus", "cpuset.mems", "cpuset.cpus.effective", "cpuset.mems.effective",
   "io.max", "io.stat", "io.pressure",
   "memory.current", "memory.max", "memory.min", "memory.low", "memory.high",
-  "memory.swap.max", "memory.events", "memory.stat", "memory.pressure",
+  "memory.swap.max", "memory.oom.group", "memory.zswap.max", "memory.zswap.writeback",
+  "memory.events", "memory.stat", "memory.pressure",
   "pids.current", "pids.max", "pids.events",
 };
 #define CGROUP_NFILES ((int)(sizeof(CGROUP_FILES)/sizeof(CGROUP_FILES[0])))
@@ -3920,6 +3921,12 @@ const char* cgroup_file_content(const char* g, char* buf, size_t cap) {
   else if (strcmp(base, "memory.max") == 0 || strcmp(base, "memory.high") == 0 ||
            strcmp(base, "memory.swap.max") == 0)
     snprintf(buf, cap, "max\n");
+  else if (strcmp(base, "memory.oom.group") == 0)
+    snprintf(buf, cap, "0\n");
+  else if (strcmp(base, "memory.zswap.max") == 0)
+    snprintf(buf, cap, "max\n");
+  else if (strcmp(base, "memory.zswap.writeback") == 0)
+    snprintf(buf, cap, "1\n");
   else if (strcmp(base, "memory.events") == 0)
     snprintf(buf, cap, "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\n");
   else if (strcmp(base, "memory.stat") == 0)
@@ -3957,6 +3964,20 @@ int cgroup_path_kind(const char* g) {
   if (cgroup_file_name(g)) return 2;
   if (cgroup_is_dir(g)) return 1;
   return 0;                       // under /sys/fs/cgroup but not (yet) an existing dir or known file
+}
+
+// Stable synthetic 64-bit ID for a cgroup object (dir or leaf file): FNV-1a of the full guest
+// path. systemd reads the first 8 bytes of a name_to_handle_at() handle as the cgroup ID (the
+// kernfs inode number on a real kernel); a path-derived value is stable across shim restarts and
+// distinct for distinct cgroup paths, which is all systemd needs to detect cgroup identity. The
+// shim enforces no limits, so an opaque, reproducible ID is honest (matching the no-op attach).
+uint64_t cgroup_handle_id(const char* g) {
+  uint64_t h = 14695981039346656037ULL;   // FNV-1a offset basis
+  for (const unsigned char* p = (const unsigned char*)g; p && *p; p++) {
+    h ^= (uint64_t)*p;
+    h *= 1099511628211ULL;                // FNV-1a 64-bit prime
+  }
+  return h;
 }
 
 // Per-fd backing store for cgroup directory fds. A child cgroup is not materialized in the rootfs

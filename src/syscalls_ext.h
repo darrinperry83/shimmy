@@ -1,6 +1,8 @@
 // syscalls_ext.h — extended/rarer Linux syscalls (fallback tier for linux_syscall).
 #ifndef RDRIFT_SYSCALLS_EXT_H
 #define RDRIFT_SYSCALLS_EXT_H
+#include <stddef.h>
+#include <stdint.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -14,6 +16,8 @@ void mountapi_fd_closed(int fd);
 // statx of the in-memory cgroup dirs/files. cgroup_path_kind: 0 not-cgroup, 1 dir, 2 leaf file.
 int cgroup_path_kind(const char* g);
 const char* cgroup_file_content(const char* g, char* buf, size_t cap);
+// Stable path-derived 64-bit ID for a synthesized cgroup dir/file (see cgroup_handle_id).
+uint64_t cgroup_handle_id(const char* g);
 
 // Same ABI as linux_syscall(): negative LINUX errno on failure.
 // Returns -38 (-ENOSYS) for anything genuinely unimplemented.
