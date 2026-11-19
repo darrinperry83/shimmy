@@ -4202,6 +4202,14 @@ static void synth_materialize_all(void) {
     "/sys/class", "/sys/class/drm", "/sys/class/sound", "/sys/class/input", "/sys/class/block",
     "/sys/devices", "/sys/devices/system", "/sys/devices/system/cpu",
     "/dev", "/dev/dri", "/dev/input", "/dev/snd", "/dev/shm", "/dev/pts",
+    // The cgroup v2 tree (children + leaf files) is synthesized in-memory and must NOT be
+    // materialized here. The ROOT anchor is different: systemd 261 mounts cgroup2 with
+    // mount_nofollow(), which opens the mountpoint (openat("/sys/fs/cgroup", O_PATH|O_NOFOLLOW))
+    // BEFORE issuing mount(2). That openat is a plain host open on <rootfs>/sys/fs/cgroup, and the
+    // rootfs ships no such directory, so it ENOENTs and the cgroup2 mount fails before the shim's
+    // no-op mount(2) can run. Materialize only the empty anchor dir; cgroup_dir_open() reuses it as
+    // the backing dirfd for every in-memory child cgroup.
+    "/sys/fs/cgroup",
   };
   for (size_t i = 0; i < sizeof dirs / sizeof dirs[0]; i++)
     if (guest_to_host(dirs[i], host, sizeof host) == 0) mkdir_p(host);
