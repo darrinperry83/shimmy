@@ -48,6 +48,12 @@ void guest_set_tid_address(unsigned long addr);
 long guest_set_robust_list(unsigned long head, unsigned long len);
 long guest_get_robust_list(long tid, unsigned long head_out, unsigned long len_out);
 
+// rseq (restartable sequences) registration, per guest thread. The shim only
+// records the area address + signature; it never runs a guest critical section,
+// so the record exists solely so RSEQ_FLAG_UNREGISTER can validate the caller.
+int  guest_rseq_get(unsigned long *ptr_out, unsigned long *sig_out); // 1 if registered
+void guest_rseq_set(unsigned long ptr, unsigned long sig);           // ptr 0 clears
+
 // Is the calling thread a CLONE_VFORK child? Such a thread must NOT re-exec the shim on
 // execve() — that would replace the shared parent process too — and must not end the process on
 // exit(). It spawns a host process (or records a status) and releases the blocked parent instead.

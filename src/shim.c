@@ -369,6 +369,8 @@ struct gthread {
   int           tid;             // guest tid
   unsigned long ctid;            // CLONE_CHILD_CLEARTID address, 0 if none
   unsigned long robust_head;     // Linux set_robust_list registration (per thread)
+  unsigned long rseq_ptr;        // guest address of this thread's rseq area, 0 if none
+  unsigned long rseq_sig;        // signature recorded at rseq register time
   // THE ONE HOME for this thread's guest x18 — the very word the VENEERS address inline
   // (mrs xJ,tpidrro_el0 / and xJ,xJ,#~7 / ldr|str xK,[xJ,#tsd_off]), recorded here as an address
   // so the TRAP path can reach the same word. See the invariant note above gmem_x18_slot() and
@@ -688,6 +690,21 @@ long guest_get_robust_list(long tid, unsigned long head_out, unsigned long len_o
     return -14;
   }
   return 0;
+}
+
+// rseq registration is per guest thread, exactly like Linux's current->rseq. Only
+// the calling thread ever touches its own record, so no lock is needed. The shim
+// never enters a guest critical section: it records the area + signature so the
+// syscall layer can validate RSEQ_FLAG_UNREGISTER, and the syscall layer publishes
+// the initial "single CPU 0, never in a critical section" words.
+int guest_rseq_get(unsigned long *ptr_out, unsigned long *sig_out) {
+  if (ptr_out) *ptr_out = t_cur ? t_cur->rseq_ptr : 0;
+  if (sig_out) *sig_out = t_cur ? t_cur->rseq_sig : 0;
+  return t_cur && t_cur->rseq_ptr != 0;
+}
+
+void guest_rseq_set(unsigned long ptr, unsigned long sig) {
+  if (t_cur) { t_cur->rseq_ptr = ptr; t_cur->rseq_sig = sig; }
 }
 
 // A guest thread has called exit(). Publish the clear-tid word and wake anyone joining, exactly

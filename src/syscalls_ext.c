@@ -96,6 +96,7 @@ extern void rd_rtnl_dup(int oldfd, int newfd);
 #define LX_EFAULT         14
 #define LX_EISDIR         21
 #define LX_EINVAL         22
+#define LX_ENOSPC         28
 #define LX_EOVERFLOW      75
 #define LX_ESPIPE         29
 #define LX_ERANGE         34
@@ -1036,6 +1037,11 @@ static int  g_thp_disable;
 static unsigned g_mdwe;
 static int  g_memory_merge;
 static unsigned long g_timerslack = 50000;
+// pkey_alloc/pkey_free bookkeeping: a 16-bit bitmap of guest protection keys.
+// Memory protection is NOT enforced (macOS has no user protection-key hardware),
+// but allocation/free mirrors Linux so callers probing for pkey support get a
+// stable answer. Atomic so concurrent threads cannot be handed the same key.
+static unsigned g_pkey_bits;
 
 static long do_seccomp_set_mode_filter(unsigned long prog_addr);
 
@@ -4043,7 +4049,32 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
       return -LX_EINVAL;
     return gmem_mprotect(a0, (size_t)a1, (int)a2);
   }
-  case 289: case 290: return -LX_ENOSYS;                        // pkey_alloc/free
+  case 289: {                                                   // pkey_alloc(flags, access_rights)
+    // Protection keys are bookkeeping-only here: the shim has no user pkey
+    // hardware and never enforces the requested access restrictions, so a key is
+    // just a number 0..15 handed out lowest-first. The flag/rights validation
+    // matches Linux's no-hardware fallback (PKEY_DISABLE_ACCESS/WRITE only).
+    if (a0 != 0) return -LX_EINVAL;
+    if (a1 & ~(unsigned long)(0x1 /*PKEY_DISABLE_ACCESS*/ | 0x2 /*PKEY_DISABLE_WRITE*/))
+      return -LX_EINVAL;
+    for (;;) {
+      unsigned cur = __atomic_load_n(&g_pkey_bits, __ATOMIC_RELAXED);
+      unsigned avail = ~cur & 0xFFFFu;
+      if (!avail) return -LX_ENOSPC;
+      unsigned key = (unsigned)__builtin_ctz(avail);
+      unsigned want = cur | (1u << key);
+      if (__atomic_compare_exchange_n(&g_pkey_bits, &cur, want, 0,
+                                      __ATOMIC_RELAXED, __ATOMIC_RELAXED))
+        return (long)key;
+    }
+  }
+  case 290: {                                                   // pkey_free(pkey)
+    long pkey = (long)a0;
+    if (pkey < 0 || pkey > 15) return -LX_EINVAL;
+    unsigned bit = 1u << (unsigned)pkey;
+    unsigned cur = __atomic_fetch_and(&g_pkey_bits, ~bit, __ATOMIC_RELAXED);
+    return (cur & bit) ? 0 : -LX_EINVAL;                        // never allocated
+  }
   case 258:                                                     // statx alias (see report)
   case 291: {
     if (!a4) return -LX_EFAULT;
@@ -4360,7 +4391,12 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
       return -LX_ENOMEM;
     return (long)iov.len;
   }
-  case 441: return -LX_ENOSYS;                                  // epoll_pwait2 (falls back)
+  case 441:                                                     // epoll_pwait2: owned by net.c
+    // net_owns_syscall(441) routes this to net_syscall() before the ext tier is
+    // ever reached, so this case is unreachable from the trap dispatcher. It
+    // exists only so a direct linux_syscall_ext(441, ...) caller does not fall
+    // through to an unrelated case.
+    return -LX_ENOSYS;
   case 442:                                                    // mount_setattr: no-op success
     if (getenv("RDMOUNTAPI_TRACE"))
       fprintf(stderr, "[mountapi] mount_setattr(dfd=%ld path=%p flags=%#lx attr=%p size=%ld)\n",
@@ -4405,6 +4441,16 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   case 446: {                                                   // landlock_restrict_self
     if (a1 != 0) return -LX_EINVAL;                             // flags
     return landlock_restrict_self((int)a0);
+  }
+  case 447: {                                                   // memfd_secret(flags)
+    // Same anonymous mkstemp+unlink file as memfd_create, but the "secret"
+    // memory isolation is a no-op under the shim (no secretmem, no boot-time
+    // reservation, no kernel-only mapping). Linux accepts only MFD_CLOEXEC and
+    // MFD_ALLOW_SEALING here; honor CLOEXEC and accept the sealing flag as a
+    // no-op, exactly as memfd_create does.
+    if (a0 & ~(unsigned long)(LX_MFD_CLOEXEC | LX_MFD_ALLOW_SEALING))
+      return -LX_EINVAL;
+    return do_memfd_create("", (unsigned)a0);
   }
   case 450: {                                                   // set_mempolicy_home_node
     // Linux only updates an existing per-VMA BIND or PREFERRED_MANY policy.
@@ -4687,9 +4733,9 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
                            (a2 & LX_AT_SYMLINK_NOFOLLOW) ? XATTR_NOFOLLOW : 0));
   }
   case 471:                                                     // rseq_slice_yield
-    // rseq(293) never registers a guest thread here, so Shimmy cannot grant
-    // an rseq scheduler slice. Linux returns 0 when no slice was granted;
-    // that is the only truthful result for this no-argument syscall.
+    // rseq(293) now records the registration, but the shim still never runs a
+    // guest critical section and never grants a scheduler slice. Linux returns 0
+    // when no slice was granted; that remains the only truthful result here.
     return 0;
 
   default:

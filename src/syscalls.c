@@ -6369,7 +6369,46 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
   }
 
   // ---------- 293 rseq ----------
-  case 293: return -LX_ENOSYS;                  // no restartable sequences under the shim
+  case 293: {
+    // Restartable sequences. Linux keeps the registration per guest thread
+    // (current->rseq). The shim never runs a guest critical section, so a
+    // register only needs to (a) validate, (b) publish the "never in a critical
+    // section, single CPU 0" words glibc reads, and (c) record the area +
+    // signature so RSEQ_FLAG_UNREGISTER can be validated on the same thread.
+    const unsigned long RSEQ_FLAG_UNREGISTER = 1;
+    const unsigned long rseq_addr = a0, rseq_len = a1, flags = a2, sig = a3;
+    if (flags & ~RSEQ_FLAG_UNREGISTER) return -LX_EINVAL;
+
+    unsigned long cur_ptr = 0, cur_sig = 0;
+    const int registered = guest_rseq_get(&cur_ptr, &cur_sig);
+
+    if (flags & RSEQ_FLAG_UNREGISTER) {
+      if (rseq_addr || rseq_len) return -LX_EINVAL;
+      if (!registered) return -LX_EINVAL;
+      if (cur_sig != sig) return -LX_EINVAL;
+      guest_rseq_set(0, 0);
+      return 0;
+    }
+
+    if (sig == 0) return -LX_EINVAL;
+    if (rseq_len < 32) return -LX_EINVAL;
+    if (!rseq_addr) return -LX_EINVAL;
+    if (registered) return -LX_EBUSY;   // already registered on this thread
+    if (gmem_guest_range_writable(rseq_addr, 32) != 0) return -LX_EFAULT;
+    // Linux struct rseq is 32 bytes; publish only the fields glibc reads and
+    // leave the rest zero so a caller that never initialised the area still sees
+    // a sane ABI (cpu_id == 0, rseq_cs == 0 == "not in a critical section").
+    struct {
+      uint32_t cpu_id_start, cpu_id;
+      uint64_t rseq_cs;
+      uint32_t rseq_flags, node_id, mm_cid, __pad;
+    } zero;
+    memset(&zero, 0, sizeof zero);
+    if (gmem_guest_copyout_checked(rseq_addr, &zero, sizeof zero) != 0)
+      return -LX_EFAULT;
+    guest_rseq_set(rseq_addr, sig);
+    return 0;
+  }
 
   default:
     if (g_trace) { fprintf(stderr, "[sc] -> ext nr=%lu\n", nr); fflush(stderr); }
