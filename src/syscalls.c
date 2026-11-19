@@ -5560,6 +5560,12 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     if ((r = resolve_f((int)a0, guest_path, RSV_NOFOLLOW, host, sizeof host,
                        gabs, sizeof gabs)) < 0)
       return r;
+    // /dev/dri/card0 and /dev/dri/renderD128 are synthetic CHAR nodes, not symlinks.
+    // readlink() on a non-symlink is EINVAL, and glibc's realpath() treats EINVAL as
+    // "ordinary component, keep it" — but only EINVAL. ENOENT makes realpath() fail and
+    // turns kwin's QFileInfo("/dev/dri/card0").canonicalFilePath() into an empty path,
+    // which then fails open("") with ENOENT ("Failed to open drm device").
+    if (drm_is_node(gabs)) return -LX_EINVAL;
     if (strcmp(gabs, "/proc/self/exe") == 0)
       return readlink_guest_text(a2, sz, g_exe);
     if (strcmp(gabs, "/proc/self/cwd") == 0)

@@ -146,6 +146,7 @@ __attribute__((weak)) int rdgpu_handoff_is_carrier_fd(int fd) { (void)fd; return
 #define DRM_CAP_CRTC_IN_VBLANK_EVENT 0x12
 #define DRM_CAP_SYNCOBJ              0x13
 #define DRM_CAP_SYNCOBJ_TIMELINE     0x14
+#define DRM_CAP_ATOMIC_ASYNC_PAGE_FLIP 0x15
 #define DRM_PRIME_CAP_IMPORT         0x1
 #define DRM_PRIME_CAP_EXPORT         0x2
 
@@ -2141,6 +2142,7 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
       case DRM_CAP_ADDFB2_MODIFIERS:    v = 1; break;
       case DRM_CAP_SYNCOBJ:             v = 1; break;         // 0x13
       case DRM_CAP_SYNCOBJ_TIMELINE:    v = 1; break;         // 0x14
+      case DRM_CAP_ATOMIC_ASYNC_PAGE_FLIP: v = 1; break;      // 0x15
       default:                          ok = 0; break;
     }
     gc->value = v;
