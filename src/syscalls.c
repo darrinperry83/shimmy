@@ -1602,6 +1602,30 @@ static int proc_open(const char* g, long* out) {
     *out = fd < 0 ? herrno() : fd;
     return 1;
   }
+  // /proc/self/{uid_map,gid_map,setgroups} — the user-namespace id mapping. systemd-executor's
+  // PrivateUsers= setup writes "0 <uid> 1" here (and "deny" to setgroups) after unshare(CLONE_NEWUSER),
+  // which the shim accepts as a no-op. Serve these as read/write anon files so the writes return their
+  // byte count (exactly like oom_score_adj above); the shim has no real user namespace to map, so the
+  // read-back value is the virtual-root identity the guest already runs under. This mirrors the
+  // /proc/<pid>/<leaf> -> /proc/self/<leaf> normalization above, so /proc/<pid>/uid_map also resolves.
+  if (strcmp(g, "/proc/self/uid_map") == 0) {
+    snprintf(buf, sizeof buf, "0 0 1\n");
+    int fd = mem_fd(buf, strlen(buf));
+    *out = fd < 0 ? herrno() : fd;
+    return 1;
+  }
+  if (strcmp(g, "/proc/self/gid_map") == 0) {
+    snprintf(buf, sizeof buf, "0 0 1\n");
+    int fd = mem_fd(buf, strlen(buf));
+    *out = fd < 0 ? herrno() : fd;
+    return 1;
+  }
+  if (strcmp(g, "/proc/self/setgroups") == 0) {
+    snprintf(buf, sizeof buf, "deny\n");
+    int fd = mem_fd(buf, strlen(buf));
+    *out = fd < 0 ? herrno() : fd;
+    return 1;
+  }
   if (strcmp(g, "/proc/cgroups") == 0) {
     // No cgroup v1 controllers are bound (the shim is v2-only / no-cgroup). systemd reads this to
     // decide between the legacy and unified hierarchy; an empty table means "use cgroup v2".

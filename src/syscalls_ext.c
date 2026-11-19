@@ -538,6 +538,15 @@ static long lx_io_pgetevents(uint64_t handle, long min_nr, long nr,
 #define LX_MS_INVALIDATE  2
 #define LX_MS_SYNC        4
 
+// Linux clone/unshare namespace flags (<linux/sched.h>). The shim has no real kernel
+// namespaces. CLONE_NEWUSER and CLONE_NEWCGROUP are modeled virtually (see the unshare(2)
+// case); CLONE_NEWNS and the remaining namespaces keep their historic -EPERM so systemd's
+// "running under a container manager" fallbacks (PrivateNetwork=, ProtectHostname=,
+// mount namespacing) still degrade gracefully instead of erroring.
+#define LX_CLONE_NEWNS     0x00020000
+#define LX_CLONE_NEWCGROUP 0x02000000
+#define LX_CLONE_NEWUSER   0x10000000
+
 #define LX_WNOHANG      0x00000001
 #define LX_WUNTRACED    0x00000002
 #define LX_WSTOPPED     0x00000002
@@ -2608,7 +2617,22 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     }
     return 0;
   }
-  case 97: return a0 == 0 ? 0 : -LX_EPERM;                     // unshare(0) is a true no-op
+  case 97: {                                                   // unshare
+    // The shim cannot create a real namespace, but it already models two of them:
+    //   CLONE_NEWUSER   — the guest runs under a virtual uid model (RDUID0); every id is uid/gid 0.
+    //   CLONE_NEWCGROUP — a private cgroup v2 tree is synthesized in-memory (see cgroup_open()).
+    // systemd-executor's PrivateUsers= / ProtectControlGroups= setup treats a refused unshare as a
+    // hard error (and then loops/retries on the missing id-map), so these two must be no-op successes.
+    // Every other namespace — including CLONE_NEWNS — is NOT modeled (there is no per-process mount
+    // table to unshare, and /proc/self/mountinfo does not exist), so keep -EPERM: systemd's
+    // namespace_type_supported() then answers "unsupported" and its container fallbacks
+    // (PrivateNetwork=, ProtectHostname=, mount namespacing for PrivateTmp=/ProtectSystem=)
+    // degrade gracefully instead of proceeding into mountinfo/mount(2) and failing hard.
+    unsigned long uflags = (unsigned long)a0;
+    if ((uflags & ~(LX_CLONE_NEWUSER | LX_CLONE_NEWCGROUP)) == 0)
+      return 0;
+    return -LX_EPERM;
+  }
   case 100: return guest_get_robust_list((long)a0, a1, a2);    // get_robust_list
   case 101: {                                                  // nanosleep
     struct lx_timespec requested;
