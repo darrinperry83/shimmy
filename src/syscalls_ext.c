@@ -1489,6 +1489,66 @@ static long lx_process_vm_readv_self(unsigned long pid_arg, unsigned long local_
 }
 
 // ---------------------------------------------------------------------------
+// New mount API fd -> fstype registry.
+//
+// systemd/libmount mount /tmp via the new mount API: fsopen("tmpfs") -> fsconfig
+// (options) -> fsconfig(FSCONFIG_CMD_CREATE) -> fsmount() -> move_mount(mfd, "",
+// AT_FDCWD, "/tmp", MOVE_MOUNT_F_EMPTY_PATH). move_mount() only ever receives the
+// fsmount() RESULT fd, so the fstype captured at fsopen() must be carried across the
+// fsopen->fsmount handoff onto the new fd. fspick() reopens an existing tree without
+// an fstype argument, so it registers no fstype (conservative: move_mount() keeps its
+// existing no-op success). Entries are dropped on close(2).
+// ---------------------------------------------------------------------------
+#define MOUNTAPI_FSTYPE_MAX 32
+#define MOUNTAPI_FD_MAX 128
+static struct { int fd; char fstype[MOUNTAPI_FSTYPE_MAX]; } g_mountapi[MOUNTAPI_FD_MAX];
+static int             g_mountapi_n;
+static pthread_mutex_t g_mountapi_mu = PTHREAD_MUTEX_INITIALIZER;
+
+static void mountapi_fd_set(int fd, const char* fstype) {
+  if (fd < 0 || !fstype || !*fstype) return;
+  size_t n = strlen(fstype);
+  if (n >= MOUNTAPI_FSTYPE_MAX) n = MOUNTAPI_FSTYPE_MAX - 1;
+  pthread_mutex_lock(&g_mountapi_mu);
+  for (int i = 0; i < g_mountapi_n; i++)
+    if (g_mountapi[i].fd == fd) {
+      memcpy(g_mountapi[i].fstype, fstype, n);
+      g_mountapi[i].fstype[n] = 0;
+      pthread_mutex_unlock(&g_mountapi_mu);
+      return;
+    }
+  if (g_mountapi_n < MOUNTAPI_FD_MAX) {
+    g_mountapi[g_mountapi_n].fd = fd;
+    memcpy(g_mountapi[g_mountapi_n].fstype, fstype, n);
+    g_mountapi[g_mountapi_n].fstype[n] = 0;
+    g_mountapi_n++;
+  }
+  pthread_mutex_unlock(&g_mountapi_mu);
+}
+
+// Returns 0 and fills `out` when fd is registered, -1 otherwise.
+static int mountapi_fd_get(int fd, char* out, size_t cap) {
+  if (fd < 0 || !out || !cap) return -1;
+  pthread_mutex_lock(&g_mountapi_mu);
+  int found = -1;
+  for (int i = 0; i < g_mountapi_n; i++)
+    if (g_mountapi[i].fd == fd) { found = i; break; }
+  if (found >= 0) {
+    snprintf(out, cap, "%s", g_mountapi[found].fstype);
+  }
+  pthread_mutex_unlock(&g_mountapi_mu);
+  return found >= 0 ? 0 : -1;
+}
+
+void mountapi_fd_closed(int fd) {
+  if (fd < 0) return;
+  pthread_mutex_lock(&g_mountapi_mu);
+  for (int i = 0; i < g_mountapi_n; i++)
+    if (g_mountapi[i].fd == fd) { g_mountapi[i] = g_mountapi[--g_mountapi_n]; break; }
+  pthread_mutex_unlock(&g_mountapi_mu);
+}
+
+// ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
 long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, unsigned long a2,
@@ -4037,20 +4097,89 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     // fsmount's result is fd_reopen(mfd, O_DIRECTORY)'d by systemd's credential setup, so it must
     // be a real directory. Return the host /tmp dir fd.
     int fd = open("/tmp", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    // fsmount() must carry the fstype captured at fsopen() onto its NEW fd, because
+    // move_mount() only ever sees this fsmount result fd (from_dfd), never the fsopen fd.
+    if (nr == 432 && fd >= 0) {
+      char fstype[MOUNTAPI_FSTYPE_MAX];
+      if (mountapi_fd_get((int)a0, fstype, sizeof fstype) == 0)
+        mountapi_fd_set(fd, fstype);
+    }
+    if (getenv("RDMOUNTAPI_TRACE"))
+      fprintf(stderr, "[mountapi] %s(a0=%ld) -> fd=%d\n", nr == 428 ? "open_tree" : "fsmount",
+              (long)a0, fd);
     return fd >= 0 ? fd : eret();
   }
-  case 430: case 433: {                                       // fsopen / fspick -> unconnected DGRAM
-    // libmount's mnt_context_read_mesgs() does `while (read(fd,...) != -1)` and loops forever on
-    // EOF (0); an unconnected socket makes read() return -1 immediately. MEASURED: on macOS a
-    // BLOCKING unconnected DGRAM read() does NOT return -1 — it blocks forever, so /usr/bin/mount
-    // (tmp.mount's fsopen path) hung in read() and the boot stalled. Make it O_NONBLOCK so read()
-    // returns EAGAIN at once and libmount's loop breaks.
+  case 430: {                                                  // fsopen(fstype, flags)
+    // Parse and record the filesystem type; a NULL/bad guest pointer is -EFAULT, never
+    // a phantom success. The fd itself is an unconnected O_NONBLOCK DGRAM: libmount's
+    // mnt_context_read_mesgs() does `while (read(fd,...) != -1)` and loops forever on EOF
+    // (0); an unconnected socket makes read() return -1 at once. MEASURED: a BLOCKING
+    // unconnected DGRAM read() on macOS blocks forever (does not return -1), so /usr/bin/mount
+    // (tmp.mount's fsopen path) hung in read() and stalled the boot. O_NONBLOCK makes read()
+    // return EAGAIN immediately so libmount's loop breaks.
+    char fstype[MOUNTAPI_FSTYPE_MAX];
+    e = copy_guest_cstr(a0, fstype, sizeof fstype);
+    if (e < 0) return e;
+    int fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+    if (fd >= 0) {
+      fcntl(fd, F_SETFD, FD_CLOEXEC); fcntl(fd, F_SETFL, O_NONBLOCK);
+      mountapi_fd_set(fd, fstype);
+    }
+    if (getenv("RDMOUNTAPI_TRACE"))
+      fprintf(stderr, "[mountapi] fsopen(fstype='%s' flags=%ld) -> fd=%d\n", fstype, (long)a1, fd);
+    return fd >= 0 ? fd : eret();
+  }
+  case 433: {                                                  // fspick(dirfd, path, flags)
+    // fspick() reopens an EXISTING tree for reconfiguration and has no fstype argument.
+    // Register no fstype (conservative default): a later move_mount() of the picked tree
+    // keeps its existing no-op success, exactly like the synthetic API filesystems.
     int fd = socket(AF_UNIX, SOCK_DGRAM, 0);
     if (fd >= 0) { fcntl(fd, F_SETFD, FD_CLOEXEC); fcntl(fd, F_SETFL, O_NONBLOCK); }
+    if (getenv("RDMOUNTAPI_TRACE"))
+      fprintf(stderr, "[mountapi] fspick(dirfd=%ld flags=%ld) -> fd=%d\n", (long)a0, (long)a2, fd);
     return fd >= 0 ? fd : eret();
   }
-  case 429: return 0;                                           // move_mount: no-op success
-  case 431: return 0;                                           // fsconfig: no-op success
+  case 429: {                                                  // move_mount(from_dfd, from_path, to_dfd, to_path, flags)
+    // Copy in and validate the target path: a NULL/bad guest pointer must be -EFAULT,
+    // never acknowledged as a successful mount. from_path may be "" (MOVE_MOUNT_F_EMPTY_PATH).
+    char to_path[PATH_MAX];
+    e = copy_guest_cstr(a3, to_path, sizeof to_path);
+    if (e < 0) return e;
+    if (a1) {
+      char from_path[PATH_MAX];
+      e = copy_guest_cstr(a1, from_path, sizeof from_path);
+      if (e < 0) return e;
+    }
+    // Refuse exactly the tmpfs destinations mount(2) refuses: /tmp and /run/user/<uid>.
+    // The fstype rides on from_dfd (the fsmount() result fd). Synthetic API filesystems
+    // (proc/sys/dev/run/cgroup2/...) keep their no-op success.
+    char carried[MOUNTAPI_FSTYPE_MAX];
+    if (mountapi_fd_get((int)a0, carried, sizeof carried) == 0 &&
+        strcmp(carried, "tmpfs") == 0) {
+      if (strcmp(to_path, "/tmp") == 0) {
+        if (getenv("RDMOUNTAPI_TRACE"))
+          fprintf(stderr, "[mountapi] move_mount(to='%s' tmpfs) -> EPERM\n", to_path);
+        return -LX_EPERM;
+      }
+      if (strncmp(to_path, "/run/user/", 10) == 0) {
+        const char *uid = to_path + 10;
+        if (*uid && strspn(uid, "0123456789") == strlen(uid)) {
+          if (getenv("RDMOUNTAPI_TRACE"))
+            fprintf(stderr, "[mountapi] move_mount(to='%s' tmpfs) -> EPERM\n", to_path);
+          return -LX_EPERM;
+        }
+      }
+    }
+    if (getenv("RDMOUNTAPI_TRACE"))
+      fprintf(stderr, "[mountapi] move_mount(from_dfd=%ld to='%s' flags=%#lx) -> 0\n",
+              (long)a0, to_path, a4);
+    return 0;                                                  // no-op success
+  }
+  case 431: {                                                  // fsconfig(fd, cmd, key, value, aux)
+    if (getenv("RDMOUNTAPI_TRACE"))
+      fprintf(stderr, "[mountapi] fsconfig(fd=%ld cmd=%ld)\n", (long)a0, (long)a1);
+    return 0;                                                  // no-op success
+  }
   case 434: return pidfd_open_shim((pid_t)(long)a0, (unsigned int)a1);   // pidfd_open
   case 435: {                                                   // clone3
     if (getenv("RDCLONEDBG")) {
@@ -4103,6 +4232,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
       } else {
         drm_forget_fd((int)fd);                                 // see the close(2) case for why
         evdev_forget_fd((int)fd);
+        mountapi_fd_closed((int)fd);                            // drop a fsopen/fsmount fstype entry
         net_fd_closed((int)fd);
         close((int)fd);
       }
@@ -4195,7 +4325,11 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     return (long)iov.len;
   }
   case 441: return -LX_ENOSYS;                                  // epoll_pwait2 (falls back)
-  case 442: return 0;                                           // mount_setattr: no-op success
+  case 442:                                                    // mount_setattr: no-op success
+    if (getenv("RDMOUNTAPI_TRACE"))
+      fprintf(stderr, "[mountapi] mount_setattr(dfd=%ld path=%p flags=%#lx attr=%p size=%ld)\n",
+              (long)a0, (void*)a1, a2, (void*)a3, (long)a4);
+    return 0;
   case 443: return -LX_EPERM;                                   // quotactl_fd
   case 444: {                                                   // landlock_create_ruleset
     const uint64_t attr = a0, size = a1, flags = a2;

@@ -5097,6 +5097,7 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     signalfd_shim_closed((int)a0);
     timerfd_shim_closed((int)a0);
     pidfd_shim_closed((int)a0);
+    mountapi_fd_closed((int)a0);         // drop a fsopen/fsmount fstype registry entry
     snd_forget_fd((int)a0);
     evdev_forget_fd((int)a0);
     vt_fd_closed((int)a0);               // drop a console's open count for honest VT_GETSTATE

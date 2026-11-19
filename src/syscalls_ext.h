@@ -7,6 +7,9 @@ extern "C" {
 
 void syscalls_ext_set_root(const char* root);
 
+// Drop a new mount API (fsopen/fsmount) fstype registry entry for `fd` on close(2).
+void mountapi_fd_closed(int fd);
+
 // cgroup v2 (/sys/fs/cgroup) synthesis lives in syscalls.c; do_statx needs these to fake the
 // statx of the in-memory cgroup dirs/files. cgroup_path_kind: 0 not-cgroup, 1 dir, 2 leaf file.
 int cgroup_path_kind(const char* g);
