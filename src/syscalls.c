@@ -389,6 +389,7 @@ static void synth_materialize_all(void);   // defined with the /proc,/sys,/dev s
 static void drm_materialize_udev(void);     // only the actual guest PID1 boot owner updates seat state
 static void evdev_materialize_udev(void);
 static int  cgroup_dir_path(int fd, char* out, size_t cap);  // defined with the cgroup synthesis below
+static void cgroup_proc_content(long pid, char* buf, size_t cap);  // cgroup synthesis
 
 void syscalls_set_root(const char* root) {
   g_root[0] = 0; g_rootlen = 0;
@@ -983,15 +984,16 @@ long syscalls_resolve(int lx_dirfd, const char* path, int nofollow_final,
 static int mem_fd(const char* content, size_t len) {
   // An explicit confined directory wins. Otherwise use the private per-boot
   // socket group: unlike TMPDIR, RDSOCKETGROUP survives guest execve even when
-  // the guest supplies an empty envp. This keeps synthetic /proc readable in
-  // exec'd children without falling back to a sandbox-denied /var/tmp.
+  // the guest supplies an empty envp. /tmp is the last resort: it is always
+  // writable (unlike /var/tmp, which the DSH file sandbox denies), so synthetic
+  // /proc and /sys/fs/cgroup files stay openable in exec'd children.
   const char* td = getenv("RDX_MEMFD_DIR");
   if (!td || !*td) td = getenv("RDSOCKETGROUP");
   if (!td || !*td) td = getenv("TMPDIR");
   char tmpl[PATH_MAX];
   if (td && *td) snprintf(tmpl, sizeof tmpl, "%s%srdshim-XXXXXX", td,
                           td[strlen(td)-1] == '/' ? "" : "/");
-  else           snprintf(tmpl, sizeof tmpl, "/var/tmp/rdshim-XXXXXX");
+  else           snprintf(tmpl, sizeof tmpl, "/tmp/rdshim-XXXXXX");
   int fd = mkstemp(tmpl);
   if (fd < 0) return -1;
   unlink(tmpl);
@@ -1387,6 +1389,15 @@ static int proc_open(const char* g, long* out) {
     return 1;
   }
 
+  // /proc/<pid>/cgroup — the recorded cgroup path for THAT pid (see cgroup_record_pid). Never
+  // normalize this one: the leaf is per-pid, unlike the "one guest per host process" aliases.
+  if (pidnum >= 0 && leaf && strcmp(leaf, "/cgroup") == 0) {
+    cgroup_proc_content(pidnum, buf, sizeof buf);
+    int fd = mem_fd(buf, strlen(buf));
+    *out = fd < 0 ? herrno() : fd;
+    return 1;
+  }
+
   // /proc/self/fdinfo/<N> and /proc/<pid>/fdinfo/<N> — the pidfd metadata surface. systemd's
   // pidfd_get_pid() falls back here after PIDFD_GET_INFO and maps a missing file to -EBADF, so the
   // "Pid:" line must exist for pidfds (and only pidfds) or every pidref_verify() fails.
@@ -1560,9 +1571,9 @@ static int proc_open(const char* g, long* out) {
     return 1;
   }
   if (strcmp(g, "/proc/self/cgroup") == 0) {
-    // cgroup v2 unified hierarchy, root membership. systemd reads /proc/1/cgroup to learn its own
-    // cgroup; "0::/" = hierarchy 0, no bound controllers, path "/" — the honest no-cgroup answer.
-    snprintf(buf, sizeof buf, "0::/\n");
+    // cgroup v2 unified hierarchy. systemd reads /proc/1/cgroup to learn its own cgroup; "0::/" =
+    // hierarchy 0, no bound controllers, path "/". Reflect any recorded cgroup attach for this pid.
+    cgroup_proc_content(syscalls_guest_pid(), buf, sizeof buf);
     int fd = mem_fd(buf, strlen(buf));
     *out = fd < 0 ? herrno() : fd;
     return 1;
@@ -3742,6 +3753,99 @@ static int cgroup_unregister(const char* g) {
   return removed;
 }
 
+// Process -> cgroup directory mapping, for /proc/<pid>/cgroup read-back. The shim enforces no
+// cgroup resource limits; "attaching" a process is a no-op that records where the guest believes
+// it is. One guest process == one host process, so a guest PID is the host pid (syscalls_guest_pid).
+#define CGPID_MAX 512
+static struct { long pid; char path[GPATH_MAX]; } g_cg_procs[CGPID_MAX];
+static int g_cg_proc_count;
+
+static void cgroup_record_pid(long pid, const char* dir) {
+  if (pid <= 0) return;
+  for (int i = 0; i < g_cg_proc_count; i++)
+    if (g_cg_procs[i].pid == pid) { snprintf(g_cg_procs[i].path, GPATH_MAX, "%s", dir); return; }
+  if (g_cg_proc_count >= CGPID_MAX) return;
+  g_cg_procs[g_cg_proc_count].pid = pid;
+  snprintf(g_cg_procs[g_cg_proc_count].path, GPATH_MAX, "%s", dir);
+  g_cg_proc_count++;
+}
+
+// The recorded cgroup directory for `pid`, or NULL if never attached (which means root "/").
+static const char* cgroup_pid_path(long pid) {
+  for (int i = 0; i < g_cg_proc_count; i++)
+    if (g_cg_procs[i].pid == pid) return g_cg_procs[i].path;
+  return 0;
+}
+
+// /proc/<pid>/cgroup body: "0::/<path relative to /sys/fs/cgroup>".
+static void cgroup_proc_content(long pid, char* buf, size_t cap) {
+  const char* dir = cgroup_pid_path(pid);
+  const char* rel = "/";
+  if (dir && strncmp(dir, CGROUP_PREFIX, CGROUP_PREFIX_LEN) == 0) {
+    rel = dir + CGROUP_PREFIX_LEN;
+    if (!*rel) rel = "/";
+  }
+  snprintf(buf, cap, "0::%s\n", rel);
+}
+
+// Parse one write to cgroup.procs / cgroup.threads and record every target pid. systemd 261
+// writes plain ASCII ("<pid>\n"); newer kernels also accept a raw-int pidfd, which we resolve
+// through the pidfd shim so a pidfd-based attach stays honest too.
+static void cgroup_record_write(const char* dir, const char* p, size_t n) {
+  if (n == sizeof(int)) {
+    int pfd;
+    memcpy(&pfd, p, sizeof pfd);
+    long pid = (long)pidfd_shim_pid(pfd);
+    if (pid > 0) { cgroup_record_pid(pid, dir); return; }
+  }
+  for (size_t i = 0; i < n; ) {
+    while (i < n && (p[i] == ' ' || p[i] == '\t' || p[i] == '\n' || p[i] == '\r')) i++;
+    if (i >= n) break;
+    long v = 0; int any = 0;
+    while (i < n && p[i] >= '0' && p[i] <= '9') {
+      v = v * 10 + (p[i] - '0'); if (v > 0x7fffffff) v = 0x7fffffff; any = 1; i++;
+    }
+    if (!any) { i++; continue; }
+    if (v == 0) v = syscalls_guest_pid();           // "0" means the writing process
+    cgroup_record_pid(v, dir);
+  }
+}
+
+// cgroup.procs read-back: the PIDs recorded in `dir`, plus init for the root cgroup.
+static void cgroup_procs_list(const char* dir, char* buf, size_t cap) {
+  size_t n = 0;
+  if (cgroup_is_root(dir) && cap > 2)
+    n = (size_t)snprintf(buf, cap, "1\n");
+  for (int i = 0; i < g_cg_proc_count && n < cap; i++) {
+    if (strcmp(g_cg_procs[i].path, dir) != 0) continue;
+    int w = snprintf(buf + n, cap - n, "%ld\n", g_cg_procs[i].pid);
+    if (w > 0) n += (size_t)w;
+  }
+}
+
+// Per-fd table for cgroup.procs / cgroup.threads leaf fds, so the write path can recover which
+// cgroup directory a written PID is being attached to.
+#define CGPROCFD_MAX 64
+static struct { int fd; char dir[GPATH_MAX]; } g_cgproc_fd[CGPROCFD_MAX];
+
+static void cgproc_fd_register(int fd, const char* dir) {
+  for (int i = 0; i < CGPROCFD_MAX; i++)
+    if (g_cgproc_fd[i].fd == fd && fd > 0) { snprintf(g_cgproc_fd[i].dir, GPATH_MAX, "%s", dir); return; }
+  for (int i = 0; i < CGPROCFD_MAX; i++)
+    if (g_cgproc_fd[i].fd <= 0) { g_cgproc_fd[i].fd = fd; snprintf(g_cgproc_fd[i].dir, GPATH_MAX, "%s", dir); return; }
+}
+
+static const char* cgproc_fd_dir(int fd, char* out, size_t cap) {
+  for (int i = 0; i < CGPROCFD_MAX; i++)
+    if (g_cgproc_fd[i].fd == fd && fd > 0) { snprintf(out, cap, "%s", g_cgproc_fd[i].dir); return out; }
+  return 0;
+}
+
+static void cgproc_fd_drop(int fd) {
+  for (int i = 0; i < CGPROCFD_MAX; i++)
+    if (g_cgproc_fd[i].fd == fd) { g_cgproc_fd[i].fd = 0; g_cgproc_fd[i].dir[0] = 0; return; }
+}
+
 // content of a cgroup leaf file, or NULL. Written into the caller's `buf` (a static is NOT used
 // because the value is handed straight to mem_fd and must survive across cgroup_open calls).
 const char* cgroup_file_content(const char* g, char* buf, size_t cap) {
@@ -3751,8 +3855,11 @@ const char* cgroup_file_content(const char* g, char* buf, size_t cap) {
     snprintf(buf, cap, "cpuset cpu io memory hugetlb pids\n");
   else if (strcmp(base, "cgroup.subtree_control") == 0)
     snprintf(buf, cap, "%s", "");                          // controllers enabled in children: none yet
-  else if (strcmp(base, "cgroup.procs") == 0)
-    snprintf(buf, cap, "%s", cgroup_is_root(g) ? "1\n" : "");
+  else if (strcmp(base, "cgroup.procs") == 0) {
+    char dir[GPATH_MAX];
+    const char* d = cgroup_parent(g, dir, sizeof dir);
+    cgroup_procs_list(d ? d : CGROUP_PREFIX, buf, cap);
+  }
   else if (strcmp(base, "cgroup.events") == 0)
     snprintf(buf, cap, "populated 0\nfrozen 0\n");
   else if (strcmp(base, "cgroup.max.depth") == 0)
@@ -3853,6 +3960,14 @@ static int cgroup_open(const char* g, long* out) {
   if (c) {
     int fd = mem_fd(c, strlen(c));
     *out = fd < 0 ? herrno() : fd;
+    if (fd >= 0) {
+      const char* base = cgroup_file_name(g);
+      if (base && (strcmp(base, "cgroup.procs") == 0 || strcmp(base, "cgroup.threads") == 0)) {
+        char dir[GPATH_MAX];
+        const char* d = cgroup_parent(g, dir, sizeof dir);
+        if (d) cgproc_fd_register(fd, d);
+      }
+    }
     return 1;
   }
   if (cgroup_is_dir(g) && !cgroup_is_root(g)) {     // root opens the real host dir (F_GETPATH works)
@@ -4978,6 +5093,7 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     dirmap_close((int)a0);
     syncur_drop((int)a0);
     cgroup_dir_drop((int)a0);
+    cgproc_fd_drop((int)a0);
     signalfd_shim_closed((int)a0);
     timerfd_shim_closed((int)a0);
     pidfd_shim_closed((int)a0);
@@ -5115,6 +5231,13 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
       }
     }
     long r = herr((long)write((int)a0, staged, (size_t)a2));
+    // cgroup.procs / cgroup.threads writes are no-op attachments: accept the write and record the
+    // process -> cgroup mapping for /proc/<pid>/cgroup read-back (see cgroup_record_write).
+    if (r > 0) {
+      char cgdir[GPATH_MAX];
+      const char* d = cgproc_fd_dir((int)a0, cgdir, sizeof cgdir);
+      if (d) cgroup_record_write(d, staged, (size_t)a2);
+    }
     if (getenv("RDWRDUMP") && (int)a0 < 32 && r > 0) {
       const char* dump_path = getenv("RDWRDUMPFILE");
       FILE* df = fopen(dump_path ? dump_path : "/tmp/rd_wrdump.txt", "a");
