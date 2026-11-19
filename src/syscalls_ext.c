@@ -71,6 +71,7 @@ void fx_note(const char* fmt, ...);
 #include "timerfd_shim.h"
 #include "posix_timer_shim.h"
 #include "pidfd_shim.h"
+#include "io_uring_shim.h"
 #include "gmem.h"
 #include "inotify_watch.h"
 #include <sys/socket.h>
@@ -1239,6 +1240,7 @@ static long do_dup3(int oldfd, int newfd, int flags) {
   if (drm_owns_fd(oldfd)) drm_register_fd_copy(newfd, oldfd);
   if (snd_owns_fd(oldfd)) snd_dup_fd(oldfd, newfd);
   if (evdev_owns_fd(oldfd)) evdev_register_fd(newfd, evdev_device_of_fd(oldfd));
+  if (ioring_owns_fd(oldfd)) ioring_register_fd_copy(newfd, oldfd);
   inotify_watch_dup(oldfd, newfd);
   rd_rtnl_dup(oldfd, newfd);
   if (pidfd_shim_pid(oldfd) > 0) pidfd_shim_register(newfd, pidfd_shim_pid(oldfd));
@@ -1849,6 +1851,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (r >= 0 && drm_owns_fd((int)a0)) drm_register_fd_copy(r, (int)a0);
     if (r >= 0 && snd_owns_fd((int)a0)) snd_dup_fd((int)a0, r);
     if (r >= 0 && evdev_owns_fd((int)a0)) evdev_register_fd(r, evdev_device_of_fd((int)a0));
+    if (r >= 0 && ioring_owns_fd((int)a0)) ioring_register_fd_copy(r, (int)a0);
     return r < 0 ? eret() : r;
   }
   case 24: return do_dup3((int)a0, (int)a1, (int)a2);          // dup3
@@ -4152,7 +4155,11 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (hsig < 0) return -LX_EOPNOTSUPP; // no host equivalent for this Linux signal
     return ok0(pidfd_shim_send_signal((int)a0, hsig));
   }
-  case 425: case 426: case 427: return -LX_ENOSYS;              // io_uring_*
+  case 425: return ioring_setup((unsigned)a0, a1);               // io_uring_setup
+  case 426: return ioring_enter((unsigned)a0, (unsigned)a1, (unsigned)a2,
+                                (unsigned)a3, a4, a5);           // io_uring_enter
+  case 427: return ioring_register((unsigned)a0, (unsigned)a1, a2, (unsigned)a3);
+                                                                 // io_uring_register
   case 428: case 432: {                                       // open_tree / fsmount -> a real dir fd
     // fsmount's result is fd_reopen(mfd, O_DIRECTORY)'d by systemd's credential setup, so it must
     // be a real directory. Return the host /tmp dir fd.
@@ -4293,6 +4300,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
         drm_forget_fd((int)fd);                                 // see the close(2) case for why
         evdev_forget_fd((int)fd);
         mountapi_fd_closed((int)fd);                            // drop a fsopen/fsmount fstype entry
+        ioring_fd_closed((int)fd);
         net_fd_closed((int)fd);
         close((int)fd);
       }
@@ -4451,6 +4459,14 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (a0 & ~(unsigned long)(LX_MFD_CLOEXEC | LX_MFD_ALLOW_SEALING))
       return -LX_EINVAL;
     return do_memfd_create("", (unsigned)a0);
+  }
+  case 448: {                                                   // process_mrelease(pidfd, flags)
+    // Linux checks flags first, then resolves the pidfd. Under the shim there is
+    // no memory pressure to release from a dying process, so a valid pidfd is a
+    // no-op success.
+    if (a1) return -LX_EINVAL;
+    if (pidfd_shim_pid((int)a0) <= 0) return -LX_EBADF;
+    return 0;
   }
   case 450: {                                                   // set_mempolicy_home_node
     // Linux only updates an existing per-VMA BIND or PREFERRED_MANY policy.

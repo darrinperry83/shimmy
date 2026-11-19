@@ -65,6 +65,7 @@ static int g_idle_saw_address;
 #include "signalfd_shim.h"
 #include "timerfd_shim.h"
 #include "pidfd_shim.h"
+#include "io_uring_shim.h"
 #include "inotify_watch.h"
 #include "unix_outq_peer.h"
 // net.c owns the kqueue-backed epoll; on close(2) it must drop the fd from every epoll set
@@ -3361,6 +3362,7 @@ static long do_fcntl(int fd, int cmd, unsigned long arg) {
       if (nf >= 0 && drm_owns_fd(fd)) drm_register_fd_copy(nf, fd);
       if (nf >= 0 && snd_owns_fd(fd)) snd_dup_fd(fd, nf);    // a dup of a snd node keeps its role
       if (nf >= 0 && evdev_owns_fd(fd)) evdev_register_fd(nf, evdev_device_of_fd(fd));
+      if (nf >= 0 && ioring_owns_fd(fd)) ioring_register_fd_copy(nf, fd);
       return herr(nf);
     }
     case LF_GETFD:         return herr(fcntl(fd, F_GETFD));
@@ -5143,6 +5145,7 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     timerfd_shim_closed((int)a0);
     pidfd_shim_closed((int)a0);
     mountapi_fd_closed((int)a0);         // drop a fsopen/fsmount fstype registry entry
+    ioring_fd_closed((int)a0);           // release an io_uring ring when its last fd closes
     snd_forget_fd((int)a0);
     evdev_forget_fd((int)a0);
     vt_fd_closed((int)a0);               // drop a console's open count for honest VT_GETSTATE
@@ -6222,6 +6225,13 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     // mmap() on a synthetic ALSA pcm node maps the status/control/data ring-buffer pages.
     if (snd_owns_fd((int)a4)) {
       void* p = snd_mmap((int)a4, (long)a5);
+      if (p) return (long)(uintptr_t)p;
+      return -LX_EINVAL;
+    }
+    // mmap() on an io_uring ring fd resolves IORING_OFF_SQ_RING / CQ_RING / SQES to a
+    // fresh MAP_SHARED alias of the ring's backing file (see io_uring_shim.c).
+    if (ioring_owns_fd((int)a4)) {
+      void* p = ioring_mmap((int)a4, (long)a5, (size_t)a1);
       if (p) return (long)(uintptr_t)p;
       return -LX_EINVAL;
     }
