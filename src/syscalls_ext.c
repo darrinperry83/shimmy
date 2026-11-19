@@ -2111,6 +2111,12 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     // A shim-owned descriptor is not a guest file, even if its host fd
     // number is addressable. Never change permissions on shim internals.
     if (fd < 0 || shim_fd_reserved(fd)) return -LX_EBADF;
+    // Linux treats chmod on a socket as a successful no-op (sockets carry no
+    // mode bits). macOS fchmod on a socket fd returns EINVAL, which made
+    // systemd's SocketMode=0600 on gpg-agent/dirmngr socket units abort with
+    // "Failed to create listening socket".
+    struct stat st52;
+    if (fstat(fd, &st52) == 0 && S_ISSOCK(st52.st_mode)) return 0;
     return ok0(fchmod(fd, (mode_t)a1));
   }
   case 53: {                                                   // fchmodat(dfd, path, mode)
@@ -2166,10 +2172,16 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     // A shim-owned descriptor is not a guest file. Never attach virtual
     // ownership metadata to it or change its real Darwin ownership.
     if (fd < 0 || shim_fd_reserved(fd)) return -LX_EBADF;
-    if (g_uid0) {
-      struct stat st; if(fstat(fd,&st)<0)return eret();
-      return ok0(guest_ownership_set(&st,(uint32_t)a1,(uint32_t)a2));
-    }
+    struct stat st55;
+    if (fstat(fd, &st55) < 0) return eret();
+    // A socket carries no meaningful on-disk owner under the shim's virtual uid
+    // model; fchown on it is a no-op (Linux records the inode owner, but the shim
+    // already identifies peers via the per-process credential registry). macOS
+    // fchown on a socket fd returns EINVAL, so this must be handled before the
+    // host call regardless of RDUID0.
+    if (S_ISSOCK(st55.st_mode)) return 0;
+    if (g_uid0)
+      return ok0(guest_ownership_set(&st55,(uint32_t)a1,(uint32_t)a2));
     return ok0(fchown(fd,(uid_t)a1,(gid_t)a2));
   }
   case 58: return -LX_EPERM;                                   // vhangup
