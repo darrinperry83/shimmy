@@ -1939,6 +1939,35 @@ static int stat_m2l(const struct stat* s, struct linux_stat* l) {
   return 0;
 }
 
+// Synthetic /dev device nodes (see syscalls.h). These are fabricated in /dev's listing and served
+// from memory; the host rootfs has no files for them, so any stat/access fall-through returns
+// ENOENT. systemd's getty@.service carries ConditionPathExists=/dev/tty0, and access("/dev/tty0",
+// F_OK) is exactly what must succeed for the login prompt to start — so faccessat/statx must
+// answer from this table rather than the host filesystem.
+int syscalls_dev_fake_stat(const char* gabs, unsigned* mode, uint64_t* rdev) {
+  if (!gabs || !mode || !rdev) return 0;
+  if (vt_is_node(gabs)) {
+    vt_fake_stat(mode, rdev, gabs);
+    return 1;
+  }
+  unsigned long lr = (unsigned long)*rdev;
+  unsigned m = *mode;
+  if (drm_is_node(gabs)) {
+    drm_fake_stat(&m, &lr, gabs);
+  } else if (evdev_is_node(gabs)) {
+    evdev_fake_stat(&m, &lr, gabs);
+  } else if (snd_is_node(gabs)) {
+    snd_fake_stat(&m, &lr, gabs);
+  } else if (cam_is_node(gabs)) {
+    cam_fake_stat(&m, &lr);
+  } else {
+    return 0;
+  }
+  *mode = m;
+  *rdev = (uint64_t)lr;
+  return 1;
+}
+
 // Linux filesystem magic by mount point. libudev's sd_device refuses a syspath whose
 // fstatfs() is not SYSFS_MAGIC ("outside of sysfs"), so /sys must report sysfs, not ext4.
 static int64_t fs_magic_for(const char* g) {
@@ -4743,6 +4772,13 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
         strcmp(gabs, "/sys/devices/system/cpu/present") == 0 ||
         strcmp(gabs, "/sys/devices/system/cpu/offline") == 0)
       return (a2 & 2) ? -LX_EACCES : 0;         // readable/executable, never writable
+    // Synthetic /dev device nodes (VT consoles, DRM, evdev, snd, camera) are served from memory
+    // and have no host rootfs file, so access() must not fall through to a host ENOENT. This is
+    // what systemd's getty@.service hits with ConditionPathExists=/dev/tty0 -> access(tty0, F_OK).
+    {
+      unsigned dev_mode = 0600u; uint64_t dev_rdev = 0;
+      if (syscalls_dev_fake_stat(gabs, &dev_mode, &dev_rdev)) return 0;
+    }
     // NB: syscall 48 takes only (dfd, path, mode) — the kernel ignores any 4th register, and
     // so must we: musl's 3-argument wrapper leaves x3 holding junk.  AT_EACCESS is faccessat2.
     { static int on = -1;

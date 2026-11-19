@@ -704,9 +704,11 @@ void vt_stat_identity(const char* gpath, uint64_t* dev, uint64_t* ino) {
 
 void vt_fake_stat(unsigned int* mode, uint64_t* rdev, const char* gpath) {
     int n = vt_node_number(gpath);
-    if (n == 0) n = 1;
+    // /dev/tty0 is the current-console alias (4:0); /dev/console and /dev/ttyN resolve to a
+    // concrete console (4:N). Keep minor 0 for tty0 so it matches Linux's makedev(4, 0).
+    if (n == 0 && gpath && strcmp(gpath, "/dev/tty0") != 0) n = 1;
     *mode = 0620u | 0020000u;               // S_IFCHR, mode 0620 (tty owner rw, group w)
-    *rdev = ((uint64_t)4 << 8) | (uint64_t)n;  // Linux console: major 4, minor N
+    *rdev = ((uint64_t)4 << 8) | (uint64_t)n;  // Linux console: major 4, minor 0 or N
 }
 
 long vt_ioctl(int fd, unsigned long req, unsigned long arg) {

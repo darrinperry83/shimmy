@@ -1,6 +1,7 @@
 // syscalls.h — Linux aarch64 syscall numbers -> macOS/BSD. Core set.
 #ifndef RDRIFT_SYSCALLS_H
 #define RDRIFT_SYSCALLS_H
+#include <stdint.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -53,6 +54,13 @@ long syscalls_resolve(int lx_dirfd, const char* path, int nofollow_final,
 // namespace). Used by Landlock's add_rule to resolve parent_fd. Returns 0, or a
 // negative Linux errno.
 long syscalls_guest_path_of_fd(int fd, char* out, size_t cap);
+
+// Synthetic /dev device nodes. The shim fabricates /dev's listing (DEV_ENTS) and serves the VT
+// consoles, DRM, evdev, snd and camera nodes from memory; the host rootfs holds no files for
+// them, so a statx/newfstatat/faccessat fall-through would report ENOENT. If `gabs` names such a
+// node, fill *mode (S_IF* + permission bits) and *rdev (Linux major<<8|minor) and return 1;
+// otherwise return 0 without touching the outputs.
+int syscalls_dev_fake_stat(const char* gabs, unsigned* mode, uint64_t* rdev);
 
 // Dispatch one Linux syscall. Returns the raw Linux-ABI result: >=0 on success, or a
 // NEGATIVE LINUX errno (e.g. -2 for ENOENT) — never -1/errno.
