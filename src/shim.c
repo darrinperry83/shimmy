@@ -2418,16 +2418,22 @@ static void run_clear_tree(const char* path) {
 }
 
 // Linux mounts /run as a fresh tmpfs at every boot, so the previous boot's
-// runtime state (e.g. the greeter's /run/user/<uid>/wayland-0 socket, stale
-// dbus/sshd/plasmalogin state) is simply gone. Our /run is a host-backed
-// directory that persists, so a stale socket makes the next boot's bind() fail
-// with EADDRINUSE. The root shim empties /run once before systemd starts, which
-// is the same end result: systemd and the shim re-materialise /run/udev,
-// /run/credentials and /run/user on demand.
+// runtime state is gone by construction. Our /run is host-backed and persists,
+// so a stale socket (e.g. the greeter's /run/user/<uid>/wayland-0) makes the
+// next boot's bind() fail with EADDRINUSE. The root shim empties the stale
+// per-session dirs once before systemd starts — the same end result for the
+// state that actually breaks boots. /run/systemd, /run/udev and /run/credentials
+// are left alone: systemd/logind/udevd re-create them on a real system, but here
+// the shim materializes them and plasmalogin needs the logind seat/session state
+// under /run/systemd to spawn the greeter's kwin_wayland.
 static void run_clear_boot(const char* rootfs) {
-  char run[PATH_MAX];
-  if (snprintf(run, sizeof run, "%s/run", rootfs) >= (int)sizeof run) return;
-  run_clear_tree(run);
+  static const char* const dirs[] = { "user", "plasmalogin" };
+  for (size_t i = 0; i < sizeof dirs / sizeof dirs[0]; i++) {
+    char p[PATH_MAX];
+    if (snprintf(p, sizeof p, "%s/run/%s", rootfs, dirs[i]) >= (int)sizeof p)
+      continue;
+    run_clear_tree(p);
+  }
 }
 
 int main(int argc, char** argv) {
@@ -2598,7 +2604,7 @@ int main(int argc, char** argv) {
   // of the carried RDVT_ROOT_PID) empties /run once before systemd starts.
   // Re-exec'd shims inherit RDVT_ROOT_PID and skip this so they never wipe the
   // runtime state of an already-booted guest.
-  if (!getenv("RDVT_ROOT_PID"))
+  if (!getenv("RDVT_ROOT_PID") && !getenv("RDSKIP_RUNCLEAR"))
     run_clear_boot(rootfs);
   // The root PID identifies which shim process owns the VT console renderer + reader thread.
   // exec() keeps the PID, fork() gives the child a new one, so a re-exec'd main process (shebang,
