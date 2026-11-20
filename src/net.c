@@ -519,11 +519,19 @@ static int mkdir_p(const char* dir) {
     if (*p != '/') continue;
     *p = 0;
     if (mkdir(tmp, 0755) < 0 && errno != EEXIST) { *p = '/'; return -1; }
-    chmod(tmp, 0755);   // an existing component may be 0600/0700; make it traversable
+    // Never widen the socket-group root: the launcher created it 0700 (mktemp)
+    // and pidfd_shim's socket_group() requires that owner-only mode. chmod'ing
+    // it to 0755 here made every subsequent systemd-executor fail
+    // pidfd_shim_target_init() -> shim main() exit 1 -> "Main process exited
+    // status=1" for every service. Sub-directories inside the group may still
+    // be 0755 so bind()/connect() can traverse them.
+    if (!(g_group_prefix_len && strcmp(tmp, g_group_prefix) == 0))
+      chmod(tmp, 0755);   // an existing component may be 0600/0700; make it traversable
     *p = '/';
   }
   if (mkdir(tmp, 0755) < 0 && errno != EEXIST) return -1;
-  chmod(tmp, 0755);
+  if (!(g_group_prefix_len && strcmp(tmp, g_group_prefix) == 0))
+    chmod(tmp, 0755);
   return 0;
 }
 static int mkdir_parent(const char* path) {
