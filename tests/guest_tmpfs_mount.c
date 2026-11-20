@@ -25,17 +25,17 @@ int main(void) {
     fputs("refusing mount test without disposable Shimmy marker\n", stderr);
     return 77;
   }
-  if (expect_mount("/run/user/22001", "tmpfs", EPERM)) return 1;
+  if (expect_mount("/run/user/22001", "tmpfs", 0)) return 1;    /* materialized + success */
   if (expect_mount("/run/user/22001/child", "tmpfs", 0)) return 1;
   if (expect_mount("/run/user/not-a-uid", "tmpfs", 0)) return 1;
-  if (expect_mount("/tmp", "tmpfs", 0)) return 1;
+  if (expect_mount("/tmp", "tmpfs", EPERM)) return 1;            /* /tmp stays refused */
   if (expect_mount("/dev", "tmpfs", 0)) return 1;
   if (expect_mount("/run", "tmpfs", 0)) return 1;
   if (expect_mount("/dev/shm", "tmpfs", 0)) return 1;
   if (expect_mount("/dev/pts", "tmpfs", 0)) return 1;
   if (expect_mount("/proc", "proc", 0)) return 1;
   // systemd's mount_nofollow passes a proc fd path for both its early API
-  // mounts and this per-user mount. Only the runtime directory may fail.
+  // mounts and this per-user mount; the runtime dir fd form also succeeds.
   if (mkdir("/run/user", 0755) < 0 && errno != EEXIST) return 1;
   if (mkdir("/run/user/23099", 0700) < 0 && errno != EEXIST) return 1;
   int runtime_fd = open("/run/user/23099", O_RDONLY | O_DIRECTORY);
@@ -43,14 +43,12 @@ int main(void) {
   if (runtime_fd < 0 || early_fd < 0) return 1;
   char target[64];
   snprintf(target, sizeof target, "/proc/self/fd/%d", runtime_fd);
-  if (expect_mount(target, "tmpfs", EPERM)) return 1;
+  if (expect_mount(target, "tmpfs", 0)) return 1;
   snprintf(target, sizeof target, "/proc/self/fd/%d", early_fd);
   if (expect_mount(target, "tmpfs", 0)) return 1;
   close(runtime_fd);
   close(early_fd);
-  // This is the fallback systemd-user-runtime-dir takes when mount returns
-  // EPERM: create/chmod/chown the ordinary directory and verify the guest
-  // sees the requested ownership, rather than only host uid 501.
+  // The mounted runtime directory must report the requested virtual ownership.
   const char *runtime = "/run/user/23099";
   if (chmod(runtime, 0700) < 0 || chown(runtime, 23099, 23099) < 0) return 1;
   struct stat st = {0};

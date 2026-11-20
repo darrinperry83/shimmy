@@ -104,6 +104,7 @@ extern void rd_rtnl_dup(int oldfd, int newfd);
 #define LX_ENAMETOOLONG   36
 #define LX_ENOSYS         38
 #define LX_ELOOP          40
+#define LX_ENOTDIR        20
 #define LX_EOPNOTSUPP     95
 
 // Prototype native-AIO context store. The handle is the mapped guest ring
@@ -1578,7 +1579,12 @@ static long lx_process_vm_readv_self(unsigned long pid_arg, unsigned long local_
 // ---------------------------------------------------------------------------
 #define MOUNTAPI_FSTYPE_MAX 32
 #define MOUNTAPI_FD_MAX 128
-static struct { int fd; char fstype[MOUNTAPI_FSTYPE_MAX]; } g_mountapi[MOUNTAPI_FD_MAX];
+static struct {
+  int fd;
+  char fstype[MOUNTAPI_FSTYPE_MAX];
+  uint32_t uid, gid;           // parsed tmpfs uid=/gid= fsconfig options
+  mode_t mode;                 // parsed tmpfs mode= fsconfig option (octal)
+} g_mountapi[MOUNTAPI_FD_MAX];
 static int             g_mountapi_n;
 static pthread_mutex_t g_mountapi_mu = PTHREAD_MUTEX_INITIALIZER;
 
@@ -1598,23 +1604,72 @@ static void mountapi_fd_set(int fd, const char* fstype) {
     g_mountapi[g_mountapi_n].fd = fd;
     memcpy(g_mountapi[g_mountapi_n].fstype, fstype, n);
     g_mountapi[g_mountapi_n].fstype[n] = 0;
+    g_mountapi[g_mountapi_n].uid = 0;
+    g_mountapi[g_mountapi_n].gid = 0;
+    g_mountapi[g_mountapi_n].mode = 0700;
     g_mountapi_n++;
   }
   pthread_mutex_unlock(&g_mountapi_mu);
 }
 
-// Returns 0 and fills `out` when fd is registered, -1 otherwise.
-static int mountapi_fd_get(int fd, char* out, size_t cap) {
-  if (fd < 0 || !out || !cap) return -1;
+// Fetch fstype plus the parsed tmpfs uid/gid/mode options for an fd.
+static int mountapi_fd_get_opts(int fd, char* fstype, size_t fscap,
+                                uint32_t* uid, uint32_t* gid, mode_t* mode) {
+  if (fd < 0 || !fstype || !fscap) return -1;
   pthread_mutex_lock(&g_mountapi_mu);
   int found = -1;
   for (int i = 0; i < g_mountapi_n; i++)
     if (g_mountapi[i].fd == fd) { found = i; break; }
   if (found >= 0) {
-    snprintf(out, cap, "%s", g_mountapi[found].fstype);
+    snprintf(fstype, fscap, "%s", g_mountapi[found].fstype);
+    if (uid)  *uid  = g_mountapi[found].uid;
+    if (gid)  *gid  = g_mountapi[found].gid;
+    if (mode) *mode = g_mountapi[found].mode;
   }
   pthread_mutex_unlock(&g_mountapi_mu);
   return found >= 0 ? 0 : -1;
+}
+
+// Apply one fsconfig(FSCONFIG_SET_STRING) key=value (uid/gid/mode) to the fsopen
+// fd's registry entry. Unknown keys and malformed values are ignored so arbitrary
+// tmpfs string options (size=, nr_inodes=, source=, ...) stay a no-op.
+static void mountapi_fd_apply_opt(int fd, const char* key, const char* value) {
+  if (fd < 0 || !key || !value || !*value) return;
+  char* end = NULL;
+  uint32_t u32 = 0;
+  mode_t m = 0;
+  int which = -1;                          // 0 uid, 1 gid, 2 mode
+  if (!strcmp(key, "uid"))        { u32 = (uint32_t)strtoul(value, &end, 10); which = 0; }
+  else if (!strcmp(key, "gid"))   { u32 = (uint32_t)strtoul(value, &end, 10); which = 1; }
+  else if (!strcmp(key, "mode"))  { m = (mode_t)strtoul(value, &end, 8); which = 2; }
+  else return;
+  if (end == value || *end) return;        // empty or trailing garbage: keep default
+  pthread_mutex_lock(&g_mountapi_mu);
+  for (int i = 0; i < g_mountapi_n; i++)
+    if (g_mountapi[i].fd == fd) {
+      if (which == 0) g_mountapi[i].uid = u32;
+      else if (which == 1) g_mountapi[i].gid = u32;
+      else g_mountapi[i].mode = m;
+      break;
+    }
+  pthread_mutex_unlock(&g_mountapi_mu);
+}
+
+// Carry fstype + parsed options from the fsopen fd onto the fsmount result fd.
+static void mountapi_fd_carry(int from, int to) {
+  char fstype[MOUNTAPI_FSTYPE_MAX];
+  uint32_t uid, gid; mode_t mode;
+  if (mountapi_fd_get_opts(from, fstype, sizeof fstype, &uid, &gid, &mode) != 0) return;
+  mountapi_fd_set(to, fstype);              // seeds uid=0 gid=0 mode=0700 defaults
+  pthread_mutex_lock(&g_mountapi_mu);
+  for (int i = 0; i < g_mountapi_n; i++)
+    if (g_mountapi[i].fd == to) {
+      g_mountapi[i].uid = uid;
+      g_mountapi[i].gid = gid;
+      g_mountapi[i].mode = mode;
+      break;
+    }
+  pthread_mutex_unlock(&g_mountapi_mu);
 }
 
 void mountapi_fd_closed(int fd) {
@@ -1623,6 +1678,103 @@ void mountapi_fd_closed(int fd) {
   for (int i = 0; i < g_mountapi_n; i++)
     if (g_mountapi[i].fd == fd) { g_mountapi[i] = g_mountapi[--g_mountapi_n]; break; }
   pthread_mutex_unlock(&g_mountapi_mu);
+}
+
+// ---------------------------------------------------------------------------
+// /run/user/<uid> tmpfs materialization.
+//
+// systemd-logind mounts a private tmpfs at /run/user/<uid> (uid=<uid>, gid=<gid>,
+// mode=0700) so the greeter and the user session get a valid XDG_RUNTIME_DIR. On
+// native Linux that mount materializes the directory with the requested owner and
+// mode. The shim's synthetic mount must do the same: create the directory, set its
+// mode, record its ownership (virtual under RDUID0, raw otherwise), and succeed.
+// Without this, logind skips its container fallback and /run/user stays empty, so
+// kwin_wayland aborts with "XDG_RUNTIME_DIR is invalid or not set in the
+// environment".
+// ---------------------------------------------------------------------------
+struct run_user_opts { uint32_t uid, gid; mode_t mode; };
+
+static void run_user_opts_init(struct run_user_opts* o) {
+  o->uid = 0; o->gid = 0; o->mode = 0700;
+}
+
+// Parse "uid=..,gid=..,mode=.." out of a comma-separated tmpfs option string.
+// `mode` is octal, uid/gid are decimal. Unknown or malformed options are ignored
+// so unrelated tmpfs options (size=, nr_inodes=, ...) pass through untouched.
+static void run_user_opts_parse(const char* data, struct run_user_opts* o) {
+  run_user_opts_init(o);
+  if (!data || !*data) return;
+  char buf[PATH_MAX];
+  snprintf(buf, sizeof buf, "%s", data);
+  char* save = NULL;
+  for (char* tok = strtok_r(buf, ",", &save); tok; tok = strtok_r(NULL, ",", &save)) {
+    char* eq = strchr(tok, '=');
+    if (!eq) continue;
+    *eq = 0;
+    const char* key = tok, *val = eq + 1;
+    if (!*val) continue;
+    char* end = NULL;
+    if (!strcmp(key, "uid")) {
+      unsigned long v = strtoul(val, &end, 10);
+      if (end != val && !*end) o->uid = (uint32_t)v;
+    } else if (!strcmp(key, "gid")) {
+      unsigned long v = strtoul(val, &end, 10);
+      if (end != val && !*end) o->gid = (uint32_t)v;
+    } else if (!strcmp(key, "mode")) {
+      unsigned long v = strtoul(val, &end, 8);
+      if (end != val && !*end) o->mode = (mode_t)v;
+    }
+  }
+}
+
+// mkdir -p on a host path (same shape as syscalls.c's mkdir_p).
+static int run_user_mkdir_p(const char* path) {
+  char tmp[PATH_MAX];
+  size_t n = strlen(path);
+  if (n == 0 || n >= sizeof tmp) { errno = ENAMETOOLONG; return -1; }
+  memcpy(tmp, path, n + 1);
+  while (n > 1 && tmp[n - 1] == '/') tmp[--n] = 0;
+  for (char* p = tmp + 1; *p; p++) {
+    if (*p == '/') {
+      *p = 0;
+      if (mkdir(tmp, 0755) && errno != EEXIST) return -1;
+      *p = '/';
+    }
+  }
+  if (mkdir(tmp, 0755) && errno != EEXIST) return -1;
+  return 0;
+}
+
+// Materialize /run/user/<uid> as a real directory with the requested mode and
+// ownership, then report success (native tmpfs mount semantics).
+static long run_user_materialize(const char* guest_path, uint32_t uid, uint32_t gid,
+                                 mode_t mode) {
+  char host[PATH_MAX];
+  long r = resolve_path(guest_path, host, sizeof host);
+  if (r < 0) return r;
+  mode_t dir_mode = (mode & 07777) | 0700;      // owner can always traverse
+  if (run_user_mkdir_p(host) != 0) return eret();
+  if (chmod(host, dir_mode) != 0) return eret();
+  struct stat st;
+  if (stat(host, &st) != 0) return eret();
+  if (!S_ISDIR(st.st_mode)) return -LX_ENOTDIR;
+  if (g_uid0) {
+    // Virtual ownership under RDUID0: the guest's stat reports this uid:gid
+    // without a real Darwin chown (which an unprivileged shim could not perform
+    // anyway). Root (0:0) is already the default for an untracked inode, so only
+    // a non-root id needs a sidecar record. That record is best-effort: a
+    // disposable root without <root>/var/lib makes guest_ownership_set fail, but
+    // the directory must still exist and the mount succeed — returning an error
+    // here re-triggers logind's broken container fallback and leaves /run/user
+    // empty again (the exact bug this fixes).
+    if (uid || gid) (void)guest_ownership_set(&st, uid, gid);
+  } else {
+    // Raw uid/gid: best-effort real chown. macOS only lets an unprivileged
+    // caller chown to its own uid, so an arbitrary id fails EPERM; existence
+    // and mode are the load-bearing contract here, which we satisfy regardless.
+    (void)chown(host, (uid_t)uid, (gid_t)gid);
+  }
+  return 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -2079,7 +2231,7 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   // their existing synthetic success to let PID1 boot.
   case 40: {
     // mount(source, target, fstype, mountflags, data)
-    (void)a0; (void)a3; (void)a4;
+    (void)a0; (void)a3;
     // Even the synthetic mount subset must not dereference raw guest
     // pointers or acknowledge an invalid target as a successful mount.
     char guest_target[PATH_MAX], guest_fstype[PATH_MAX];
@@ -2093,6 +2245,20 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
       fstype = guest_fstype;
     }
     if (fstype && strcmp(fstype, "tmpfs") == 0) {
+      // Parse uid=, gid=, mode= out of the mount data (defaults 0:0:0700).
+      char data[PATH_MAX];
+      if (a4) {
+        e = copy_guest_cstr(a4, data, sizeof data);
+        if (e < 0) return e;
+      } else {
+        data[0] = 0;
+      }
+      struct run_user_opts opts;
+      run_user_opts_parse(data, &opts);
+
+      // A tmpfs mount of /run/user/<uid> materializes that runtime directory
+      // with the requested ownership and mode (native logind semantics).
+      const char *runtime = NULL;               // guest path of the runtime dir
       // systemd's mount_nofollow() passes /proc/self/fd/N, not the pathname.
       // Match that fd against the actual guest runtime directory inode; PID1
       // also mounts tmpfs through fd paths, so matching the fd syntax alone
@@ -2105,25 +2271,27 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
         if (n >= 0 && n <= INT_MAX && end && !*end) {
           char fdpath[PATH_MAX];
           if (fcntl((int)n, F_GETPATH, fdpath) == 0) {
-            const char *runtime = strstr(fdpath, "/run/user/");
-            if (runtime) {
-              const char *uid = runtime + 10;
+            char *run = strstr(fdpath, "/run/user/");
+            if (run) {
+              const char *uid = run + 10;
               if (*uid && strspn(uid, "0123456789") == strlen(uid)) {
                 char expected[PATH_MAX];
                 struct stat got, want;
-                if (resolve_path(runtime, expected, sizeof expected) >= 0 &&
+                if (resolve_path(run, expected, sizeof expected) >= 0 &&
                     fstat((int)n, &got) == 0 && stat(expected, &want) == 0 &&
                     got.st_dev == want.st_dev && got.st_ino == want.st_ino)
-                  return -LX_EPERM;
+                  runtime = run;
               }
             }
           }
         }
       }
-      if (strncmp(target, "/run/user/", 10) == 0) {
+      if (!runtime && strncmp(target, "/run/user/", 10) == 0) {
         const char *uid = target + 10;
-        if (*uid && strspn(uid, "0123456789") == strlen(uid)) return -LX_EPERM;
+        if (*uid && strspn(uid, "0123456789") == strlen(uid)) runtime = target;
       }
+      if (runtime)
+        return run_user_materialize(runtime, opts.uid, opts.gid, opts.mode);
       // /tmp is a real host-backed directory, not a synthesized tmpfs. Claiming
       // success here makes systemd's tmp.mount believe the mount took effect,
       // then retry forever when it cannot observe it. Refuse honestly so the
@@ -4331,13 +4499,11 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     // fsmount's result is fd_reopen(mfd, O_DIRECTORY)'d by systemd's credential setup, so it must
     // be a real directory. Return the host /tmp dir fd.
     int fd = open("/tmp", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    // fsmount() must carry the fstype captured at fsopen() onto its NEW fd, because
-    // move_mount() only ever sees this fsmount result fd (from_dfd), never the fsopen fd.
-    if (nr == 432 && fd >= 0) {
-      char fstype[MOUNTAPI_FSTYPE_MAX];
-      if (mountapi_fd_get((int)a0, fstype, sizeof fstype) == 0)
-        mountapi_fd_set(fd, fstype);
-    }
+    // fsmount() must carry the fstype (and parsed tmpfs options) captured at fsopen()
+    // onto its NEW fd, because move_mount() only ever sees this fsmount result fd
+    // (from_dfd), never the fsopen fd.
+    if (nr == 432 && fd >= 0)
+      mountapi_fd_carry((int)a0, fd);
     if (getenv("RDMOUNTAPI_TRACE"))
       fprintf(stderr, "[mountapi] %s(a0=%ld) -> fd=%d\n", nr == 428 ? "open_tree" : "fsmount",
               (long)a0, fd);
@@ -4384,11 +4550,13 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
       e = copy_guest_cstr(a1, from_path, sizeof from_path);
       if (e < 0) return e;
     }
-    // Refuse exactly the tmpfs destinations mount(2) refuses: /tmp and /run/user/<uid>.
-    // The fstype rides on from_dfd (the fsmount() result fd). Synthetic API filesystems
-    // (proc/sys/dev/run/cgroup2/...) keep their no-op success.
+    // The fstype and parsed tmpfs options ride on from_dfd (the fsmount() result fd).
+    // A tmpfs move_mount onto /run/user/<uid> materializes the runtime directory;
+    // /tmp stays honestly refused. Synthetic API filesystems (proc/sys/dev/run/
+    // cgroup2/...) keep their no-op success.
     char carried[MOUNTAPI_FSTYPE_MAX];
-    if (mountapi_fd_get((int)a0, carried, sizeof carried) == 0 &&
+    uint32_t uid, gid; mode_t mode;
+    if (mountapi_fd_get_opts((int)a0, carried, sizeof carried, &uid, &gid, &mode) == 0 &&
         strcmp(carried, "tmpfs") == 0) {
       if (strcmp(to_path, "/tmp") == 0) {
         if (getenv("RDMOUNTAPI_TRACE"))
@@ -4396,12 +4564,9 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
         return -LX_EPERM;
       }
       if (strncmp(to_path, "/run/user/", 10) == 0) {
-        const char *uid = to_path + 10;
-        if (*uid && strspn(uid, "0123456789") == strlen(uid)) {
-          if (getenv("RDMOUNTAPI_TRACE"))
-            fprintf(stderr, "[mountapi] move_mount(to='%s' tmpfs) -> EPERM\n", to_path);
-          return -LX_EPERM;
-        }
+        const char *uidstr = to_path + 10;
+        if (*uidstr && strspn(uidstr, "0123456789") == strlen(uidstr))
+          return run_user_materialize(to_path, uid, gid, mode);
       }
     }
     if (getenv("RDMOUNTAPI_TRACE"))
@@ -4412,6 +4577,22 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
   case 431: {                                                  // fsconfig(fd, cmd, key, value, aux)
     if (getenv("RDMOUNTAPI_TRACE"))
       fprintf(stderr, "[mountapi] fsconfig(fd=%ld cmd=%ld)\n", (long)a0, (long)a1);
+    // Capture tmpfs uid=/gid=/mode= SET_STRING options so a later move_mount()
+    // can materialize /run/user/<uid> with the requested ownership and mode.
+    // cmd 1 is FSCONFIG_SET_STRING; the other commands (CREATE, RECONFIGURE, ...)
+    // carry no key/value and keep their existing no-op success. Unknown string
+    // options are left alone, so long values (source=, size=, ...) never error.
+    if ((long)a1 == 1) {
+      char key[32];
+      e = copy_guest_cstr(a2, key, sizeof key);
+      if (e < 0) return e;
+      if (!strcmp(key, "uid") || !strcmp(key, "gid") || !strcmp(key, "mode")) {
+        char value[64];
+        e = copy_guest_cstr(a3, value, sizeof value);
+        if (e < 0) return e;
+        mountapi_fd_apply_opt((int)a0, key, value);
+      }
+    }
     return 0;                                                  // no-op success
   }
   case 434: return pidfd_open_shim((pid_t)(long)a0, (unsigned int)a1);   // pidfd_open

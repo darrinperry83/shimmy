@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Probe the new mount API (fsopen/fsconfig/fsmount/move_mount) honesty.
 
-A tmpfs whose destination is /tmp or /run/user/<uid> must fail with EPERM,
-while synthetic API filesystems (proc, /dev/shm, ...) keep their no-op success.
+A tmpfs whose destination is /tmp must fail with EPERM, while a tmpfs onto
+/run/user/<uid> materializes the runtime directory, and synthetic API
+filesystems (proc, /dev/shm, ...) keep their no-op success.
 """
 from pathlib import Path
 import resource
@@ -35,7 +36,7 @@ def main():
         if result.returncode or "GUEST_MOUNTAPI_OK" not in result.stdout:
             raise RuntimeError(f"guest failed rc={result.returncode}\n"
                                f"{result.stdout}\n{result.stderr[-2000:]}")
-        print("GUEST_MOUNTAPI_OK: tmpfs /tmp + /run/user/<uid> EPERM, proc/shm no-op")
+        print("GUEST_MOUNTAPI_OK: tmpfs /tmp EPERM, /run/user/<uid> materialized, proc/shm no-op")
 
 
 if __name__ == "__main__":

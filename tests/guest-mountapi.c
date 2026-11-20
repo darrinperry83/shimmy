@@ -2,8 +2,9 @@
  *
  * systemd/libmount mount /tmp via fsopen("tmpfs") -> fsconfig -> fsconfig(CMD_CREATE)
  * -> fsmount -> move_mount(mfd, "", AT_FDCWD, "/tmp", MOVE_MOUNT_F_EMPTY_PATH). The shim
- * must refuse a tmpfs whose destination is /tmp (or /run/user/<uid>) with EPERM, exactly
- * like mount(2) (case 40), while synthetic API filesystems keep their no-op success.
+ * must refuse a tmpfs whose destination is /tmp with EPERM, exactly like mount(2)
+ * (case 40), while a tmpfs onto /run/user/<uid> materializes the runtime directory and
+ * synthetic API filesystems keep their no-op success.
  */
 static long sc5(long nr, long a, long b, long c, long d, long e) {
   register long x0 __asm__("x0") = a, x1 __asm__("x1") = b;
@@ -47,9 +48,10 @@ void _start(void) {
   /* A NULL/bad fstype pointer must be refused, not a phantom success. */
   if (sc5(430, 0, FSOPEN_CLOEXEC, 0, 0, 0) != -14) done(1);     /* fsopen(NULL) -> EFAULT */
 
-  /* tmpfs on /tmp and /run/user/<uid> must be refused with EPERM. */
+  /* tmpfs on /tmp must be refused with EPERM; a tmpfs on /run/user/<uid> now
+   * materializes the runtime directory and succeeds (native logind semantics). */
   if (mount_via_new_api("tmpfs", "/tmp", 0) != -1) done(2);      /* -EPERM */
-  if (mount_via_new_api("tmpfs", "/run/user/22001", 0) != -1) done(3);
+  if (mount_via_new_api("tmpfs", "/run/user/22001", 0) != 0) done(3);
   /* A non-uid /run/user suffix is not the per-user runtime dir: keep no-op success. */
   if (mount_via_new_api("tmpfs", "/run/user/not-a-uid", 0) != 0) done(4);
 
