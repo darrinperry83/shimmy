@@ -96,14 +96,7 @@ static int verify_handed_drm_fileport(mach_port_t port) {
       g_master_claim_pid > 1 &&
       !(kill(g_master_claim_pid, 0) < 0 && errno == ESRCH);
   close(fd);
-  if (!valid) return -EACCES;
-  int probe = open(g_master_path, O_RDWR | O_NOFOLLOW | O_CLOEXEC);
-  if (probe < 0) return -EACCES;
-  int held = flock(probe, LOCK_EX | LOCK_NB) < 0 &&
-      (errno == EWOULDBLOCK || errno == EAGAIN);
-  if (!held) (void)flock(probe, LOCK_UN);
-  close(probe);
-  return held ? 0 : -EACCES;
+  return valid ? 0 : -EACCES;
 }
 
 static int audit_sender(mach_msg_header_t *hdr, size_t cap,
@@ -341,7 +334,28 @@ static int receive_device_auth(mach_msg_header_t *hdr, size_t cap) {
       sender > 1 && sender_uid == g_expected_uid &&
       m->claimed_pid == (uint32_t)sender &&
       m->epoch_high == g_epoch.high && m->epoch_low == g_epoch.low;
-  int rc = authorized ? verify_handed_drm_fileport(m->drm_port.name) : -EACCES;
+  int rc = -EACCES;
+  if (authorized) {
+    // A logind-handoff compositor never calls SET_MASTER (logind hands it an
+    // already-master card0 fd), so receive_master() never ran, no process holds
+    // the shim's synthetic DRM-master flock, and g_drm_dev/ino are still zero.
+    // The first device auth is therefore the registration: record this exact
+    // DRM socket identity as the handed master device. Later auths/presents
+    // must carry the SAME socket identity.
+    int fd = fileport_makefd(m->drm_port.name);
+    struct stat st = {0};
+    int is_sock = fd >= 0 && !fstat(fd, &st) && S_ISSOCK(st.st_mode);
+    if (fd >= 0) close(fd);
+    if (is_sock) {
+      if (!g_drm_dev && !g_drm_ino) {
+        g_drm_dev = st.st_dev;
+        g_drm_ino = st.st_ino;
+        g_master_claim_pid = sender;
+      }
+      rc = (st.st_dev == g_drm_dev && st.st_ino == g_drm_ino &&
+            g_master_claim_pid == sender) ? 0 : -EACCES;
+    }
+  }
   pthread_mutex_unlock(&g_lock);
   return rc;
 }

@@ -1273,12 +1273,26 @@ int drm_is_node(const char* p) {
 void drm_register_fd_path(int fd, const char* path) {
   if (fd < 0 || g_nfd >= MAXFD) return;
   int minor = path && strstr(path, "renderD128") ? 128 : 0;
-  g_fds[g_nfd++] = (typeof(*g_fds)){fd, minor};
-  // The virtual card fd travels through logind and D-Bus via SCM_RIGHTS. Record its pipe
-  // identity in this boot's private namespace so the receiving Shimmy process can classify it.
+  // The virtual card fd travels through logind and D-Bus via SCM_RIGHTS. Record its PIPE
+  // identity (the raw fstat of the carrier socket) in this boot's private namespace so the
+  // receiving Shimmy process can classify it. This must be the RAW fstat identity, NOT
+  // drm_fd_identity(): once g_fds[] holds the fd, drm_fd_identity() reports the synthetic
+  // 0x64726d:<minor> key, but the receiver (drm_register_received_fd) looks the fd up by its
+  // raw fstat identity before it registers the fd there, so the two keys would never match and
+  // logind's TakeDevice handoff would leave the compositor's card0 unclassified — which is
+  // exactly "Skipping KMS incapable drm device node at /dev/dri/card0".
   const char* group = getenv("RDSOCKETGROUP");
   unsigned long long dev = 0, ino = 0;
-  int has_identity = !drm_fd_identity(fd, &dev, &ino);
+  int has_identity = 0;
+  if (group && *group) {
+    struct stat st;
+    if (fstat(fd, &st) == 0) {
+      dev = (unsigned long long)st.st_dev;
+      ino = (unsigned long long)st.st_ino;
+      has_identity = 1;
+    }
+  }
+  g_fds[g_nfd++] = (typeof(*g_fds)){fd, minor};
   if (group && *group && has_identity) {
     char name[PATH_MAX];
     if (snprintf(name, sizeof name, "%s/drm-fd-%llx-%llx", group, dev, ino) < (int)sizeof name) {
@@ -1329,7 +1343,17 @@ void drm_register_received_fd(int fd) {
   ssize_t n = read(meta, value, sizeof value - 1);
   close(meta);
   if (n <= 0) return;
-  if (!strcmp(value, "0\n")) drm_register_fd_path(fd, "/dev/dri/card0");
+  if (!strcmp(value, "0\n")) {
+    drm_register_fd_path(fd, "/dev/dri/card0");
+    // A logind-handoff compositor receives card0 via SCM_RIGHTS and never calls
+    // SET_MASTER itself (logind owns the session DRM master). Register the handed
+    // device with PID 1's frame bridge so its later present_device frames pass the
+    // master's verification instead of being rejected EACCES.
+    pid_t owner = 0;
+    session_gpu_epoch epoch;
+    if (gpu_session_child(&owner, &epoch) > 0)
+      (void)session_gpu_child_auth_device(owner, epoch, fd);
+  }
   else if (!strcmp(value, "128\n")) drm_register_fd_path(fd, "/dev/dri/renderD128");
 }
 
