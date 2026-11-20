@@ -2095,6 +2095,25 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     if (!strcmp(guest_path, "/run/udev") || !strcmp(guest_path, "/run/utmp") ||
         !strcmp(guest_path, "/var/run/utmp"))
       return inotify_watch_add_noop((int)a0, guest_path, (unsigned)a2);
+    // plasmalogin opens /run/udev then watches it through /proc/self/fd/N; resolve that fd back
+    // to its real target so a synthetic dir still takes the no-op path. The literal
+    // /proc/self/fd/N has no host vnode, so a kqueue watch there fails EBADF and plasmalogin
+    // loses its udev monitor.
+    if (strncmp(guest_path, "/proc/self/fd/", 14) == 0) {
+      char* end = NULL;
+      long n = strtol(guest_path + 14, &end, 10);
+      if (n >= 0 && n <= INT_MAX && end && !*end) {
+        char fdpath[PATH_MAX];
+        if (fcntl((int)n, F_GETPATH, fdpath) == 0) {
+          size_t fl = strlen(fdpath);
+          const char* tail = NULL;
+          if (fl >= 9 && strcmp(fdpath + fl - 9, "/run/udev") == 0) tail = "/run/udev";
+          else if (fl >= 9 && strcmp(fdpath + fl - 9, "/run/utmp") == 0) tail = "/run/utmp";
+          if (tail)
+            return inotify_watch_add_noop((int)a0, tail, (unsigned)a2);
+        }
+      }
+    }
     char gabs[PATH_MAX];
     e = syscalls_resolve(LX_AT_FDCWD, guest_path,
                          ((unsigned)a2 & 0x02000000u) != 0,     // IN_DONT_FOLLOW
