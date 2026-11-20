@@ -2264,6 +2264,18 @@ static char** build_guest_env(void) {
              strncmp(*e, "RDMETAL_TRACE_SHADER=", 21)) ||
             !strncmp(*e, "X11SRV_", 7) || !strncmp(*e, "WLSRV_", 6))
           continue;                            // shim controls, not the guest's environment
+        // LISTEN_PID names the process that should inherit the socket-activation
+        // fds (systemd sets it to the forked child's getpid()). A vfork'd child runs
+        // as a thread with the parent's pid, but its exec re-spawns a brand-new host
+        // process (guest_execve's posix_spawn path), so the pid the parent wrote no
+        // longer matches THIS process. Re-point it at our own guest pid so
+        // sd_listen_fds() accepts the inherited LISTEN_FDS/LISTEN_PID pair.
+        if (!strncmp(*e, "LISTEN_PID=", 11)) {
+          static char lp[64];
+          snprintf(lp, sizeof lp, "LISTEN_PID=%ld", syscalls_guest_pid());
+          out[k++] = lp;
+          continue;
+        }
         out[k++] = *e;
       }
       out[k] = 0;
