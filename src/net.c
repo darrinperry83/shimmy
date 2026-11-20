@@ -1320,8 +1320,18 @@ static int sender_ucred(int fd, const char* src_host_path, struct lin_ucred* out
             (int)getpid(), fd, src_host_path ? src_host_path : "(null)", (int)pid);
   if (pid <= 0) return 0;
   uid_t uid = 0; gid_t gid = 0;
-  if (getpeereid(fd, &uid, &gid) != 0) { uid = getuid(); gid = getgid(); }
-  if (getenv("RDUID0")) { uid = 0; gid = 0; }
+  if (g_uid0) {
+    uint32_t guest_uid, guest_gid;
+    // The host uid is shared by every Shimmy process. Recover the sender's real
+    // guest uid/gid from the credential registry (keyed by host pid), exactly as
+    // peer_ucred() does for connected sockets. Forcing uid=gid=0 here made
+    // dbus-broker attribute the reply to root and refuse to route it back.
+    if (guest_cred_registry_lookup((pid_t)pid, &guest_uid, &guest_gid) < 0) return 0;
+    uid = (uid_t)guest_uid;
+    gid = (gid_t)guest_gid;
+  } else if (getpeereid(fd, &uid, &gid) != 0) {
+    uid = getuid(); gid = getgid();
+  }
   out->pid = pid; out->uid = (uint32_t)uid; out->gid = (uint32_t)gid;
   return 1;
 }
