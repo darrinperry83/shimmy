@@ -3841,13 +3841,16 @@ static const char* cgroup_file_name(const char* g) {
   return 0;
 }
 
-// True if `g` names an existing cgroup directory (root or a registered child / descendant).
+// True if `g` names an existing cgroup directory: the root, or a child dir that was explicitly
+// registered by mkdir(). A path must be REGISTERED to exist — a descendant of a registered dir
+// does NOT imply existence (a real cgroupfs only has a child once it is mkdir'd). The previous
+// prefix check here ran the comparison the wrong way: it treated every descendant of a registered
+// dir as already present, so mkdir("/sys/fs/cgroup/system.slice/systemd-udevd.service") returned
+// EEXIST and the service cgroup was never recorded, which cascaded into bogus cgroup-ID ENOENTs.
 static int cgroup_is_dir(const char* g) {
   if (cgroup_is_root(g)) return 1;
-  for (int i = 0; i < g_cgroup_ndirs; i++) {
-    size_t dl = strlen(g_cgroup_dirs[i]);
-    if (strncmp(g, g_cgroup_dirs[i], dl) == 0 && (g[dl] == '/' || g[dl] == 0)) return 1;
-  }
+  for (int i = 0; i < g_cgroup_ndirs; i++)
+    if (strcmp(g, g_cgroup_dirs[i]) == 0) return 1;
   return 0;
 }
 
@@ -3985,11 +3988,74 @@ static void cgproc_fd_drop(int fd) {
     if (g_cgproc_fd[i].fd == fd) { g_cgproc_fd[i].fd = 0; g_cgproc_fd[i].dir[0] = 0; return; }
 }
 
+// Per-fd table for every cgroup VALUE file (memory.max, cpu.idle, ... — everything except the
+// special cgroup.procs / cgroup.threads pid-list files and the write-only cgroup.kill). The write
+// path uses it to remember which control file a written value belongs to, so a later read reflects
+// the write exactly as a real cgroupfs would.
+#define CGFILEFD_MAX 64
+static struct { int fd; char path[GPATH_MAX]; } g_cgfile_fd[CGFILEFD_MAX];
+
+static void cgfile_fd_register(int fd, const char* path) {
+  for (int i = 0; i < CGFILEFD_MAX; i++)
+    if (g_cgfile_fd[i].fd == fd && fd > 0) { snprintf(g_cgfile_fd[i].path, GPATH_MAX, "%s", path); return; }
+  for (int i = 0; i < CGFILEFD_MAX; i++)
+    if (g_cgfile_fd[i].fd <= 0) { g_cgfile_fd[i].fd = fd; snprintf(g_cgfile_fd[i].path, GPATH_MAX, "%s", path); return; }
+}
+
+static const char* cgfile_fd_path(int fd, char* out, size_t cap) {
+  for (int i = 0; i < CGFILEFD_MAX; i++)
+    if (g_cgfile_fd[i].fd == fd && fd > 0) { snprintf(out, cap, "%s", g_cgfile_fd[i].path); return out; }
+  return 0;
+}
+
+static void cgfile_fd_drop(int fd) {
+  for (int i = 0; i < CGFILEFD_MAX; i++)
+    if (g_cgfile_fd[i].fd == fd) { g_cgfile_fd[i].fd = 0; g_cgfile_fd[i].path[0] = 0; return; }
+}
+
+// Written-value store keyed by full cgroup control-file path. A write records the exact bytes here;
+// cgroup_file_content() consults it before falling back to the static synthesized default.
+#define CGVAL_MAX 128
+static struct { char path[GPATH_MAX]; char val[512]; int len; } g_cg_vals[CGVAL_MAX];
+static int g_cg_nvals;
+
+static char* cgroup_val_get(const char* g, char* buf, size_t cap) {
+  for (int i = 0; i < g_cg_nvals; i++)
+    if (strcmp(g_cg_vals[i].path, g) == 0) {
+      if ((size_t)g_cg_vals[i].len + 1 > cap) return 0;
+      memcpy(buf, g_cg_vals[i].val, (size_t)g_cg_vals[i].len);
+      buf[g_cg_vals[i].len] = 0;
+      return buf;
+    }
+  return 0;
+}
+
+static void cgroup_val_set(const char* g, const char* val, int len) {
+  if (!g || !val || len < 0 || len > 511) return;
+  for (int i = 0; i < g_cg_nvals; i++)
+    if (strcmp(g_cg_vals[i].path, g) == 0) {
+      memcpy(g_cg_vals[i].val, val, (size_t)len);
+      g_cg_vals[i].val[len] = 0;
+      g_cg_vals[i].len = len;
+      return;
+    }
+  if (g_cg_nvals >= CGVAL_MAX) return;
+  snprintf(g_cg_vals[g_cg_nvals].path, GPATH_MAX, "%s", g);
+  memcpy(g_cg_vals[g_cg_nvals].val, val, (size_t)len);
+  g_cg_vals[g_cg_nvals].val[len] = 0;
+  g_cg_vals[g_cg_nvals].len = len;
+  g_cg_nvals++;
+}
+
 // content of a cgroup leaf file, or NULL. Written into the caller's `buf` (a static is NOT used
 // because the value is handed straight to mem_fd and must survive across cgroup_open calls).
 const char* cgroup_file_content(const char* g, char* buf, size_t cap) {
   const char* base = cgroup_file_name(g);
   if (!base) return 0;
+  // A previously-written value wins over the static default, so reads reflect writes like a real
+  // cgroupfs. cgroup.procs / cgroup.threads / cgroup.kill never enter the store (see cgroup_open),
+  // so their pid-list / empty-read semantics are unchanged.
+  if (cgroup_val_get(g, buf, cap)) return buf;
   if (strcmp(base, "cgroup.controllers") == 0)
     snprintf(buf, cap, "cpuset cpu io memory hugetlb pids\n");
   else if (strcmp(base, "cgroup.subtree_control") == 0)
@@ -4127,6 +4193,8 @@ static int cgroup_open(const char* g, long* out) {
         char dir[GPATH_MAX];
         const char* d = cgroup_parent(g, dir, sizeof dir);
         if (d) cgproc_fd_register(fd, d);
+      } else if (base && strcmp(base, "cgroup.kill") != 0) {
+        cgfile_fd_register(fd, g);                    // value file: record path for write-back
       }
     }
     return 1;
@@ -5317,6 +5385,7 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     syncur_drop((int)a0);
     cgroup_dir_drop((int)a0);
     cgproc_fd_drop((int)a0);
+    cgfile_fd_drop((int)a0);
     signalfd_shim_closed((int)a0);
     timerfd_shim_closed((int)a0);
     pidfd_shim_closed((int)a0);
@@ -5459,6 +5528,9 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     // cgroup.procs / cgroup.threads writes are no-op attachments: accept the write and record the
     // process -> cgroup mapping for /proc/<pid>/cgroup read-back (see cgroup_record_write).
     if (r > 0) {
+      char cgfile[GPATH_MAX];
+      if (cgfile_fd_path((int)a0, cgfile, sizeof cgfile))
+        cgroup_val_set(cgfile, staged, (int)r);       // reflect the write on a later read
       char cgdir[GPATH_MAX];
       const char* d = cgproc_fd_dir((int)a0, cgdir, sizeof cgdir);
       if (d) cgroup_record_write(d, staged, (size_t)a2);
@@ -5590,6 +5662,11 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
       gathered += part;
     }
     long r = herr((long)writev((int)a0, host, (int)nhost));
+    if (r > 0) {
+      char cgfile[GPATH_MAX];
+      if (cgfile_fd_path((int)a0, cgfile, sizeof cgfile))
+        cgroup_val_set(cgfile, staged, (int)r);       // reflect the write on a later read
+    }
     if (getenv("RDWRDUMP") && (int)a0 < 32 && r > 0) {
       const char* dump_path = getenv("RDWRDUMPFILE");
       FILE* df = fopen(dump_path ? dump_path : "/tmp/rd_wrdump.txt", "a");
