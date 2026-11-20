@@ -4709,6 +4709,19 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
       return r;
     if ((r = resolve_f((int)a2, new_path, RSV_NOFOLLOW, host2, sizeof host2, g_new, sizeof g_new)) < 0)
       return r;
+    // A bound AF_UNIX socket lives in the per-boot socket group, not the rootfs.
+    // link()ing its guest path must see the real socket inode (Linux refuses with
+    // EPERM, never ENOENT) and keep the destination in the same namespace so the
+    // host link() does not turn a same-directory link into a spurious EXDEV/ENOENT.
+    if (old_path[0] == '/') {
+      char old_sock[PATH_MAX];
+      if (net_unix_socket_host_path(old_path, old_sock, sizeof old_sock)) {
+        snprintf(host, sizeof host, "%s", old_sock);
+        char new_sock[PATH_MAX];
+        if (net_unix_socket_group_path(new_path, new_sock, sizeof new_sock))
+          snprintf(host2, sizeof host2, "%s", new_sock);
+      }
+    }
     // Landlock: REFER governs creating a new name; both the source and the
     // destination directories must allow it.
     if ((r = landlock_check(g_old, LL_FS_REFER)) < 0) return r;
@@ -4733,6 +4746,19 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
       return r;
     if ((r = resolve_f((int)a2, new_path, RSV_NOFOLLOW, host2, sizeof host2, g2, sizeof g2)) < 0)
       return r;
+    // A bound AF_UNIX socket lives in the per-boot socket group, not the rootfs.
+    // Renaming its guest path must move the real socket inode and keep the
+    // destination in the same namespace; otherwise the rootfs lookup returns a
+    // spurious ENOENT for the source (or its missing group parent directory).
+    if (old_path[0] == '/') {
+      char old_sock[PATH_MAX];
+      if (net_unix_socket_host_path(old_path, old_sock, sizeof old_sock)) {
+        snprintf(host, sizeof host, "%s", old_sock);
+        char new_sock[PATH_MAX];
+        if (net_unix_socket_group_path(new_path, new_sock, sizeof new_sock))
+          snprintf(host2, sizeof host2, "%s", new_sock);
+      }
+    }
     // Landlock: rename removes the old name and creates the new one. Same-
     // directory renames need no REFER (Linux's current_check_refer_path).
     {
@@ -4835,6 +4861,13 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     if (i == sizeof guest_path) return -LX_ENAMETOOLONG;
     if ((r = resolve((int)a0, guest_path, host, sizeof host, gabs, sizeof gabs)) < 0)
       return r;
+    // A bound AF_UNIX socket is relocated into the per-boot socket group; access()
+    // on its guest path must check the real socket inode, not ENOENT in the rootfs.
+    if (guest_path[0] == '/') {
+      char sock_host[PATH_MAX];
+      if (net_unix_socket_host_path(guest_path, sock_host, sizeof sock_host))
+        snprintf(host, sizeof host, "%s", sock_host);
+    }
     if (strcmp(gabs, "/proc/self/exe") == 0 || strcmp(gabs, "/proc/self/maps") == 0 ||
         strcmp(gabs, "/proc/self/cmdline") == 0 || strcmp(gabs, "/proc/self/stat") == 0 ||
         strcmp(gabs, "/proc/self/status") == 0 || strcmp(gabs, "/proc/self/environ") == 0 ||
@@ -4946,6 +4979,16 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     if ((r = resolve_f((int)a0, guest_path, ((int)a2 & LO_NOFOLLOW) ? RSV_NOFOLLOW : 0,
                        host, sizeof host, gabs, sizeof gabs)) < 0)
       return r;
+    // A bound AF_UNIX socket lives in the per-boot socket group, not the rootfs.
+    // O_PATH opens are handled by net_open_bound_socket_opath() below (via gabs);
+    // any other open of the guest socket path must also reach the real socket
+    // inode so it returns the same "cannot open a socket" error Linux does,
+    // rather than a spurious ENOENT from the empty rootfs location.
+    if (guest_path[0] == '/') {
+      char sock_host[PATH_MAX];
+      if (net_unix_socket_host_path(guest_path, sock_host, sizeof sock_host))
+        snprintf(host, sizeof host, "%s", sock_host);
+    }
     // Landlock: map the access mode to READ_FILE/READ_DIR/WRITE_FILE/TRUNCATE
     // and require the resolved guest path to be granted it. O_PATH opens name
     // an inode without accessing it, so they need no right here.
@@ -5560,6 +5603,15 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     if ((r = resolve_f((int)a0, guest_path, RSV_NOFOLLOW, host, sizeof host,
                        gabs, sizeof gabs)) < 0)
       return r;
+    // A bound AF_UNIX socket is relocated into the per-boot socket group, not the
+    // rootfs. readlink() on a socket is EINVAL (it is not a symlink), never ENOENT;
+    // resolving the guest path against the rootfs would return ENOENT and abort a
+    // greeter that readlink()s its just-bound socket path.
+    if (guest_path[0] == '/') {
+      char sock_host[PATH_MAX];
+      if (net_unix_socket_host_path(guest_path, sock_host, sizeof sock_host))
+        snprintf(host, sizeof host, "%s", sock_host);
+    }
     // /dev/dri/card0 and /dev/dri/renderD128 are synthetic CHAR nodes, not symlinks.
     // readlink() on a non-symlink is EINVAL, and glibc's realpath() treats EINVAL as
     // "ordinary component, keep it" — but only EINVAL. ENOENT makes realpath() fail and

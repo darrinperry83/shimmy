@@ -929,9 +929,22 @@ static long do_statx(int lx_dirfd, const char* gpath, int lxflags, unsigned mask
     else r = net_opath_socket_stat(fd, &st) ? 0 : fstat(fd, &st);
   } else {
     char host[PATH_MAX]; int hdirfd;
-    long e = resolve_at_nf(lx_dirfd, gpath, host, sizeof host, &hdirfd,
-                           (lxflags & LX_AT_SYMLINK_NOFOLLOW) != 0);
-    if (e < 0) return e;
+    // A bound AF_UNIX socket is relocated into the per-boot socket group; statx on
+    // its guest path must see the real socket inode, not ENOENT in the rootfs.
+    int mapped_socket = 0;
+    if (gpath && gpath[0] == '/') {
+      char sock_host[PATH_MAX];
+      if (net_unix_socket_host_path(gpath, sock_host, sizeof sock_host)) {
+        snprintf(host, sizeof host, "%s", sock_host);
+        hdirfd = AT_FDCWD;
+        mapped_socket = 1;
+      }
+    }
+    if (!mapped_socket) {
+      long e = resolve_at_nf(lx_dirfd, gpath, host, sizeof host, &hdirfd,
+                             (lxflags & LX_AT_SYMLINK_NOFOLLOW) != 0);
+      if (e < 0) return e;
+    }
     r = fstatat(hdirfd, host, &st, host_at_flags(lxflags));
   }
   if (r != 0) return eret();
@@ -2100,6 +2113,14 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     e = syscalls_resolve(LX_AT_FDCWD, guest_path, 0, host, sizeof host,
                          gabs, sizeof gabs);
     if (e < 0) return e;
+    // A bound AF_UNIX socket is relocated into the per-boot socket group; truncate()
+    // on its guest path must reach the real socket inode (Linux returns EINVAL for a
+    // non-regular file) rather than a spurious ENOENT from the empty rootfs location.
+    if (guest_path[0] == '/') {
+      char sock_host[PATH_MAX];
+      if (net_unix_socket_host_path(guest_path, sock_host, sizeof sock_host))
+        snprintf(host, sizeof host, "%s", sock_host);
+    }
     // Landlock: resizing a file needs TRUNCATE on its path.
     if ((e = landlock_check(gabs, LL_FS_TRUNCATE)) < 0) return e;
     return ok0(truncate(host, (off_t)a1));
@@ -2556,6 +2577,13 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     e = resolve_at_nf((int)a0, guest_path, host, sizeof host, &hdirfd,
                       (flags & LX_AT_SYMLINK_NOFOLLOW) != 0);
     if (e < 0) return e;
+    // A bound AF_UNIX socket is relocated into the per-boot socket group; setting
+    // times on its guest path must reach the real socket inode, not ENOENT.
+    if (guest_path[0] == '/') {
+      char sock_host[PATH_MAX];
+      if (net_unix_socket_host_path(guest_path, sock_host, sizeof sock_host))
+        snprintf(host, sizeof host, "%s", sock_host);
+    }
     return ok0(utimensat(hdirfd, host, ts, host_at_flags((int)flags)));
   }
   case 89: return -LX_EPERM;                                   // acct
@@ -3879,6 +3907,19 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     e  = resolve_at_nf_g((int)a2, new_guest, host2, sizeof host2, &hdirfd2, 1,
                          g_new, sizeof g_new);
     if (e < 0) return e;
+    // A bound AF_UNIX socket lives in the per-boot socket group, not the rootfs.
+    // Renaming its guest path must move the real socket inode and keep the
+    // destination in the same namespace; otherwise the rootfs lookup returns a
+    // spurious ENOENT for the source (or its missing group parent directory).
+    if (old_guest[0] == '/') {
+      char old_sock[PATH_MAX];
+      if (net_unix_socket_host_path(old_guest, old_sock, sizeof old_sock)) {
+        snprintf(host, sizeof host, "%s", old_sock);
+        char new_sock[PATH_MAX];
+        if (net_unix_socket_group_path(new_guest, new_sock, sizeof new_sock))
+          snprintf(host2, sizeof host2, "%s", new_sock);
+      }
+    }
     // Landlock: same shape as renameat — same-directory renames need no REFER.
     {
       struct stat st_old, st_new;
@@ -4452,6 +4493,13 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     e = resolve_at_nf_g((int)a0, guest_path, host, sizeof host, &hdirfd,
                         ((int)a3 & LX_AT_SYMLINK_NOFOLLOW) != 0, gabs, sizeof gabs);
     if (e < 0) return e;
+    // A bound AF_UNIX socket is relocated into the per-boot socket group; access()
+    // on its guest path must check the real socket inode, not ENOENT in the rootfs.
+    if (guest_path[0] == '/') {
+      char sock_host[PATH_MAX];
+      if (net_unix_socket_host_path(guest_path, sock_host, sizeof sock_host))
+        snprintf(host, sizeof host, "%s", sock_host);
+    }
     // Synthetic /dev device nodes (VT consoles, DRM, evdev, snd, camera) have no host rootfs
     // file; answer access() from the in-memory table so ConditionPathExists=/dev/tty0 succeeds.
     {
