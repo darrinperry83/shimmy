@@ -2146,6 +2146,19 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
       if (e < 0) return e;
       guest_path = guest_path_buf;
     }
+    // A bound AF_UNIX socket lives in the relocated namespace, not the rootfs;
+    // chown on the guest path must hit the real socket file (same as fchmodat),
+    // or plasmalogin's greeter socket server aborts with "Failed to change owner".
+    char sock_host[PATH_MAX];
+    if (guest_path && guest_path[0] == '/' &&
+        net_unix_socket_host_path(guest_path, sock_host, sizeof sock_host)) {
+      if (g_uid0) {
+        struct stat st;
+        if (fstatat(AT_FDCWD, sock_host, &st, 0) < 0) return eret();
+        return ok0(guest_ownership_set(&st, (uint32_t)a2, (uint32_t)a3));
+      }
+      return ok0(fchownat(AT_FDCWD, sock_host, (uid_t)a2, (gid_t)a3, 0));
+    }
     if (g_uid0) {
       struct stat st;
       if ((int)a4 & ~(LX_AT_EMPTY_PATH | LX_AT_SYMLINK_NOFOLLOW)) return -LX_EINVAL;
