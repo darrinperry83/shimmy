@@ -40,6 +40,8 @@
 #include <pthread.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>
+#include <sys/sockio.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/event.h>
@@ -2037,7 +2039,8 @@ static long sys_epoll_wait_ts(int epfd, struct lin_epoll_event* uev, int maxeven
           if (socket_listen_pending(rfd)) has_data = 1;
           else if (!socket_is_listening(rfd)) {
             char tmp;
-            has_data = recv(rfd, &tmp, 1, MSG_PEEK | MSG_DONTWAIT) > 0;
+            if (recv(rfd, &tmp, 1, MSG_PEEK | MSG_DONTWAIT) > 0) has_data = 1;
+            else { int avail = 0; if (ioctl(rfd, FIONREAD, &avail) == 0 && avail > 0) has_data = 1; }
           }
         }
         if (has_data) {
@@ -2110,11 +2113,9 @@ epoll_retry:
           if (socket_listen_pending(rfd)) {
             has_data = 1;
           } else if (!socket_is_listening(rfd)) {
-            // Not a listener: a bound datagram socket that received from a
-            // different process is the peekable case. recv() on a listener
-            // returns ENOTCONN and never touches the accept queue anyway.
             char tmp;
-            has_data = recv(rfd, &tmp, 1, MSG_PEEK | MSG_DONTWAIT) > 0;
+            if (recv(rfd, &tmp, 1, MSG_PEEK | MSG_DONTWAIT) > 0) has_data = 1;
+            else { int avail = 0; if (ioctl(rfd, FIONREAD, &avail) == 0 && avail > 0) has_data = 1; }
           }
         } else if (pidfd_shim_pid(rfd) > 0) {
           // pidfd: a kqueue watching a child pid; "readable" once the child exits.
