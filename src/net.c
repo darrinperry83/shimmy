@@ -3372,9 +3372,15 @@ static long sys_recvmsg(int fd, struct lin_msghdr* lm, int lflags) {
   }
   struct msghdr hm; memset(&hm, 0, sizeof hm);
   struct sockaddr_storage hs; memset(&hs, 0, sizeof hs);
-  // Always capture the sender address — even when the guest's msg_name is NULL — so the SCM_CREDENTIALS
-  // synthesis below can recover the sender pid from ".rdx-sender/<pid>.<seq>" (see sender_ucred).
-  hm.msg_name = &hs; hm.msg_namelen = sizeof hs;
+  // Only capture the sender address for DGRAM sockets, where the SCM_CREDENTIALS
+  // synthesis below recovers the sender pid from ".rdx-sender/<pid>.<seq>" (see
+  // sender_ucred). On a connected STREAM socket Darwin treats a non-NULL msg_name
+  // as a peer-address request and the shim then rewrites it to a bogus empty
+  // result, corrupting the stream receive (dbus-broker replies never arrived).
+  int stype = 0; socklen_t stype_len = sizeof stype;
+  if (getsockopt(fd, SOL_SOCKET, SO_TYPE, &stype, &stype_len) == 0 && stype == SOCK_DGRAM) {
+    hm.msg_name = &hs; hm.msg_namelen = sizeof hs;
+  }
   hm.msg_iov = (struct iovec*)lm->msg_iov;
   if (lm->msg_iovlen > INT_MAX) return -L_EINVAL;
   hm.msg_iovlen = (int)lm->msg_iovlen;
