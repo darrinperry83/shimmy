@@ -5,6 +5,7 @@
 // this stage can be merged as a usable feature.
 #include "posix_timer_shim.h"
 #include "gmem.h"
+#include "syscalls.h"            // syscalls_guest_monotonic_ns — guest monotonic epoch
 #include <stdint.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -147,6 +148,25 @@ static clockid_t timer_host_clock(const struct lx_posix_timer* timer) {
          CLOCK_REALTIME : CLOCK_UPTIME_RAW;
 }
 
+// CLOCK_MONOTONIC timers express their deadlines in the guest's clock_gettime(CLOCK_MONOTONIC)
+// time base, which is the host CLOCK_UPTIME_RAW rebased to guest boot. Read "now" in that same
+// base so absolute monotonic deadlines compare against the same epoch the guest sees.
+static void monotonic_now_ts(struct timespec* out) {
+  uint64_t ns = syscalls_guest_monotonic_ns();
+  out->tv_sec  = (time_t)(ns / 1000000000ULL);
+  out->tv_nsec = (long)(ns % 1000000000ULL);
+}
+
+// Fill *out with the time base a timer's stored deadline is expressed in. Returns 0, or -1 with
+// errno set if the host clock read fails.
+static int timer_now(const struct lx_posix_timer* timer, struct timespec* out) {
+  if (timer->clockid == LX_CLOCK_MONOTONIC) {
+    monotonic_now_ts(out);
+    return 0;
+  }
+  return clock_gettime(timer_host_clock(timer), out);
+}
+
 // This is also the readback operation required by timer_gettime. SIGEV_NONE
 // timers are never placed on a host timer queue; Linux computes their expiry
 // when queried, forwarding an expired periodic deadline to the next interval.
@@ -193,7 +213,7 @@ long posix_timer_shim_settime(uint64_t timer_id, uint64_t flags,
   struct timespec now_ts;
   // Read the old setting using its existing timebase before choosing the
   // new one. A realtime timer can switch between relative and absolute mode.
-  if (clock_gettime(timer_host_clock(timer), &now_ts) != 0) {
+  if (timer_now(timer, &now_ts) != 0) {
     pthread_mutex_unlock(&g_timer_mu);
     return -LX_EINVAL;
   }
@@ -204,12 +224,18 @@ long posix_timer_shim_settime(uint64_t timer_id, uint64_t flags,
   int relative_realtime = value && timer->clockid == LX_CLOCK_REALTIME &&
                           !(flags & LX_TIMER_ABSTIME);
   if (value && !(flags & LX_TIMER_ABSTIME)) {
-    // This is also the epoch Shimmy exposes as guest CLOCK_MONOTONIC.
-    clockid_t effective = relative_realtime ? CLOCK_UPTIME_RAW :
-                          timer_host_clock(timer);
-    if (clock_gettime(effective, &now_ts) != 0) {
-      pthread_mutex_unlock(&g_timer_mu);
-      return -LX_EINVAL;
+    // Relative CLOCK_MONOTONIC timers are rebased to the guest monotonic epoch; CLOCK_REALTIME
+    // relative timers stay on an internal monotonic base so wall-clock adjustments cannot move
+    // an already-armed relative deadline.
+    if (timer->clockid == LX_CLOCK_MONOTONIC) {
+      monotonic_now_ts(&now_ts);
+    } else {
+      clockid_t effective = relative_realtime ? CLOCK_UPTIME_RAW :
+                            timer_host_clock(timer);
+      if (clock_gettime(effective, &now_ts) != 0) {
+        pthread_mutex_unlock(&g_timer_mu);
+        return -LX_EINVAL;
+      }
     }
     value += to_ns(now_ts.tv_sec, now_ts.tv_nsec);
     if (value > max_ns()) value = max_ns();
@@ -239,7 +265,7 @@ long posix_timer_shim_gettime(uint64_t timer_id, uint64_t setting_addr) {
     return -LX_EINVAL;
   }
   struct timespec now_ts;
-  if (clock_gettime(timer_host_clock(timer), &now_ts) != 0) {
+  if (timer_now(timer, &now_ts) != 0) {
     pthread_mutex_unlock(&g_timer_mu);
     return -LX_EINVAL;
   }

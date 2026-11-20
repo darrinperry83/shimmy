@@ -48,6 +48,7 @@
 
 #include "vdso.h"
 #include "gmem.h"
+#include "syscalls.h"      // syscalls_guest_monotonic_ns / syscalls_guest_boottime_ns
 
 // ---------------------------------------------------------------------------------------------
 // Minimal ELF64 types (macOS has no <elf.h>).
@@ -153,14 +154,16 @@ static long vdso_ns_for_clock(long clk, uint64_t* out) {
     case LX_CLOCK_TAI:
       ns = clock_gettime_nsec_np(CLOCK_REALTIME);                 break;
     // Linux CLOCK_MONOTONIC does NOT advance across suspend -> macOS CLOCK_UPTIME_RAW.
+    // Both are rebased to guest boot via the shared epoch (see syscalls.c). A freshly-booted
+    // guest legitimately reads ~0 here, so 0 must not be mistaken for a clock error.
     case LX_CLOCK_MONOTONIC:
     case LX_CLOCK_MONOTONIC_RAW:
     case LX_CLOCK_MONOTONIC_COARSE:
-      ns = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);               break;
+      ns = syscalls_guest_monotonic_ns(); allow_zero = 1;          break;
     // Linux CLOCK_BOOTTIME DOES advance across suspend -> macOS CLOCK_MONOTONIC_RAW.
     case LX_CLOCK_BOOTTIME:
     case LX_CLOCK_BOOTTIME_ALARM:
-      ns = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW);            break;
+      ns = syscalls_guest_boottime_ns(); allow_zero = 1;           break;
     case LX_CLOCK_PROCESS_CPUTIME_ID:
       ns = clock_gettime_nsec_np(CLOCK_PROCESS_CPUTIME_ID); allow_zero = 1; break;
     case LX_CLOCK_THREAD_CPUTIME_ID:
