@@ -210,6 +210,7 @@ __attribute__((weak)) int rdgpu_handoff_is_carrier_fd(int fd) { (void)fd; return
 #define DRM_PROP_CRTC_W   12
 #define DRM_PROP_CRTC_H   13
 #define DRM_PROP_DPMS     14   // connector "DPMS" enum
+#define DRM_PROP_EDID     15   // connector "EDID" blob (synthesized 128-byte base block)
 
 // struct drm_version, 64-bit layout (offsets verified against drm.h):
 //   0 version_major(i32) 4 version_minor(i32) 8 version_patchlevel(i32) 12 pad
@@ -1654,6 +1655,139 @@ static void blob_destroy(uint32_t id) {
   if (s) memset(s, 0, sizeof *s);
 }
 
+// ---- Synthesized EDID -----------------------------------------------------------
+// kwin/aquamarine refuses to present a connector it cannot identify: it reads the
+// connector's "EDID" blob property and logs "Could not find edid for connector" when
+// that blob is missing, stopping short of the KMS commit. Build a valid 128-byte
+// EDID 1.4 base block whose single detailed timing descriptor matches the mode that
+// MODE_GETCONNECTOR advertises, so the compositor's native-mode probe agrees with the
+// mode list. One blob per connector (the two panels differ in native size).
+static uint32_t g_edid_blob[2];   // 0 = not yet registered
+
+// Pack four 10-bit chromaticity coordinates into the 10-byte EDID layout (bytes 25-34).
+// Layout (EDID 1.4 §3.7): bytes 25-26 hold the 2 LSBs of all eight values (Rx,Ry,Gx,Gy in
+// byte 25; Bx,By,Wx,Wy in byte 26, 2 bits each from MSB), then bytes 27-34 hold each value's
+// 8 MSBs in order.
+static void edid_chromaticity(unsigned char* d,
+                              uint32_t rx, uint32_t ry, uint32_t gx, uint32_t gy,
+                              uint32_t bx, uint32_t by, uint32_t wx, uint32_t wy) {
+  d[0] = (unsigned char)(((rx & 3) << 6) | ((ry & 3) << 4) | ((gx & 3) << 2) | (gy & 3));
+  d[1] = (unsigned char)(((bx & 3) << 6) | ((by & 3) << 4) | ((wx & 3) << 2) | (wy & 3));
+  d[2] = (unsigned char)(rx >> 2);
+  d[3] = (unsigned char)(ry >> 2);
+  d[4] = (unsigned char)(gx >> 2);
+  d[5] = (unsigned char)(gy >> 2);
+  d[6] = (unsigned char)(bx >> 2);
+  d[7] = (unsigned char)(by >> 2);
+  d[8] = (unsigned char)(wx >> 2);
+  d[9] = (unsigned char)(wy >> 2);
+}
+
+// Fill a 13-byte monitor descriptor (name, range, or dummy) at `desc`.
+static void edid_monitor_descriptor(unsigned char* desc, unsigned char type,
+                                    const unsigned char* body) {
+  memset(desc, 0, 18);
+  desc[0] = desc[1] = desc[2] = 0x00;
+  desc[3] = type;
+  desc[4] = 0x00;
+  if (body) memcpy(desc + 5, body, 13);
+}
+
+static void edid_build(const struct drm_mode_modeinfo* m, unsigned char* e) {
+  memset(e, 0, 128);
+  static const unsigned char header[8] = {0x00,0xff,0xff,0xff,0xff,0xff,0xff,0x00};
+  memcpy(e, header, 8);
+
+  // Manufacturer "RDM" (EISA id: R=18 D=4 M=13 -> 0x488D) + product 0x0001.
+  e[8]  = 0x48; e[9]  = 0x8D;
+  e[10] = 0x01; e[11] = 0x00;
+  e[12] = 0x01; e[13] = 0x02; e[14] = 0x03; e[15] = 0x04;   // serial
+  e[16] = 1;                                                    // week of manufacture
+  e[17] = 34;                                                   // year 2024 (1990+34)
+  e[18] = 1; e[19] = 4;                                         // EDID 1.4
+  e[20] = 0xA5;                                                 // digital input
+  e[21] = 60;                                                   // max image size 60 cm
+  e[22] = 34;                                                   // max image size 34 cm
+  e[23] = 0x78;                                                 // gamma 2.2
+  e[24] = 0x0A;                                                 // preferred timing mode + sRGB
+
+  // sRGB primaries / white point.
+  edid_chromaticity(e + 25, 655, 338, 307, 614, 154, 61, 321, 337);
+
+  // No established timings; standard timing table left unused (0x01 0x01).
+  for (int i = 0; i < 8; i++) { e[38 + 2*i] = 0x01; e[38 + 2*i + 1] = 0x01; }
+
+  // Detailed timing descriptor mirrors MODE_GETCONNECTOR's advertised mode.
+  unsigned char* d = e + 54;
+  uint32_t hblank   = (uint32_t)m->htotal - m->hdisplay;
+  uint32_t hsync_off = (uint32_t)m->hsync_start - m->hdisplay;
+  uint32_t hsync_w  = (uint32_t)m->hsync_end - m->hsync_start;
+  uint32_t vblank   = (uint32_t)m->vtotal - m->vdisplay;
+  uint32_t vsync_off = (uint32_t)m->vsync_start - m->vdisplay;
+  uint32_t vsync_w  = (uint32_t)m->vsync_end - m->vsync_start;
+  uint32_t pixclk   = (m->clock + 5) / 10;                       // 10 kHz units
+  if (pixclk > 65535) pixclk = 65535;
+  d[0] = (unsigned char)(pixclk & 0xFF);
+  d[1] = (unsigned char)((pixclk >> 8) & 0xFF);
+  d[2] = (unsigned char)(m->hdisplay & 0xFF);
+  d[3] = (unsigned char)(hblank & 0xFF);
+  d[4] = (unsigned char)((((m->hdisplay >> 8) & 0x0F) << 4) | ((hblank >> 8) & 0x0F));
+  d[5] = (unsigned char)(m->vdisplay & 0xFF);
+  d[6] = (unsigned char)(vblank & 0xFF);
+  d[7] = (unsigned char)((((m->vdisplay >> 8) & 0x0F) << 4) | ((vblank >> 8) & 0x0F));
+  d[8] = (unsigned char)(hsync_off & 0xFF);
+  d[9] = (unsigned char)(hsync_w & 0xFF);
+  d[10] = (unsigned char)(((vsync_off & 0x0F) << 4) | (vsync_w & 0x0F));
+  d[11] = (unsigned char)((((hsync_off >> 8) & 0x03) << 6) |
+                          (((hsync_w >> 8) & 0x03) << 4) |
+                          (((vsync_off >> 8) & 0x03) << 2) |
+                          ((vsync_w >> 8) & 0x03));
+  d[12] = 0x58; d[13] = 0x54; d[14] = 0x21;                    // 600 x 340 mm
+  d[15] = 0x00; d[16] = 0x00;
+  d[17] = 0x18;                                                  // progressive, digital separate sync
+
+  // Monitor name descriptor "RDMETAL".
+  static const unsigned char name_body[13] =
+      {'R','D','M','E','T','A','L',0x0A,' ',' ',' ',' ',' '};
+  edid_monitor_descriptor(e + 72, 0xFC, name_body);
+
+  // Monitor range limits: bracket the advertised mode's 60 Hz refresh and its
+  // horizontal frequency, with the pixel-clock ceiling rounded up to 10 MHz units.
+  unsigned char range_body[13] = {0};
+  range_body[0] = 50; range_body[1] = 75;                       // min/max vertical Hz
+  uint32_t hfreq = (m->clock + m->htotal - 1) / m->htotal;      // horizontal kHz, ceil
+  uint32_t max_h = hfreq + 2;
+  if (max_h < 30) max_h = 30; else if (max_h > 255) max_h = 255;
+  range_body[2] = 30;                                           // min horizontal kHz
+  range_body[3] = (unsigned char)max_h;                         // max horizontal kHz
+  uint32_t maxclk = (pixclk + 999) / 1000;                      // 10 MHz units, ceil
+  if (maxclk < 1) maxclk = 1; else if (maxclk > 255) maxclk = 255;
+  range_body[4] = (unsigned char)maxclk;
+  range_body[5] = 0x00;                                         // no extended timing info
+  range_body[6] = 0x0A;
+  edid_monitor_descriptor(e + 90, 0xFD, range_body);
+
+  // Dummy descriptor pads the fourth slot.
+  edid_monitor_descriptor(e + 108, 0x10, NULL);
+
+  e[126] = 0x00;                                                 // no extension blocks
+  uint32_t sum = 0;
+  for (int i = 0; i < 127; i++) sum += e[i];
+  e[127] = (unsigned char)(0x100 - (sum & 0xFF));
+}
+
+static uint32_t edid_blob_id_for(uint32_t connector_id) {
+  uint32_t cid = (connector_id == 2) ? 2 : 1;
+  uint32_t idx = cid - 1;
+  if (g_edid_blob[idx]) return g_edid_blob[idx];
+  struct drm_mode_modeinfo mode;
+  if (fill_mode_for_connector(cid, &mode) != 0) return 0;
+  unsigned char edid[128];
+  edid_build(&mode, edid);
+  g_edid_blob[idx] = blob_create(edid, sizeof edid);
+  return g_edid_blob[idx];
+}
+
 // A self-connected datagram carrier gives each DRM open its own stable fd identity and event
 // queue. SCM_RIGHTS preserves both across logind's FD handoff. The private pathname is removed
 // after connect; only holders of the descriptor can send or receive its flip events.
@@ -1733,6 +1867,7 @@ static const struct prop_def kProps[] = {
   { DRM_PROP_CRTC_W,  "CRTC_W",  DRM_MODE_PROP_RANGE | DRM_MODE_PROP_ATOMIC, NULL, 0 },
   { DRM_PROP_CRTC_H,  "CRTC_H",  DRM_MODE_PROP_RANGE | DRM_MODE_PROP_ATOMIC, NULL, 0 },
   { DRM_PROP_DPMS,    "DPMS",    DRM_MODE_PROP_ENUM | DRM_MODE_PROP_ATOMIC, kDpmsEnums, 4 },
+  { DRM_PROP_EDID,    "EDID",    DRM_MODE_PROP_BLOB | DRM_MODE_PROP_IMMUTABLE, NULL, 0 },
 };
 #define NUM_PROPS (sizeof kProps / sizeof kProps[0])
 
@@ -1743,7 +1878,7 @@ static const struct prop_def* prop_find_by_id(uint32_t id) {
 
 // Per-object property attachment (which prop ids each object exposes, in order).
 static const uint32_t kCrtcProps[]    = { DRM_PROP_ACTIVE, DRM_PROP_MODE_ID };
-static const uint32_t kConnectorProps[] = { DRM_PROP_CRTC_ID, DRM_PROP_DPMS };
+static const uint32_t kConnectorProps[] = { DRM_PROP_CRTC_ID, DRM_PROP_DPMS, DRM_PROP_EDID };
 static const uint32_t kPlaneProps[]   = { DRM_PROP_TYPE, DRM_PROP_FB_ID, DRM_PROP_CRTC_ID,
                                           DRM_PROP_SRC_X, DRM_PROP_SRC_Y, DRM_PROP_SRC_W, DRM_PROP_SRC_H,
                                           DRM_PROP_CRTC_X, DRM_PROP_CRTC_Y, DRM_PROP_CRTC_W, DRM_PROP_CRTC_H };
@@ -1769,6 +1904,7 @@ static uint64_t prop_value(uint32_t obj_type, uint32_t obj_id, uint32_t prop_id)
     case DRM_PROP_CRTC_W:  return pl->crtc_w;
     case DRM_PROP_CRTC_H:  return pl->crtc_h;
     case DRM_PROP_DPMS:    return cn->dpms;
+    case DRM_PROP_EDID:    return edid_blob_id_for(obj_id);
     default:               return 0;
   }
 }
@@ -2279,6 +2415,7 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
     int is_builtin = (cid == 2);
     struct drm_mode_modeinfo mode;
     int connected = fill_mode_for_connector(cid, &mode) == 0;
+    uint32_t edid = edid_blob_id_for(cid);
     c->encoder_id = is_builtin ? 2 : 1;
     c->connector_type = is_builtin ? DRM_MODE_CONNECTOR_eDP : DRM_MODE_CONNECTOR_DisplayPort;
     c->connector_type_id = 1;
@@ -2300,9 +2437,9 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
         ((uint64_t*)(uintptr_t)c->prop_values_ptr)[i] =
           prop_value(DRM_MODE_OBJECT_CONNECTOR, cid, kConnectorProps[i]);
     if (tracing())
-      fprintf(stderr, "[drm] MODE_GETCONNECTOR connector_id=%u type=%s connection=%u modes=%u encoders=%u props=%u\n",
+      fprintf(stderr, "[drm] MODE_GETCONNECTOR connector_id=%u type=%s connection=%u modes=%u encoders=%u props=%u edid=%u\n",
               c->connector_id, is_builtin ? "eDP" : "DP", c->connection,
-              c->count_modes, c->count_encoders, c->count_props);
+              c->count_modes, c->count_encoders, c->count_props, edid);
     return 0;
   }
 
