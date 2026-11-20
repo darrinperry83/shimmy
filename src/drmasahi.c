@@ -546,7 +546,20 @@ static pthread_mutex_t g_magic_lock = PTHREAD_MUTEX_INITIALIZER;
 __attribute__((weak_import)) extern int shim_fd_reserve(int fd);
 __attribute__((weak_import)) extern void shim_fd_unreserve(int fd);
 
+int drm_minor_of_fd(int fd);  // defined below; forward-declared for drm_fd_identity
+
 static int drm_fd_identity(int fd, unsigned long long* dev, unsigned long long* ino) {
+  // The DRM node fd is a synthetic mem_fd; its fstat identity is a fresh temp
+  // file per open, so it is NOT stable across reopens. The stable identity is
+  // the DRM minor (0 = card0, 128 = renderD128). Magic/master matching must key
+  // on that, otherwise drmAuthMagic on a reopened card0 never matches the magic
+  // minted for the first open.
+  int minor = drm_minor_of_fd(fd);
+  if (minor >= 0) {
+    *dev = 0x64726dULL;               // synthetic "drm" device
+    *ino = (unsigned long long)minor;
+    return 0;
+  }
   struct stat st;
   if (fstat(fd, &st)) return -1;
   *dev = (unsigned long long)st.st_dev;
@@ -597,11 +610,19 @@ static long drm_magic_ioctl(int fd, unsigned nr, uint32_t *magic) {
       // locally, then ask the host to verify that this exact fd matches the
       // registered, still-live DRM master. No second lock claim is made.
       int known = 0;
+      unsigned long long mdev = 0, mino = 0;
       pthread_mutex_lock(&g_magic_lock);
       for (int i = 0; i < MAX_DRM_MAGIC; i++)
-        if (g_magic[i].magic == *magic) { known = 1; break; }
+        if (g_magic[i].magic == *magic) {
+          known = 1; mdev = g_magic[i].dev; mino = g_magic[i].ino; break;
+        }
       pthread_mutex_unlock(&g_magic_lock);
       if (!known) return -EINVAL;
+      // drmAuthMagic on the SAME open file description (the card the magic was
+      // minted for) is always accepted: kwin reopens card0 for its GBM allocator
+      // and authenticates that reopen. Do not require the logind session-child
+      // handoff for the local case.
+      if (mdev == dev && mino == ino) return 0;
       pid_t owner = 0;
       session_gpu_epoch epoch;
       int child = gpu_session_child(&owner, &epoch);
