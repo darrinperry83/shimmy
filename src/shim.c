@@ -2392,6 +2392,44 @@ static int close_initial_host_fds(void) {
   return 0;
 }
 
+// Best-effort recursive removal of a directory's contents (not the directory
+// itself). Used to empty /run at boot; see run_clear_boot().
+static void run_clear_tree(const char* path) {
+  DIR* d = opendir(path);
+  if (!d) return;
+  struct dirent* e;
+  while ((e = readdir(d))) {
+    if (e->d_name[0] == '.' &&
+        (e->d_name[1] == 0 || (e->d_name[1] == '.' && e->d_name[2] == 0)))
+      continue;
+    char sub[PATH_MAX];
+    if (snprintf(sub, sizeof sub, "%s/%s", path, e->d_name) >= (int)sizeof sub)
+      continue;
+    struct stat st;
+    if (lstat(sub, &st)) continue;
+    if (S_ISDIR(st.st_mode)) {
+      run_clear_tree(sub);
+      rmdir(sub);
+    } else {
+      unlink(sub);
+    }
+  }
+  closedir(d);
+}
+
+// Linux mounts /run as a fresh tmpfs at every boot, so the previous boot's
+// runtime state (e.g. the greeter's /run/user/<uid>/wayland-0 socket, stale
+// dbus/sshd/plasmalogin state) is simply gone. Our /run is a host-backed
+// directory that persists, so a stale socket makes the next boot's bind() fail
+// with EADDRINUSE. The root shim empties /run once before systemd starts, which
+// is the same end result: systemd and the shim re-materialise /run/udev,
+// /run/credentials and /run/user on demand.
+static void run_clear_boot(const char* rootfs) {
+  char run[PATH_MAX];
+  if (snprintf(run, sizeof run, "%s/run", rootfs) >= (int)sizeof run) return;
+  run_clear_tree(run);
+}
+
 int main(int argc, char** argv) {
   if (argc < 3) { fprintf(stderr, "usage: %s <rootfs> <guest-path> [args...]\n", argv[0]); return 2; }
   // LaunchServices gives apps a soft limit of 256 fds, while the shim reserves
@@ -2556,6 +2594,12 @@ int main(int argc, char** argv) {
   // binary and do not need a device/command queue during boot.
   syscalls_set_root(rootfs);
   syscalls_ext_set_root(rootfs);
+  // Emulate Linux's fresh /run tmpfs: the root shim (identified by the absence
+  // of the carried RDVT_ROOT_PID) empties /run once before systemd starts.
+  // Re-exec'd shims inherit RDVT_ROOT_PID and skip this so they never wipe the
+  // runtime state of an already-booted guest.
+  if (!getenv("RDVT_ROOT_PID"))
+    run_clear_boot(rootfs);
   // The root PID identifies which shim process owns the VT console renderer + reader thread.
   // exec() keeps the PID, fork() gives the child a new one, so a re-exec'd main process (shebang,
   // `exec` in a script) stays the renderer while forked gettys do not. Carried across exec in
