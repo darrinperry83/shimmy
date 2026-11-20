@@ -922,7 +922,7 @@ long guest_execve(const char* guest_path, char* const* argv, char* const* envp) 
     // socketpair is created by the UI process and USED by the exec'd WebKitWebProcess, so a child
     // that reverted to the default would make the A/B measure nothing.
     "RDSEQPACKET", "RDCREDLOG", "RDSOCKETGROUP", "RDSHARE", "RDPIDFD_SOCKET", "RDPIDFD_TRANSFER",
-    "RDNETSOCK",
+    "RDNETSOCK", "RDEPOLL_PRESCAN", "RDREADDBG", "RDWRDUMP", "RDDBUSDBG",
     // RDSND gates the synthetic ALSA card. PipeWire and WirePlumber are EXEC'D daemons: the ALSA
     // monitor runs inside the exec'd wireplumber, and without RDSND riding across execve it sees
     // no /dev/snd/*, so no sink node is ever auto-created even though the card works top-level.
