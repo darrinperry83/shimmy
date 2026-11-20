@@ -1910,11 +1910,11 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
                          ((unsigned)a2 & 0x02000000u) != 0,     // IN_DONT_FOLLOW
                          host, sizeof host, gabs, sizeof gabs);
     if (e < 0) return e;
-    // A cgroup v2 directory or leaf file (cgroup.events/memory.events) has no host vnode (it is
-    // synthesized in-memory), so a real kqueue watch cannot back it. systemd watches every unit
-    // cgroup dir (deletion detection) and its cgroup.events/memory.events (populated state); accept
-    // both as an honest no-op watch that never fires instead of returning EPERM/ENOENT per service.
-    if (gabs[0] == '/' && cgroup_path_kind(gabs) != 0)
+    // A cgroup v2 directory has no host vnode (it is synthesized in-memory), so a real kqueue
+    // watch cannot back it. systemd watches every unit cgroup to detect external deletion; accept
+    // it as an honest no-op watch that never fires instead of returning ENOENT/EPERM for each
+    // service at boot.
+    if (gabs[0] == '/' && cgroup_path_kind(gabs) == 1)
       return inotify_watch_add_noop((int)a0, gabs, (unsigned)a2);
     return inotify_watch_add((int)a0, host, (unsigned)a2);
   }
