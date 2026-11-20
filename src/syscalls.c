@@ -4231,7 +4231,11 @@ static int cgroup_entries(const char* g, struct synth_ent* out) {
 
 // Return the synthesized entry table for guest path `g`, or NULL if `g` is not a synthetic dir.
 // *count receives the entry count (0 for a synthetic empty dir such as /dev/shm). Dynamic tables
-// are rebuilt into static buffers on each call.
+// are rebuilt into static buffers on each call. The buffers are SHARED, so every consumer must
+// hold g_synth_mu while it reads the returned table (do_getdents64 does); a concurrent rebuild
+// otherwise corrupts the table systemd's fdset_new_fill() is walking at boot ("Failed to allocate
+// fd set").
+static pthread_mutex_t g_synth_mu = PTHREAD_MUTEX_INITIALIZER;
 static const struct synth_ent* synth_entries(const char* g, int* count) {
   #define RET(tab) do { *count = (int)(sizeof(tab) / sizeof((tab)[0])); return (tab); } while (0)
   if (!g) return 0;
@@ -4600,11 +4604,12 @@ static long do_getdents64(int fd, unsigned char* buf, size_t cap) {
   if (cgroup_dir_path(fd, dpath, sizeof dpath) != 0)
     (void)guest_path_of_fd(fd, dpath, sizeof dpath);
   if (dpath[0]) {
+    pthread_mutex_lock(&g_synth_mu);
     int count = 0;
     const struct synth_ent* ents = synth_entries(dpath, &count);
     if (ents) {
       int slot = syncur_slot(fd);
-      if (slot < 0) return -LX_EMFILE;
+      if (slot < 0) { pthread_mutex_unlock(&g_synth_mu); return -LX_EMFILE; }
       size_t used = 0;
       int pos = g_syncur[slot].pos;
       while (pos < count) {
@@ -4612,7 +4617,7 @@ static long do_getdents64(int fd, unsigned char* buf, size_t cap) {
         size_t nl = strlen(name);
         size_t rec = (19 + nl + 1 + 7) & ~(size_t)7;   // 8-align, room for the NUL
         if (used + rec > cap) {
-          if (used == 0) return -LX_EINVAL;            // buffer too small for even one entry
+          if (used == 0) { pthread_mutex_unlock(&g_synth_mu); return -LX_EINVAL; }  // buffer too small
           break;
         }
         unsigned char* p = buf + used;
@@ -4630,8 +4635,10 @@ static long do_getdents64(int fd, unsigned char* buf, size_t cap) {
         pos++;
       }
       g_syncur[slot].pos = pos;
+      pthread_mutex_unlock(&g_synth_mu);
       return (long)used;
     }
+    pthread_mutex_unlock(&g_synth_mu);
   }
 
   DIR* d = dirmap_open(fd);
