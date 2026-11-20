@@ -1830,13 +1830,17 @@ static long guest_uts_getname(char name[65], const char *fallback,
                               const char *record_path, uint32_t magic) {
   snprintf(name, 65, "%s", fallback);
   if (!getenv("RDSOCKETGROUP")) return 0;
+  // The UTS record is a best-effort feature. uname()/gethostname() must NEVER
+  // fail (systemd asserts uname(&u) >= 0), so any inability to read the record —
+  // EACCES from a group dir whose mode/owner the security check rejects, a
+  // missing dir, a missing lock, or a corrupt record — falls back to the default
+  // name instead of propagating errno.
   int dir = guest_uts_dir();
-  if (dir < 0) return herrno();
+  if (dir < 0) return 0;
   int lock = guest_uts_lock(dir, LOCK_SH);
-  if (lock < 0) { long e = herrno(); close(dir); return e; }
+  if (lock < 0) { close(dir); return 0; }
   int fd = openat(dir, record_path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
-  if (fd < 0 && errno == ENOENT) { close(lock); close(dir); return 0; }
-  if (fd < 0) { long e = herrno(); close(lock); close(dir); return e; }
+  if (fd < 0) { close(lock); close(dir); return 0; }
   struct stat st;
   struct guest_uts_record rec;
   int valid = fstat(fd, &st) == 0 && S_ISREG(st.st_mode) &&
@@ -1844,7 +1848,7 @@ static long guest_uts_getname(char name[65], const char *fallback,
               st.st_size == sizeof rec && pread(fd, &rec, sizeof rec, 0) == sizeof rec &&
               rec.magic == magic && rec.length <= 64 && rec.name[rec.length] == 0;
   close(fd); close(lock); close(dir);
-  if (!valid) return -LX_EIO;
+  if (!valid) return 0;
   memcpy(name, rec.name, 65);
   return 0;
 }

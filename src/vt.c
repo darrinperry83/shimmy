@@ -455,6 +455,11 @@ static void* vt_reader(void* arg) {
                     if (getenv("RDVT_TRACE"))
                         fprintf(stderr, "[vt] reader pid=%d tty%d read %zd bytes\n",
                                 (int)getpid(), i + 1, n);
+                    if (getenv("RDCONSOLE_LOG")) {
+                        static FILE* cf;
+                        if (!cf) cf = fopen("/tmp/rd_console.log", "a");
+                        if (cf) { fwrite(buf, 1, (size_t)n, cf); fflush(cf); }
+                    }
                     console_put_bytes(&g_vt[i].con, buf, (size_t)n);
                     dirty = 1;
                     got = 1;
