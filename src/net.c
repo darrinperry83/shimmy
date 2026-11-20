@@ -23,6 +23,9 @@
 //     hex-encoded into a real file under the relocation prefix.
 //   * epoll is emulated on kqueue. The aarch64 struct epoll_event is NOT packed (unlike x86_64):
 //     { u32 events; u32 pad; u64 data; } == 16 bytes with data at offset 8.
+// IPV6_RECVPKTINFO / IPV6_RECVHOPLIMIT (the packet-info / hop-limit ancillary requests systemd
+// makes for LLMNR/mDNS) are the RFC 3542 spelling; Darwin only exposes them under that API.
+#define __APPLE_USE_RFC_3542 1
 #include <stdint.h>
 #include <stddef.h>
 #include <stdarg.h>
@@ -1158,6 +1161,11 @@ static const struct optmap k_sol_ipv6[] = {
   { 16, IPV6_UNICAST_HOPS }, { 17, IPV6_MULTICAST_IF }, { 18, IPV6_MULTICAST_HOPS },
   { 19, IPV6_MULTICAST_LOOP }, { 20, IPV6_JOIN_GROUP }, { 21, IPV6_LEAVE_GROUP },
   { 26, IPV6_V6ONLY },
+  // RFC 3542 ancillary-data requests systemd makes for LLMNR/mDNS. Darwin has the exact
+  // equivalents; the request asks the host to attach packet-info / hop-limit cmsgs, which it
+  // genuinely honors, so this is a real mapping rather than a swallowed no-op.
+  { 37, IPV6_RECVHOPLIMIT },   // Linux IPV6_RECVHOPLIMIT = 37 (Darwin also 37)
+  { 49, IPV6_RECVPKTINFO },    // Linux IPV6_RECVPKTINFO = 49  (Darwin 61)
 };
 
 static int lookup_opt(const struct optmap* t, size_t n, int lname) {

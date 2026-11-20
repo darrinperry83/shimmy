@@ -1918,11 +1918,23 @@ long linux_syscall_ext(unsigned long nr, unsigned long a0, unsigned long a1, uns
     char guest_path[PATH_MAX];
     e = copy_guest_cstr(a1, guest_path, sizeof guest_path);
     if (e < 0) return e;
+    // /run/udev (udevadm-settle watches the queue dir for deletion) and /var/run/utmp (logind
+    // watches utmp for session changes; /var/run -> /run so it resolves to /run/utmp) are
+    // shim-synthesized/absent surfaces with no stable host vnode, so a kqueue watch cannot back
+    // them. Accept them as never-firing no-op watches — the same contract as cgroup watches —
+    // instead of failing EBADF/ENOENT and spamming the boot journal.
+    if (!strcmp(guest_path, "/run/udev") || !strcmp(guest_path, "/run/utmp") ||
+        !strcmp(guest_path, "/var/run/utmp"))
+      return inotify_watch_add_noop((int)a0, guest_path, (unsigned)a2);
     char gabs[PATH_MAX];
     e = syscalls_resolve(LX_AT_FDCWD, guest_path,
                          ((unsigned)a2 & 0x02000000u) != 0,     // IN_DONT_FOLLOW
                          host, sizeof host, gabs, sizeof gabs);
     if (e < 0) return e;
+    if (gabs[0] == '/' &&
+        (!strcmp(gabs, "/run/udev") || !strcmp(gabs, "/run/utmp") ||
+         !strcmp(gabs, "/var/run/utmp")))
+      return inotify_watch_add_noop((int)a0, gabs, (unsigned)a2);
     // A cgroup v2 directory or leaf file (cgroup.events/memory.events) has no host vnode (it is
     // synthesized in-memory), so a real kqueue watch cannot back it. systemd watches every unit
     // cgroup dir (deletion detection) and its cgroup.events/memory.events (populated state); accept
