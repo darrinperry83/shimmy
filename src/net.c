@@ -2018,9 +2018,39 @@ static long sys_epoll_wait_ts(int epfd, struct lin_epoll_event* uev, int maxeven
   }
   double deadline = recovery_ms && tsp ? now_ms() +
       (double)tsp->tv_sec * 1000.0 + (double)tsp->tv_nsec / 1000000.0 : 0;
-  int n;
-epoll_retry:
+  int n = 0;
+  // A message already queued on a registered AF_UNIX socket before the first
+  // epoll_pwait can be missed by Darwin's kqueue entirely (the localed's bus
+  // socket: its GetAll reply-request sits queued before its loop's first wait).
+  // Probe the pending-data state BEFORE the blocking kevent so the first wait
+  // returns the queued read immediately instead of a recovery cycle later.
   {
+    pthread_mutex_lock(&g_lock);
+    struct epinst* pe = ep_find(epfd);
+    if (pe) {
+      for (int i = 0; i < pe->n && n < maxevents; i++) {
+        int rfd = pe->v[i].fd;
+        if (!(pe->v[i].events & L_EPOLLIN)) continue;
+        struct stat st;
+        int has_data = 0;
+        if (fstat(rfd, &st) == 0 && S_ISSOCK(st.st_mode)) {
+          if (socket_listen_pending(rfd)) has_data = 1;
+          else if (!socket_is_listening(rfd)) {
+            char tmp;
+            has_data = recv(rfd, &tmp, 1, MSG_PEEK | MSG_DONTWAIT) > 0;
+          }
+        }
+        if (has_data) {
+          EV_SET(&kv[n], (uintptr_t)rfd, EVFILT_READ, 0, 0, 1, NULL);
+          n++;
+        }
+      }
+    }
+    pthread_mutex_unlock(&g_lock);
+  }
+epoll_retry:
+  if (n > 0) { /* pre-scan already has events; skip the blocking kevent */ }
+  else {
     struct timespec bounded;
     const struct timespec *wait = tsp;
     if (recovery_ms) {
