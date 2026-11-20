@@ -125,6 +125,14 @@ int main(void) {
     drmModeFreeObjectProperties(op);
   }
 
+  // MODE_LIST_LESSEES: kwin 6.8 probes for outstanding DRM leases before reopening the
+  // node. The virtual card grants no leases, so the honest reply is an empty list.
+  drmModeLesseeListPtr lessees = drmModeListLessees(g_fd);
+  if (!lessees) FAIL("drmModeListLessees: %s", strerror(errno));
+  printf("list_lessees count=%u\n", lessees->count);
+  if (lessees->count != 0) FAIL("drmModeListLessees returned %u lessees", lessees->count);
+  drmFree(lessees);
+
   // Dumb buffer create + map + mmap + ADDFB2 + PRIME export.
   uint32_t handle = 0, pitch = 0;
   uint64_t size = 0;
@@ -161,7 +169,18 @@ int main(void) {
   if (prime_fd < 0) FAIL("drmPrimeHandleToFD returned bad fd");
   close(prime_fd);
 
-  if (drmModeRmFB(g_fd, fb_id)) FAIL("drmModeRmFB: %s", strerror(errno));
+  if (drmModeCloseFB(g_fd, fb_id)) FAIL("drmModeCloseFB: %s", strerror(errno));
+  printf("closefb fb_id=%u ok\n", fb_id);
+
+  // A second fb on the same handle keeps legacy MODE_RMFB covered alongside CLOSEFB.
+  uint32_t fb_id2 = 0;
+  if (drmModeAddFB2WithModifiers(g_fd, 64, 64, DRM_FORMAT_XRGB8888,
+                                 fb_handles, fb_pitches, fb_offsets, modifiers,
+                                 &fb_id2, DRM_MODE_FB_MODIFIERS))
+    FAIL("drmModeAddFB2WithModifiers (2): %s", strerror(errno));
+  if (drmModeRmFB(g_fd, fb_id2)) FAIL("drmModeRmFB: %s", strerror(errno));
+  printf("rmfb fb_id=%u ok\n", fb_id2);
+
   munmap(map, size);
   if (drmModeDestroyDumbBuffer(g_fd, handle))
     FAIL("drmModeDestroyDumbBuffer: %s", strerror(errno));

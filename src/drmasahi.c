@@ -133,6 +133,8 @@ __attribute__((weak)) int rdgpu_handoff_is_carrier_fd(int fd) { (void)fd; return
 #define DRM_NR_MODE_CREATEPROPBLOB   0xbd
 #define DRM_NR_MODE_DESTROYPROPBLOB  0xbe
 #define DRM_NR_MODE_OBJ_SETPROPERTY  0xba
+#define DRM_NR_MODE_LIST_LESSEES     0xc7
+#define DRM_NR_MODE_CLOSEFB          0xd0
 
 // DRM capabilities (drm.h). TIMESTAMP_MONOTONIC is 0x6, ASYNC_PAGE_FLIP is 0x7,
 // CRTC_IN_VBLANK_EVENT is 0x12 (the "0x6 vs 0x7" confusion in the brief is these three).
@@ -359,6 +361,13 @@ struct drm_mode_obj_set_property {
   uint64_t value;                                                                    // 8
   uint32_t prop_id, obj_id, obj_type;                                                // 12 -> 20
 };
+struct drm_mode_list_lessees {
+  uint32_t count_lessees, pad;                                                       // 8
+  uint64_t lessees_ptr;                                                              // 8 -> 16
+};
+struct drm_mode_closefb {
+  uint32_t fb_id, pad;                                                               // 8
+};
 // DRM events delivered via read() on the DRM fd after a page-flip / atomic commit.
 struct drm_event {
   uint32_t type, length;
@@ -394,6 +403,8 @@ _Static_assert(sizeof(struct drm_mode_destroy_blob) == 4,  "drm_mode_destroy_blo
 _Static_assert(sizeof(struct drm_mode_property_enum) == 40, "drm_mode_property_enum");
 _Static_assert(sizeof(struct drm_mode_connector_set_property) == 16, "drm_mode_connector_set_property");
 _Static_assert(sizeof(struct drm_mode_obj_set_property) == 24, "drm_mode_obj_set_property");
+_Static_assert(sizeof(struct drm_mode_list_lessees) == 16, "drm_mode_list_lessees");
+_Static_assert(sizeof(struct drm_mode_closefb)      == 8,  "drm_mode_closefb");
 _Static_assert(sizeof(struct drm_event)        == 8,  "drm_event");
 _Static_assert(sizeof(struct drm_event_vblank) == 32, "drm_event_vblank");
 
@@ -1769,6 +1780,16 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
   // graceful "drmModeCreateLease failed, falling back to open" — so leaving it unimplemented is
   // CORRECT. The real Asahi UAPI is nr 0x40..0x4a (matching the rootfs header).
 
+  // MODE_LIST_LESSEES: kwin 6.8 probes for outstanding DRM leases before it decides whether to
+  // reopen the node. The virtual card grants no sub-leases, so the honest answer is an empty
+  // lessee list, not -EINVAL (which logs "drmModeListLessees() failed: Invalid argument").
+  if (type == DRM_TYPE && nr == DRM_NR_MODE_LIST_LESSEES && arg) {
+    struct drm_mode_list_lessees* l = (struct drm_mode_list_lessees*)arg;
+    l->count_lessees = 0;
+    if (tracing()) fprintf(stderr, "[drm] MODE_LIST_LESSEES -> 0 lessees\n");
+    return 0;
+  }
+
   // GET_PARAMS — the first wall. Return a plausible G13 (Apple M1) GPU so Mesa's device init
   // proceeds. The driver passes its own sizeof(drm_asahi_params_global) in p->size; we write at
   // most that many bytes into p->pointer, which is exactly how the kernel honours old userspace.
@@ -2305,6 +2326,18 @@ long drm_ioctl(int fd, unsigned long req, unsigned long arg) {
     if (tracing())
       fprintf(stderr, "[drm] MODE_RMFB fb_id=%u\n", fb_id);
     fb_forget(fb_id);
+    return 0;
+  }
+
+  // MODE_CLOSEFB (nr 0xd0, Linux 6.10+): kwin 6.8 releases framebuffers with drmModeCloseFB
+  // and only falls back to drmModeRmFB on ENOSYS/ENOTTY. Unlike RMFB it must NOT disable a
+  // CRTC still scanning out the buffer, but the shim's fb_forget never touched CRTC state, so
+  // the two are equivalent here.
+  if (type == DRM_TYPE && nr == DRM_NR_MODE_CLOSEFB && arg) {
+    struct drm_mode_closefb* c = (struct drm_mode_closefb*)arg;
+    if (tracing())
+      fprintf(stderr, "[drm] MODE_CLOSEFB fb_id=%u\n", c->fb_id);
+    fb_forget(c->fb_id);
     return 0;
   }
 
