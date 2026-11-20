@@ -3497,7 +3497,11 @@ static void capture_guest_boot_epoch(void) {
   g_guest_boot_epoch_ns = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW);
 }
 static uint64_t since_guest_epoch(uint64_t now, uint64_t epoch) {
-  return now > epoch ? now - epoch : 0;   // clamp a (borrow-adjacent) negative to 0
+  // The very first read (now == epoch) yields ~0 ns, which systemd's now()
+  // truncates to 0 MICROSECONDS (timespec_load does tv_nsec / 1000) and then
+  // asserts n > 0. Clamp to at least 1us so a just-booted guest never reports 0us.
+  uint64_t r = now > epoch ? now - epoch : 0;
+  return r < 1000 ? 1000 : r;
 }
 uint64_t syscalls_guest_monotonic_ns(void) {
   pthread_once(&g_guest_mono_epoch_once, capture_guest_mono_epoch);
