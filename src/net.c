@@ -1343,6 +1343,15 @@ static int sender_ucred(int fd, const char* src_host_path, struct lin_ucred* out
 // connect() AND on the first sendto/sendmsg — sd_notify() uses sendmsg without connect, so autobinding
 // only on connect left those "READY=1" datagrams with an empty source and no credentials.
 static void autobind_sender(int fd) {
+  // Linux only autobinds an AF_UNIX *datagram* socket (unix_autobind on connect/send).
+  // A STREAM socket must never be renamed here: macOS bind() on an already-connected
+  // stream socket SUCCEEDS and replaces the local address the peer reports via
+  // getpeername() with ".rdx-sender/...", whereas Linux leaves a connected stream
+  // client unbound (its getsockname() is an empty name). Gate to SOCK_DGRAM so the
+  // three call sites (connect/sendto/sendmsg) cannot rebind a stream socket.
+  int stype = 0; socklen_t stl = sizeof stype;
+  if (getsockopt(fd, SOL_SOCKET, SO_TYPE, &stype, &stl) != 0 || stype != SOCK_DGRAM)
+    return;
   struct sockaddr_storage ls; socklen_t llen = sizeof ls;
   // macOS connect() on a DGRAM socket reports getsockname() as sun_len=16 with an EMPTY sun_path, so
   // the meaningful test for "not yet bound" is an empty sun_path, not the length.
@@ -1757,7 +1766,7 @@ static size_t cmsg_h2l(int fd, struct msghdr* hm, uint8_t* lc, size_t lcap, int 
 // ---------------------------------------------------------------------------
 // epoll on kqueue
 // ---------------------------------------------------------------------------
-struct epent { int fd; uint32_t events; uint64_t data; int unix_read; };
+struct epent { int fd; uint32_t events; uint64_t data; int unix_read; int unix_sock; };
 struct epinst {
   struct epinst* next;
   int kq;
@@ -1797,7 +1806,7 @@ static struct epent* ep_add(struct epinst* e, int fd) {
     e->v = nv; e->cap = nc;
   }
   struct epent* p = &e->v[e->n++];
-  p->fd = fd; p->events = 0; p->data = 0; p->unix_read = 0;
+  p->fd = fd; p->events = 0; p->data = 0; p->unix_read = 0; p->unix_sock = 0;
   return p;
 }
 static void ep_del(struct epinst* e, int fd) {
@@ -1808,12 +1817,16 @@ static void ep_del(struct epinst* e, int fd) {
 #define EP_WANT_READ  (L_EPOLLIN | L_EPOLLPRI | L_EPOLLRDNORM | L_EPOLLRDBAND | L_EPOLLRDHUP)
 #define EP_WANT_WRITE (L_EPOLLOUT | L_EPOLLWRNORM | L_EPOLLWRBAND)
 
-static int ep_unix_read(int fd, uint32_t events) {
-  if (!(events & EP_WANT_READ)) return 0;
+static int fd_is_unix_socket(int fd) {
   struct sockaddr_storage addr;
   socklen_t len = sizeof addr;
   return getsockname(fd, (struct sockaddr *)&addr, &len) == 0 &&
          addr.ss_family == AF_UNIX;
+}
+
+static int ep_unix_read(int fd, uint32_t events) {
+  if (!(events & EP_WANT_READ)) return 0;
+  return fd_is_unix_socket(fd);
 }
 
 static long ep_apply(int kq, int fd, uint32_t events) {
@@ -1926,6 +1939,7 @@ static long sys_epoll_ctl(int epfd, int op, int fd, struct lin_epoll_event* uev)
       if (r < 0) { ep_del(e, fd); break; }
       p->events = ev.events; p->data = ev.data;
       p->unix_read = ep_unix_read(fd, ev.events);
+      p->unix_sock = fd_is_unix_socket(fd);
       break;
     case L_EPOLL_CTL_MOD:
       if (!p) { r = -L_ENOENT; break; }
@@ -1933,6 +1947,7 @@ static long sys_epoll_ctl(int epfd, int op, int fd, struct lin_epoll_event* uev)
       if (r < 0) break;
       p->events = ev.events; p->data = ev.data;
       p->unix_read = ep_unix_read(fd, ev.events);
+      p->unix_sock = fd_is_unix_socket(fd);
       break;
     case L_EPOLL_CTL_DEL:
       if (!p) { r = -L_ENOENT; break; }
@@ -2048,7 +2063,7 @@ static long sys_epoll_wait_ts(int epfd, struct lin_epoll_event* uev, int maxeven
     if (pe) {
       for (int i = 0; i < pe->n && n < maxevents; i++) {
         int rfd = pe->v[i].fd;
-        if (!(pe->v[i].events & L_EPOLLIN)) continue;
+        if (!(pe->v[i].events & (L_EPOLLIN | L_EPOLLRDNORM))) continue;
         struct stat st;
         int has_data = 0;
         if (fstat(rfd, &st) == 0 && S_ISSOCK(st.st_mode)) {
@@ -2116,7 +2131,7 @@ epoll_retry:
     if (e) {
       for (int i = 0; i < e->n && n < maxevents; i++) {
         int rfd = e->v[i].fd;
-        if (!(e->v[i].events & L_EPOLLIN)) continue;
+        if (!(e->v[i].events & (L_EPOLLIN | L_EPOLLRDNORM))) continue;
         int in_res = 0;
         for (int j = 0; j < n; j++) if ((int)kv[j].ident == rfd) { in_res = 1; break; }
         if (in_res) continue;
@@ -2175,16 +2190,29 @@ epoll_retry:
       if (ef) { fprintf(ef, "epoll fd=%d filter=%d flags=%#x fflags=%#x data=%lld\n",
                         fd, kv[i].filter, kv[i].flags, kv[i].fflags, (long long)kv[i].data); fclose(ef); }
     }
+    int unix_fd = 0;
+    {
+      pthread_mutex_lock(&g_lock);
+      struct epinst* e = ep_find(epfd);
+      struct epent* p = e ? ep_lookup(e, fd) : NULL;
+      unix_fd = p ? p->unix_sock : fd_is_unix_socket(fd);
+      pthread_mutex_unlock(&g_lock);
+    }
     uint32_t bits = 0;
     if (kv[i].filter == EVFILT_READ) {
-      // EPOLLIN only, NOT EPOLLIN|EPOLLRDNORM. Linux signalfd/eventfd/timerfd report EPOLLIN
-      // (0x1) alone, and systemd's manager_dispatch_signal_fd() checks `revents != EPOLLIN`
-      // exactly; the extra EPOLLRDNORM (0x40) made every signal wake log "Got unexpected events
-      // from signal file descriptor" and spin the event loop.
+      // Linux unix_poll reports EPOLLIN|EPOLLRDNORM for a readable AF_UNIX
+      // socket. signalfd/eventfd/timerfd report EPOLLIN alone (systemd's
+      // manager_dispatch_signal_fd() checks `revents != EPOLLIN` exactly), so
+      // only AF_UNIX sockets gain EPOLLRDNORM here; the interest-mask filter
+      // below still trims it for an EPOLLIN-only registration.
       bits |= L_EPOLLIN;
+      if (unix_fd) bits |= L_EPOLLRDNORM;
       if (kv[i].flags & EV_EOF) bits |= L_EPOLLRDHUP;
     } else if (kv[i].filter == EVFILT_WRITE) {
+      // Linux unix_poll reports EPOLLOUT|EPOLLWRNORM|EPOLLWRBAND for a
+      // writable AF_UNIX socket.
       bits |= L_EPOLLOUT;
+      if (unix_fd) bits |= L_EPOLLWRNORM | L_EPOLLWRBAND;
       if (kv[i].flags & EV_EOF) bits |= L_EPOLLHUP;
     }
     if ((kv[i].flags & EV_ERROR) && kv[i].data) bits |= L_EPOLLERR;
@@ -2311,7 +2339,11 @@ static short pollev_h2l(short hr, short lwant) {
   if (hr & POLLRDBAND) l |= L_POLLRDBAND;
   if ((hr & POLLOUT) && (lwant & L_POLLWRNORM)) l |= L_POLLWRNORM;
   if ((hr & POLLWRBAND) && (lwant & L_POLLWRBAND)) l |= L_POLLWRBAND;
-  return l;
+  // Linux poll() reports only the requested events plus POLLERR/POLLHUP/POLLNVAL:
+  // revents = unix_poll() & (events | POLLERR | POLLHUP). Mask here so a readable
+  // AF_UNIX socket's POLLRDNORM is not leaked when only POLLIN was requested (and
+  // likewise for the WRNORM/WRBAND bits).
+  return l & (lwant | L_POLLERR | L_POLLHUP | L_POLLNVAL);
 }
 
 static void pfdbg_fd(int fd, short levents) {
@@ -2504,28 +2536,42 @@ static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_
     }
     for (unsigned long i = 0; i < nfds; i++) hf[i].revents = 0;
     // Linux-true readiness: report data already queued on an AF_UNIX stream
-    // socket immediately (Darwin poll() misses it). Do this BEFORE the blocking
-    // poll so the guest sees readiness without any timer slice.
+    // socket immediately (Darwin poll() misses it). Probe BEFORE the blocking
+    // poll so the guest sees readiness without any timer slice. Keep the hits
+    // in a side array: a later poll() clears revents on fds it fails to report.
     int prescanned = 0;
+    unsigned char pre_ready[4096];
+    memset(pre_ready, 0, sizeof pre_ready);
     for (unsigned long i = 0; i < nfds; i++) {
-      if (ufds[i].fd >= 0 && (ufds[i].events & L_POLLIN)) {
+      if (ufds[i].fd >= 0 && (ufds[i].events & (L_POLLIN | L_POLLRDNORM))) {
         struct stat st;
         if (fstat(ufds[i].fd, &st) == 0 && S_ISSOCK(st.st_mode) && !socket_is_listening(ufds[i].fd)) {
           char tmp;
           int has = recv(ufds[i].fd, &tmp, 1, MSG_PEEK | MSG_DONTWAIT) > 0;
           if (!has) { int avail = 0; if (ioctl(ufds[i].fd, FIONREAD, &avail) == 0 && avail > 0) has = 1; }
           if (!has) has = unix_stream_connected(ufds[i].fd);
-          if (has) { hf[i].revents |= POLLIN; prescanned++; }
+          if (has) { pre_ready[i] = 1; prescanned++; }
         }
       }
     }
     double poll_t0 = now_ms();
-    r = prescanned ? prescanned : poll(hf, (nfds_t)nfds, wait_ms);
+    if (prescanned) {
+      // A pre-scan hit must neither strand unrelated ready fds nor delay the
+      // already-ready socket: do a zero-timeout host poll for pipes etc., then
+      // re-OR the socket readiness the poll may have cleared.
+      (void)poll(hf, (nfds_t)nfds, 0);
+      for (unsigned long i = 0; i < nfds; i++)
+        if (pre_ready[i]) hf[i].revents |= POLLIN | POLLRDNORM;
+      r = 0;
+      for (unsigned long i = 0; i < nfds; i++) if (hf[i].revents) r++;
+    } else {
+      r = poll(hf, (nfds_t)nfds, wait_ms);
+    }
     // If the result is partial (some fds not reported), Darwin poll() may have
     // missed STREAM data on an AF_UNIX socket. Re-check just the socket fds on
     // the shim's own kqueue (event-driven) and merge, so a reply arriving
     // during the wait wakes the guest instead of being dropped.
-    if (r >= 0 && r < (int)nfds) {
+    if (r >= 0 && r < (int)nfds && !prescanned) {
       int has_sock = 0;
       for (unsigned long i = 0; i < nfds; i++) {
         if (ufds[i].fd < 0) continue;
@@ -2541,9 +2587,9 @@ static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_
             if (ufds[i].fd < 0) continue;
             struct stat st;
             if (fstat(ufds[i].fd, &st) != 0 || !S_ISSOCK(st.st_mode)) continue;
-            if (ufds[i].events & L_POLLIN)
+            if (ufds[i].events & (L_POLLIN | L_POLLRDNORM))
               EV_SET(&chg[nc++], (uintptr_t)ufds[i].fd, EVFILT_READ, EV_ADD, 0, 0, NULL);
-            if (ufds[i].events & L_POLLOUT)
+            if (ufds[i].events & (L_POLLOUT | L_POLLWRNORM | L_POLLWRBAND))
               EV_SET(&chg[nc++], (uintptr_t)ufds[i].fd, EVFILT_WRITE, EV_ADD, 0, 0, NULL);
           }
           struct timespec kts, *kw = NULL;
@@ -2560,8 +2606,8 @@ static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_
             for (int j = 0; j < kn; j++) {
               for (unsigned long i = 0; i < nfds; i++) {
                 if ((int)ufds[i].fd == (int)out[j].ident) {
-                  if (out[j].filter == EVFILT_READ) { hf[i].revents |= POLLIN; }
-                  else if (out[j].filter == EVFILT_WRITE) { hf[i].revents |= POLLOUT; }
+                  if (out[j].filter == EVFILT_READ) { hf[i].revents |= POLLIN | POLLRDNORM; }
+                  else if (out[j].filter == EVFILT_WRITE) { hf[i].revents |= POLLOUT | POLLWRBAND; }
                 }
               }
             }
@@ -2775,6 +2821,27 @@ static long sys_pselect6(int nfds, uint64_t raddr, uint64_t waddr, uint64_t eadd
           FD_SET(fd, &rfds);
           n++;
         }
+      }
+    }
+    // Darwin pselect() can also miss STREAM data already queued on an AF_UNIX
+    // socket (the D-Bus reply the greeter/compositor waits on). Probe the
+    // read-set sockets directly — mirroring ppoll's pre-scan — so a queued byte
+    // (or a connected-but-empty stream, Linux sk_is_readable) is reported this
+    // round instead of after a timer slice.
+    if (raddr) {
+      for (int fd = 0; fd < nfds; fd++) {
+        if (!FD_ISSET(fd, &req_rfds) || FD_ISSET(fd, &rfds)) continue;
+        struct stat st;
+        if (fstat(fd, &st) != 0 || !S_ISSOCK(st.st_mode)) continue;
+        int has = 0;
+        if (socket_listen_pending(fd)) has = 1;
+        else if (!socket_is_listening(fd)) {
+          char tmp;
+          if (recv(fd, &tmp, 1, MSG_PEEK | MSG_DONTWAIT) > 0) has = 1;
+          else { int avail = 0; if (ioctl(fd, FIONREAD, &avail) == 0 && avail > 0) has = 1; }
+          if (!has) has = unix_stream_connected(fd);
+        }
+        if (has) { FD_SET(fd, &rfds); n++; }
       }
     }
     // Darwin pselect() can miss STREAM data on an AF_UNIX socket (the D-Bus
@@ -3203,6 +3270,17 @@ static long sys_accept4(int fd, unsigned long uaddr, unsigned long ulen, int fla
   }
   if (nfd < 0) return lerr();
   kill_sigpipe(nfd);
+  // macOS accept() INHERITS O_NONBLOCK from the listening socket. Linux does not:
+  // the accepted fd is non-blocking only when accept4() itself carried SOCK_NONBLOCK.
+  // Clear the inherited flag so a blocking accept()/accept4(...,0) of a non-blocking
+  // listener yields a blocking connection socket, exactly as Linux does. Without this
+  // a server that listens with SOCK_NONBLOCK but accepts without it gets a
+  // spuriously non-blocking connection fd whose sendmsg() can return EAGAIN and drop
+  // a reply, so the peer's FIONREAD() never shows it.
+  if (!(flags & L_SOCK_NONBLOCK)) {
+    int fl = fcntl(nfd, F_GETFL, 0);
+    if (fl >= 0) fcntl(nfd, F_SETFL, fl & ~O_NONBLOCK);
+  }
   apply_fd_flags(nfd, (flags & L_SOCK_NONBLOCK) != 0, (flags & L_SOCK_CLOEXEC) != 0);
   if (uaddr && ulen) {
     long r = store_addr((struct sockaddr*)&hs, hlen, uaddr, ulen);
