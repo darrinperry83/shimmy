@@ -1975,6 +1975,22 @@ static int socket_listen_pending(int fd) {
   return info.psi.soi_qlen > 0;
 }
 
+// Linux sk_is_readable(): a connected AF_UNIX STREAM socket is "readable"
+// (poll reports POLLIN) even while its receive queue is empty, because the
+// stream is established and a read may observe EOF. Darwin poll() never
+// reports this, so a blocking poll on a freshly-connected bus socket waits
+// for data instead of returning ready — unlike Linux.
+static int unix_stream_connected(int fd) {
+  struct stat st;
+  if (fstat(fd, &st) != 0 || !S_ISSOCK(st.st_mode)) return 0;
+  struct socket_fdinfo info;
+  int got = proc_pidfdinfo(getpid(), fd, PROC_PIDFDSOCKETINFO, &info, sizeof info);
+  if (got != sizeof info || (info.psi.soi_options & SO_ACCEPTCONN)) return 0;
+  if (info.psi.soi_kind != SOCK_STREAM) return 0;
+  struct sockaddr_storage peer; socklen_t plen = sizeof peer;
+  return getpeername(fd, (struct sockaddr *)&peer, &plen) == 0;
+}
+
 static long sys_epoll_wait_ts(int epfd, struct lin_epoll_event* uev, int maxevents,
                              const struct timespec* tsp, const char* wait_name,
                              double requested_ms) {
@@ -2041,6 +2057,7 @@ static long sys_epoll_wait_ts(int epfd, struct lin_epoll_event* uev, int maxeven
             char tmp;
             if (recv(rfd, &tmp, 1, MSG_PEEK | MSG_DONTWAIT) > 0) has_data = 1;
             else { int avail = 0; if (ioctl(rfd, FIONREAD, &avail) == 0 && avail > 0) has_data = 1; }
+            if (!has_data) has_data = unix_stream_connected(rfd);
           }
         }
         if (has_data) {
@@ -2116,6 +2133,7 @@ epoll_retry:
             char tmp;
             if (recv(rfd, &tmp, 1, MSG_PEEK | MSG_DONTWAIT) > 0) has_data = 1;
             else { int avail = 0; if (ioctl(rfd, FIONREAD, &avail) == 0 && avail > 0) has_data = 1; }
+            if (!has_data) has_data = unix_stream_connected(rfd);
           }
         } else if (pidfd_shim_pid(rfd) > 0) {
           // pidfd: a kqueue watching a child pid; "readable" once the child exits.
@@ -2496,6 +2514,7 @@ static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_
           char tmp;
           int has = recv(ufds[i].fd, &tmp, 1, MSG_PEEK | MSG_DONTWAIT) > 0;
           if (!has) { int avail = 0; if (ioctl(ufds[i].fd, FIONREAD, &avail) == 0 && avail > 0) has = 1; }
+          if (!has) has = unix_stream_connected(ufds[i].fd);
           if (has) { hf[i].revents |= POLLIN; prescanned++; }
         }
       }
