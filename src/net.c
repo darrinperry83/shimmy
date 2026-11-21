@@ -2501,6 +2501,48 @@ static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_
       }
     }
     r = prescanned ? prescanned : poll(hf, (nfds_t)nfds, wait_ms);
+    // If host poll() returned nothing but every fd is an AF_UNIX socket,
+    // the Darwin poll just missed stream data arriving during the wait.
+    // Re-check with the shim's own kqueue (event-driven) so the guest wakes
+    // the instant the socket becomes readable, not on a timer slice.
+    if (r == 0) {
+      int all_sock = 1;
+      for (unsigned long i = 0; i < nfds; i++) {
+        if (ufds[i].fd < 0) continue;
+        struct stat st;
+        if (fstat(ufds[i].fd, &st) != 0 || !S_ISSOCK(st.st_mode)) { all_sock = 0; break; }
+      }
+      if (all_sock) {
+        int kq = kqueue();
+        if (kq >= 0) {
+          struct kevent chg[64];
+          int nc = 0;
+          for (unsigned long i = 0; i < nfds && nc < 64; i++) {
+            if (ufds[i].fd < 0) continue;
+            if (ufds[i].events & L_POLLIN)
+              EV_SET(&chg[nc++], (uintptr_t)ufds[i].fd, EVFILT_READ, EV_ADD, 0, 0, NULL);
+            if (ufds[i].events & L_POLLOUT)
+              EV_SET(&chg[nc++], (uintptr_t)ufds[i].fd, EVFILT_WRITE, EV_ADD, 0, 0, NULL);
+          }
+          struct timespec kts, *kw = NULL;
+          if (wait_ms >= 0) { kts.tv_sec = wait_ms / 1000; kts.tv_nsec = (long)(wait_ms % 1000) * 1000000L; kw = &kts; }
+          struct kevent out[64];
+          int kn = kevent(kq, chg, nc, out, 64, kw);
+          close(kq);
+          if (kn > 0) {
+            for (int j = 0; j < kn; j++) {
+              for (unsigned long i = 0; i < nfds; i++) {
+                if ((int)ufds[i].fd == (int)out[j].ident) {
+                  if (out[j].filter == EVFILT_READ) { hf[i].revents |= POLLIN; }
+                  else if (out[j].filter == EVFILT_WRITE) { hf[i].revents |= POLLOUT; }
+                }
+              }
+            }
+            r = kn;
+          }
+        }
+      }
+    }
     // Report a connection macOS poll() missed on a listening socket as POLLIN
     // so the guest accepts it this round instead of timing out.
     if (r >= 0 && has_listener) {
