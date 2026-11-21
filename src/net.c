@@ -2500,32 +2500,40 @@ static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_
         }
       }
     }
+    double poll_t0 = now_ms();
     r = prescanned ? prescanned : poll(hf, (nfds_t)nfds, wait_ms);
-    // If host poll() returned nothing but every fd is an AF_UNIX socket,
-    // the Darwin poll just missed stream data arriving during the wait.
-    // Re-check with the shim's own kqueue (event-driven) so the guest wakes
-    // the instant the socket becomes readable, not on a timer slice.
-    if (r == 0) {
-      int all_sock = 1;
+    // If the result is partial (some fds not reported), Darwin poll() may have
+    // missed STREAM data on an AF_UNIX socket. Re-check just the socket fds on
+    // the shim's own kqueue (event-driven) and merge, so a reply arriving
+    // during the wait wakes the guest instead of being dropped.
+    if (r >= 0 && r < (int)nfds) {
+      int has_sock = 0;
       for (unsigned long i = 0; i < nfds; i++) {
         if (ufds[i].fd < 0) continue;
         struct stat st;
-        if (fstat(ufds[i].fd, &st) != 0 || !S_ISSOCK(st.st_mode)) { all_sock = 0; break; }
+        if (fstat(ufds[i].fd, &st) == 0 && S_ISSOCK(st.st_mode)) { has_sock = 1; break; }
       }
-      if (all_sock) {
+      if (has_sock) {
         int kq = kqueue();
         if (kq >= 0) {
           struct kevent chg[64];
           int nc = 0;
           for (unsigned long i = 0; i < nfds && nc < 64; i++) {
             if (ufds[i].fd < 0) continue;
+            struct stat st;
+            if (fstat(ufds[i].fd, &st) != 0 || !S_ISSOCK(st.st_mode)) continue;
             if (ufds[i].events & L_POLLIN)
               EV_SET(&chg[nc++], (uintptr_t)ufds[i].fd, EVFILT_READ, EV_ADD, 0, 0, NULL);
             if (ufds[i].events & L_POLLOUT)
               EV_SET(&chg[nc++], (uintptr_t)ufds[i].fd, EVFILT_WRITE, EV_ADD, 0, 0, NULL);
           }
           struct timespec kts, *kw = NULL;
-          if (wait_ms >= 0) { kts.tv_sec = wait_ms / 1000; kts.tv_nsec = (long)(wait_ms % 1000) * 1000000L; kw = &kts; }
+          if (wait_ms >= 0) {
+            int el = (int)(now_ms() - poll_t0);
+            int remaining = wait_ms > el ? wait_ms - el : 0;
+            kts.tv_sec = remaining / 1000; kts.tv_nsec = (long)(remaining % 1000) * 1000000L;
+            kw = &kts;
+          }
           struct kevent out[64];
           int kn = kevent(kq, chg, nc, out, 64, kw);
           close(kq);
@@ -2538,8 +2546,9 @@ static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_
                 }
               }
             }
-            r = kn;
           }
+          r = 0;
+          for (unsigned long i = 0; i < nfds; i++) if (hf[i].revents) r++;
         }
       }
     }
