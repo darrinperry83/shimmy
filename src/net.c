@@ -2483,7 +2483,7 @@ static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_
       }
     }
   }
-  if (has_unix_stream && !slice) slice = 250;
+  if (has_unix_stream && !slice) slice = 20;
   if (sigmask) slice = (slice && slice < 100) ? slice : 100;
   double deadline = slice && timeout >= 0 ? now_ms() + timeout : 0;
   unsigned internal_wakes = 0;
