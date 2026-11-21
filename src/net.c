@@ -2674,21 +2674,6 @@ static long sys_pselect6(int nfds, uint64_t raddr, uint64_t waddr, uint64_t eadd
     for (int fd = 0; fd < nfds; fd++)
       if (FD_ISSET(fd, &req_rfds) && socket_is_listening(fd)) { has_listener = 1; break; }
   }
-  // A connected AF_UNIX stream socket (the D-Bus bus socket a greeter blocks
-  // on for its reply) can be missed by macOS pselect() the same way a listener
-  // is. Slice and re-peek it so a queued reply is reported readable this round.
-  int has_unix_stream = 0;
-  if (bytes && raddr) {
-    for (int fd = 0; fd < nfds; fd++) {
-      if (FD_ISSET(fd, &req_rfds) && !socket_is_listening(fd)) {
-        struct sockaddr_storage ss; socklen_t sl = sizeof ss;
-        if (getsockname(fd, (struct sockaddr *)&ss, &sl) == 0 && ss.ss_family == AF_UNIX) {
-          has_unix_stream = 1;
-          break;
-        }
-      }
-    }
-  }
   int timeout_ms = -1;
   if (tsp) {
     if (original_timeout.tv_sec >= INT_MAX / 1000)
@@ -2697,7 +2682,7 @@ static long sys_pselect6(int nfds, uint64_t raddr, uint64_t waddr, uint64_t eadd
       timeout_ms = (int)(original_timeout.tv_sec * 1000 +
                          (original_timeout.tv_nsec + 999999) / 1000000);
   }
-  const int must_slice = has_listener || has_mask || has_unix_stream;
+  const int must_slice = has_listener || has_mask;
   const int slice_ms = has_mask ? 100 : 250;
   double deadline = (must_slice && timeout_ms >= 0) ? now_ms() + timeout_ms : 0;
   long rr = 0;
@@ -2731,16 +2716,6 @@ static long sys_pselect6(int nfds, uint64_t raddr, uint64_t waddr, uint64_t eadd
             socket_listen_pending(fd)) {
           FD_SET(fd, &rfds);
           n++;
-        }
-      }
-    }
-    if (has_unix_stream && raddr) {
-      for (int fd = 0; fd < nfds; fd++) {
-        if (FD_ISSET(fd, &req_rfds) && !FD_ISSET(fd, &rfds) && !socket_is_listening(fd)) {
-          char tmp;
-          int has = recv(fd, &tmp, 1, MSG_PEEK | MSG_DONTWAIT) > 0;
-          if (!has) { int avail = 0; if (ioctl(fd, FIONREAD, &avail) == 0 && avail > 0) has = 1; }
-          if (has) { FD_SET(fd, &rfds); n++; }
         }
       }
     }
