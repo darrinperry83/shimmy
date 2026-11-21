@@ -1990,22 +1990,6 @@ static int socket_listen_pending(int fd) {
   return info.psi.soi_qlen > 0;
 }
 
-// Linux sk_is_readable(): a connected AF_UNIX STREAM socket is "readable"
-// (poll reports POLLIN) even while its receive queue is empty, because the
-// stream is established and a read may observe EOF. Darwin poll() never
-// reports this, so a blocking poll on a freshly-connected bus socket waits
-// for data instead of returning ready — unlike Linux.
-static int unix_stream_connected(int fd) {
-  struct stat st;
-  if (fstat(fd, &st) != 0 || !S_ISSOCK(st.st_mode)) return 0;
-  struct socket_fdinfo info;
-  int got = proc_pidfdinfo(getpid(), fd, PROC_PIDFDSOCKETINFO, &info, sizeof info);
-  if (got != sizeof info || (info.psi.soi_options & SO_ACCEPTCONN)) return 0;
-  if (info.psi.soi_kind != SOCK_STREAM) return 0;
-  struct sockaddr_storage peer; socklen_t plen = sizeof peer;
-  return getpeername(fd, (struct sockaddr *)&peer, &plen) == 0;
-}
-
 static long sys_epoll_wait_ts(int epfd, struct lin_epoll_event* uev, int maxevents,
                              const struct timespec* tsp, const char* wait_name,
                              double requested_ms) {
@@ -2072,7 +2056,6 @@ static long sys_epoll_wait_ts(int epfd, struct lin_epoll_event* uev, int maxeven
             char tmp;
             if (recv(rfd, &tmp, 1, MSG_PEEK | MSG_DONTWAIT) > 0) has_data = 1;
             else { int avail = 0; if (ioctl(rfd, FIONREAD, &avail) == 0 && avail > 0) has_data = 1; }
-            if (!has_data) has_data = unix_stream_connected(rfd);
           }
         }
         if (has_data) {
@@ -2084,7 +2067,25 @@ static long sys_epoll_wait_ts(int epfd, struct lin_epoll_event* uev, int maxeven
     pthread_mutex_unlock(&g_lock);
   }
 epoll_retry:
-  if (n > 0) { /* pre-scan already has events; skip the blocking kevent */ }
+  if (n > 0) {
+    // The pre-scan produced read events, so the blocking kevent is skipped.
+    // Skipping it also starves an EPOLLOUT wake for a fd that became writable
+    // while reads were pending — exactly the broker's reply flush after a
+    // sendmsg EAGAIN. Deliver any already-pending write events with a
+    // zero-timeout kevent so EPOLLOUT is never gated behind a read lull.
+    int want_out = 0;
+    pthread_mutex_lock(&g_lock);
+    struct epinst* oe = ep_find(epfd);
+    if (oe)
+      for (int i = 0; i < oe->n; i++)
+        if (oe->v[i].events & L_EPOLLOUT) { want_out = 1; break; }
+    pthread_mutex_unlock(&g_lock);
+    if (want_out && n < maxevents) {
+      struct timespec zts = {0, 0};
+      int wn = kevent(epfd, NULL, 0, kv + n, maxevents - n, &zts);
+      if (wn > 0) n += wn;
+    }
+  }
   else {
     struct timespec bounded;
     const struct timespec *wait = tsp;
@@ -2148,7 +2149,6 @@ epoll_retry:
             char tmp;
             if (recv(rfd, &tmp, 1, MSG_PEEK | MSG_DONTWAIT) > 0) has_data = 1;
             else { int avail = 0; if (ioctl(rfd, FIONREAD, &avail) == 0 && avail > 0) has_data = 1; }
-            if (!has_data) has_data = unix_stream_connected(rfd);
           }
         } else if (pidfd_shim_pid(rfd) > 0) {
           // pidfd: a kqueue watching a child pid; "readable" once the child exits.
@@ -2549,7 +2549,6 @@ static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_
           char tmp;
           int has = recv(ufds[i].fd, &tmp, 1, MSG_PEEK | MSG_DONTWAIT) > 0;
           if (!has) { int avail = 0; if (ioctl(ufds[i].fd, FIONREAD, &avail) == 0 && avail > 0) has = 1; }
-          if (!has) has = unix_stream_connected(ufds[i].fd);
           if (has) { pre_ready[i] = 1; prescanned++; }
         }
       }
@@ -2839,7 +2838,6 @@ static long sys_pselect6(int nfds, uint64_t raddr, uint64_t waddr, uint64_t eadd
           char tmp;
           if (recv(fd, &tmp, 1, MSG_PEEK | MSG_DONTWAIT) > 0) has = 1;
           else { int avail = 0; if (ioctl(fd, FIONREAD, &avail) == 0 && avail > 0) has = 1; }
-          if (!has) has = unix_stream_connected(fd);
         }
         if (has) { FD_SET(fd, &rfds); n++; }
       }
