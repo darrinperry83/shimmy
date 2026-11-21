@@ -2468,6 +2468,22 @@ static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_
       break;
     }
   if (has_listener && !slice) slice = 250;
+  // A connected AF_UNIX stream socket (the D-Bus bus socket) can also be missed
+  // by Darwin poll(): the greeter's blocking systemBus().call() waits for the
+  // reply on exactly such a socket, and without a bounded slice + re-check the
+  // already-queued reply strands it until the 25s timeout. Slice and re-peek
+  // like the listener case so the queued reply is reported as POLLIN this round.
+  int has_unix_stream = 0;
+  for (unsigned long i = 0; i < nfds; i++) {
+    if (ufds[i].fd >= 0 && (ufds[i].events & L_POLLIN) && !socket_is_listening(ufds[i].fd)) {
+      struct sockaddr_storage ss; socklen_t sl = sizeof ss;
+      if (getsockname(ufds[i].fd, (struct sockaddr *)&ss, &sl) == 0 && ss.ss_family == AF_UNIX) {
+        has_unix_stream = 1;
+        break;
+      }
+    }
+  }
+  if (has_unix_stream && !slice) slice = 250;
   if (sigmask) slice = (slice && slice < 100) ? slice : 100;
   double deadline = slice && timeout >= 0 ? now_ms() + timeout : 0;
   unsigned internal_wakes = 0;
@@ -2494,6 +2510,17 @@ static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_
             !(hf[i].revents & POLLIN) && socket_listen_pending(ufds[i].fd)) {
           hf[i].revents |= POLLIN;
           r++;
+        }
+      }
+    }
+    if (r >= 0 && has_unix_stream) {
+      for (unsigned long i = 0; i < nfds; i++) {
+        if (ufds[i].fd >= 0 && (ufds[i].events & L_POLLIN) &&
+            !(hf[i].revents & POLLIN) && !socket_is_listening(ufds[i].fd)) {
+          char tmp;
+          int has = recv(ufds[i].fd, &tmp, 1, MSG_PEEK | MSG_DONTWAIT) > 0;
+          if (!has) { int avail = 0; if (ioctl(ufds[i].fd, FIONREAD, &avail) == 0 && avail > 0) has = 1; }
+          if (has) { hf[i].revents |= POLLIN; r++; }
         }
       }
     }
