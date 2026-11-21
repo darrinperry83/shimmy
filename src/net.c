@@ -2758,6 +2758,35 @@ static long sys_pselect6(int nfds, uint64_t raddr, uint64_t waddr, uint64_t eadd
         }
       }
     }
+    // Darwin pselect() can miss STREAM data on an AF_UNIX socket (the D-Bus
+    // reply the greeter/compositor waits on). If the result is partial,
+    // re-check just the socket fds on a shim kqueue (event-driven) and merge.
+    if (n >= 0 && raddr) {
+      int total = 0;
+      for (int fd = 0; fd < nfds; fd++) if (FD_ISSET(fd, &req_rfds)) total++;
+      if (n < total) {
+        int kq = kqueue();
+        if (kq >= 0) {
+          struct kevent chg[64]; int nc = 0;
+          for (int fd = 0; fd < nfds && nc < 64; fd++) {
+            if (!FD_ISSET(fd, &req_rfds)) continue;
+            struct stat st;
+            if (fstat(fd, &st) != 0 || !S_ISSOCK(st.st_mode)) continue;
+            EV_SET(&chg[nc++], (uintptr_t)fd, EVFILT_READ, EV_ADD, 0, 0, NULL);
+          }
+          struct timespec kts = {0, 0};
+          struct kevent out[64];
+          int kn = kevent(kq, chg, nc, out, 64, &kts);
+          close(kq);
+          if (kn > 0) {
+            for (int j = 0; j < kn; j++) {
+              int fd = (int)out[j].ident;
+              if (out[j].filter == EVFILT_READ && !FD_ISSET(fd, &rfds)) { FD_SET(fd, &rfds); n++; }
+            }
+          }
+        }
+      }
+    }
     if (has_mask && (syscalls_signal_pending() & mask)) { rr = -L_EINTR; break; }
     rr = n;
     if (n != 0 || !must_slice || timeout_ms == 0) break;
