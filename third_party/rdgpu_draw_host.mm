@@ -9,6 +9,14 @@
 #include <string>
 #include <vector>
 
+// Pipeline + queue cache: Qt's greeter re-issues the same shader every frame,
+// so recompiling SPIR-V -> MSL -> Metal library and rebuilding the pipeline
+// (and a fresh command queue) per draw is the dominant boot/frame cost. Cache
+// them keyed by the shader + vertex layout, Linux/Mesa-style.
+static id<MTLRenderPipelineState> g_cached_pipeline;
+static std::string g_cached_pipeline_key;
+static id<MTLCommandQueue> g_cached_queue;
+
 namespace {
 bool is_float_vec(const spirv_cross::CompilerMSL &compiler,
                   const spirv_cross::Resource &r, unsigned comps) {
@@ -440,9 +448,23 @@ int rdgpu_draw_execute_with_depth(const void *packet,size_t bytes,
                 layout.layouts[0].stepFunction=MTLVertexStepFunctionPerVertex;
                 layout.layouts[0].stepRate=1;
                 pipeline.vertexDescriptor=layout;
-                id<MTLRenderPipelineState> state=[device
-                    newRenderPipelineStateWithDescriptor:pipeline error:&error];
-                id<MTLCommandQueue> queue=[device newCommandQueue];
+                std::string key = vertexMSL;
+                key += "\x01"; key += fragmentMSL;
+                key += "\x01"; key += has_depth ? "d" : "-";
+                key += v3 ? "3" : "-"; key += v6 ? "6" : "-";
+                char lay[64];
+                snprintf(lay, sizeof lay, "|%d|%d|%d|%d|%d",
+                         (int)h.attribute_format, (int)attr1_format, (int)attr1_offset,
+                         (int)attr2_offset, (int)h.vertex_stride);
+                key += lay;
+                id<MTLRenderPipelineState> state =
+                    (g_cached_pipeline && g_cached_pipeline_key == key) ? g_cached_pipeline : nil;
+                if (!state) {
+                    state = [device newRenderPipelineStateWithDescriptor:pipeline error:&error];
+                    if (state) { g_cached_pipeline = state; g_cached_pipeline_key = key; }
+                }
+                id<MTLCommandQueue> queue = g_cached_queue ? g_cached_queue :
+                    (g_cached_queue = [device newCommandQueue]);
                 id<MTLBuffer> vertex=[device newBufferWithBytes:vertex_data
                     length:h.vertex_bytes options:MTLResourceStorageModeShared];
                 MTLRenderPassDescriptor *pass=[MTLRenderPassDescriptor renderPassDescriptor];
