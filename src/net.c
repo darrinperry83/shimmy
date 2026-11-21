@@ -2485,7 +2485,22 @@ static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_
       }
     }
     for (unsigned long i = 0; i < nfds; i++) hf[i].revents = 0;
-    r = poll(hf, (nfds_t)nfds, wait_ms);
+    // Linux-true readiness: report data already queued on an AF_UNIX stream
+    // socket immediately (Darwin poll() misses it). Do this BEFORE the blocking
+    // poll so the guest sees readiness without any timer slice.
+    int prescanned = 0;
+    for (unsigned long i = 0; i < nfds; i++) {
+      if (ufds[i].fd >= 0 && (ufds[i].events & L_POLLIN)) {
+        struct stat st;
+        if (fstat(ufds[i].fd, &st) == 0 && S_ISSOCK(st.st_mode) && !socket_is_listening(ufds[i].fd)) {
+          char tmp;
+          int has = recv(ufds[i].fd, &tmp, 1, MSG_PEEK | MSG_DONTWAIT) > 0;
+          if (!has) { int avail = 0; if (ioctl(ufds[i].fd, FIONREAD, &avail) == 0 && avail > 0) has = 1; }
+          if (has) { hf[i].revents |= POLLIN; prescanned++; }
+        }
+      }
+    }
+    r = prescanned ? prescanned : poll(hf, (nfds_t)nfds, wait_ms);
     // Report a connection macOS poll() missed on a listening socket as POLLIN
     // so the guest accepts it this round instead of timing out.
     if (r >= 0 && has_listener) {
