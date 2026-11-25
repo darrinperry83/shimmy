@@ -314,9 +314,11 @@ static long route_syscall(unsigned long nr, unsigned long a0, unsigned long a1, 
   else                            r = linux_syscall(nr, a0, a1, a2, a3, a4, a5);
   if (nr == 0x2002 && getenv("RDMETAL_GATE_DEBUG"))
     fprintf(stderr, "RDMETAL_SYSCALL result=%ld pid=%d\n", r, (int)getpid());
-  if (getenv("RDEXECDBG") && r == -9)
+  if (getenv("RDEXECDBG") && r == -9) {
     fprintf(stderr, "[ebadf] nr=%lu(%#lx,%#lx,%#lx,%#lx,%#lx,%#lx) -> -9\n",
             nr, a0, a1, a2, a3, a4, a5);
+    FILE*_f=fopen("/tmp/rd_ebadf.txt","a"); if(_f){fprintf(_f,"pid=%d nr=%lu a0=%#lx a1=%#lx a2=%#lx a3=%#lx a4=%#lx a5=%#lx -> -9\n",(int)getpid(),nr,a0,a1,a2,a3,a4,a5);fclose(_f);}
+  }
   if (getenv("RDENOENTDBG") && r == -2)
     fprintf(stderr, "[enoent] pid=%d nr=%lu(%#lx,%#lx,%#lx) path='%s'\n",
             (int)getpid(), nr, a0, a1, a2, (const char*)a1);
@@ -2604,7 +2606,10 @@ int main(int argc, char** argv) {
   // of the carried RDVT_ROOT_PID) empties /run once before systemd starts.
   // Re-exec'd shims inherit RDVT_ROOT_PID and skip this so they never wipe the
   // runtime state of an already-booted guest.
-  if (!getenv("RDVT_ROOT_PID") && !getenv("RDSKIP_RUNCLEAR"))
+  // Only the locked init launch owns boot cleanup. A standalone diagnostic
+  // against this root must not erase a running guest's sockets and runtime.
+  if (g_boot_lock_fd >= 0 && !getenv("RDVT_ROOT_PID") &&
+      !getenv("RDSKIP_RUNCLEAR"))
     run_clear_boot(rootfs);
   // The root PID identifies which shim process owns the VT console renderer + reader thread.
   // exec() keeps the PID, fork() gives the child a new one, so a re-exec'd main process (shebang,

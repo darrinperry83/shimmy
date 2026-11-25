@@ -4,6 +4,10 @@
 #include <stdint.h>
 #include <IOSurface/IOSurface.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct RDMetalCore RDMetalCore;
 typedef struct RDMetalImage RDMetalImage;
 typedef struct RDMetalDepth RDMetalDepth;
@@ -34,4 +38,7 @@ uint64_t rd_metal_depth_clear(RDMetalDepth *depth,double value,uint32_t stencil,
                               uint32_t mask);
 int rd_metal_depth_poll(RDMetalDepth *depth,uint64_t sequence);
 void rd_metal_depth_destroy(RDMetalDepth *depth);
+#ifdef __cplusplus
+}
+#endif
 #endif

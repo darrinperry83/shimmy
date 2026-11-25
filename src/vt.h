@@ -34,6 +34,7 @@ int  vt_owns_fd(int fd);                  // is fd (or any dup of it) one of our
 int  vt_number_for_fd(int fd);            // guest tty number for a pty slave, or 0
 void vt_fd_closed(int fd);                // guest closed a console fd: drop its open count
 int  vt_console_active_open(void);        // -> fresh read-end fd for /sys/class/tty/tty0/active
+void vt_console_active_rewind(void);     // refresh the sysfs value after seek-to-start
 int  vt_console_active_owns_fd(int fd);   // is fd (or a dup) the active-console pipe read end?
 int  vt_claim_ctty(int fd);
 int  vt_get_foreground(int fd, int* pgid);

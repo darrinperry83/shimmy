@@ -96,7 +96,7 @@ typedef struct {
     uint64_t handle,generation,exportHandle,brokerReceipt;
     uint32_t width,height;
     uint8_t lease[16];
-    uint64_t drawFence;
+    uint64_t drawFence, clearFence;
     uint64_t lastCompletedFence;
     int producerComplete,exported,carrierIssued;
     int isDepth;

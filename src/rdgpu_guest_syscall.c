@@ -144,7 +144,7 @@ long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
         pthread_mutex_lock(&s->lock);
         RDGPUGuestSlot *entry=slot(s,a1);
         if(!entry){pthread_mutex_unlock(&s->lock);return -ESTALE;}
-        if(entry->exported||entry->drawFence){
+        if(entry->exported||entry->drawFence||entry->clearFence){
             pthread_mutex_unlock(&s->lock);return -EBUSY;
         }
         if(entry->carrierIssued&&
@@ -164,6 +164,7 @@ long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
             s->disabled=1;result=-EIO;
         }else if(result==0){
             entry->producerComplete=0;entry->lastCompletedFence=0;
+            entry->clearFence=r.value0;
             result=(long)r.value0;
         }
         pthread_mutex_unlock(&s->lock);return result;
@@ -402,9 +403,30 @@ long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
             draw.version!=RDMETAL_DRAW_VERSION_V3&&
             draw.version!=RDMETAL_DRAW_VERSION_V4&&
             draw.version!=RDMETAL_DRAW_VERSION_V5&&
-            draw.version!=RDMETAL_DRAW_VERSION_V6)||
+            draw.version!=RDMETAL_DRAW_VERSION_V6&&
+            draw.version!=RDMETAL_DRAW_VERSION_V7&&
+            draw.version!=RDMETAL_DRAW_VERSION_V8)||
            draw.total_bytes!=a3||draw.target_handle!=a1){
             free(snapshot);pthread_mutex_unlock(&s->lock);return -EINVAL;
+        }
+        if(draw.version==RDMETAL_DRAW_VERSION_V5 ||
+           draw.version==RDMETAL_DRAW_VERSION_V6 || draw.version==RDMETAL_DRAW_VERSION_V7 || draw.version==RDMETAL_DRAW_VERSION_V8){
+            size_t minimum=draw.version==RDMETAL_DRAW_VERSION_V8?sizeof(struct rdmetal_draw_header_v8):draw.version==RDMETAL_DRAW_VERSION_V7?
+                sizeof(struct rdmetal_draw_header_v7):draw.version==RDMETAL_DRAW_VERSION_V6?
+                sizeof(struct rdmetal_draw_header_v6):sizeof(struct rdmetal_draw_header_v5);
+            if(a3<minimum){free(snapshot);pthread_mutex_unlock(&s->lock);return -EINVAL;}
+            struct rdmetal_draw_header_v5 depth;
+            memcpy(&depth,snapshot,sizeof depth);
+            if(depth.depth_handle){
+                RDGPUGuestSlot *attachment=slot(s,depth.depth_handle);
+                if(!attachment || !attachment->isDepth ||
+                   attachment->width!=entry->width || attachment->height!=entry->height){
+                    free(snapshot);pthread_mutex_unlock(&s->lock);return -EPERM;
+                }
+                if(attachment->drawFence || attachment->clearFence){free(snapshot);pthread_mutex_unlock(&s->lock);return -EBUSY;}
+            } else if(draw.version!=RDMETAL_DRAW_VERSION_V6 && draw.version!=RDMETAL_DRAW_VERSION_V8){
+                free(snapshot);pthread_mutex_unlock(&s->lock);return -EINVAL;
+            }
         }
         RDGPUDrawBatchRequest batch={.magic=RDGPU_DRAW_BATCH_MAGIC,
             .version=RDGPU_DRAW_BATCH_VERSION,.request_id=++s->nextRequest,
@@ -502,6 +524,12 @@ long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
         memcpy(q.lease,entry->lease,16);q.arg1=entry->generation;
         q.arg0=op==RDGPU_RELEASE?0:a2;
         if(op==RDGPU_RELEASE&&a2){pthread_mutex_unlock(&s->lock);return -EINVAL;}
+        if(entry->clearFence && op==RDGPU_WAIT && a2!=entry->clearFence){
+            pthread_mutex_unlock(&s->lock);return -ESTALE;
+        }
+        if(entry->clearFence && (op==RDGPU_RELEASE || op==RDGPU_CLEAR)){
+            pthread_mutex_unlock(&s->lock);return -EBUSY;
+        }
         if(op==RDGPU_WAIT&&!a2){pthread_mutex_unlock(&s->lock);return -EINVAL;}
         if(op==RDGPU_CLEAR&&entry->exported){
             pthread_mutex_unlock(&s->lock);return -EBUSY;
@@ -583,7 +611,7 @@ long rdgpu_guest_syscall(RDGPUGuestState *s,uint64_t op,uint64_t a1,
                (!s->fdFrameComplete||s->fdFrameComplete(s->fdFrameContext,
                    s->ownerPid,entry->lease,entry->generation,a2)))
                 result=-EIO;
-            else {entry->producerComplete=1;entry->lastCompletedFence=a2;}
+            else {entry->producerComplete=1;entry->lastCompletedFence=a2;entry->clearFence=0;}
         }
         else if(op==RDGPU_PREPARE_EXPORT){
             if(!r.value0||r.value1){s->disabled=1;result=-EIO;}

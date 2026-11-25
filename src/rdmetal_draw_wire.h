@@ -12,6 +12,9 @@
 #define RDMETAL_DRAW_VERSION_V4 4u
 #define RDMETAL_DRAW_VERSION_V5 5u
 #define RDMETAL_DRAW_VERSION_V6 6u
+#define RDMETAL_DRAW_VERSION_V7 7u
+#define RDMETAL_DRAW_VERSION_V8 8u
+#define RDMETAL_DRAW_MAX_STAGE_UNIFORM_BYTES 4096u
 #define RDMETAL_DRAW_MAX_SHADER_WORDS 16384u
 #define RDMETAL_DRAW_MAX_VERTEX_BYTES 262144u
 #define RDMETAL_DRAW_MAX_INDEX_BYTES 262144u
@@ -86,6 +89,28 @@ struct rdmetal_draw_header_v6 {
    uint32_t attr2_offset;   /* byte offset of the third attribute */
 };
 _Static_assert(sizeof(struct rdmetal_draw_header_v6)==160,"draw v6 header ABI");
+/* V7 carries native depth/stencil state and the color write mask. Stencil
+ * enums use PIPE_FUNC/PIPE_STENCIL_OP values; all masks/references are 8-bit.
+ * attr2 may be NONE for the canonical two-attribute shader layout. */
+struct rdmetal_stencil_wire {
+   uint32_t enabled, compare, fail_op, depth_fail_op, pass_op;
+   uint32_t read_mask, write_mask, reference;
+};
+struct rdmetal_draw_header_v7 {
+   struct rdmetal_draw_header_v6 base;
+   struct rdmetal_stencil_wire stencil[2];
+   uint32_t color_write_mask, front_ccw;
+};
+_Static_assert(sizeof(struct rdmetal_draw_header_v7)==232,"draw v7 header ABI");
+
+/* V8 runs bounded application shaders and carries independent stage UBOs.
+ * Payload tail is vertex constants followed by fragment constants. */
+struct rdmetal_draw_header_v8 {
+   struct rdmetal_draw_header_v7 base;
+   uint32_t fragment_uniform_bytes, vertex_flags; /* bit 0: flip clip Y */
+};
+_Static_assert(sizeof(struct rdmetal_draw_header_v8)==240,"draw v8 header ABI");
+
 #if defined(__BYTE_ORDER__) && __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
 #error "rdmetal draw wire currently requires little-endian producer"
 #endif

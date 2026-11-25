@@ -26,7 +26,7 @@ bool is_float_vec(const spirv_cross::CompilerMSL &compiler,
 }
 
 bool supported_resources(const spirv_cross::CompilerMSL &compiler,
-                         spv::ExecutionModel stage, bool textured, bool v6) {
+                         spv::ExecutionModel stage, bool textured, bool v6, bool generic=false) {
     const auto resources=compiler.get_shader_resources();
     if(!resources.storage_buffers.empty()||
        !resources.subpass_inputs.empty()||!resources.storage_images.empty()||
@@ -37,8 +37,21 @@ bool supported_resources(const spirv_cross::CompilerMSL &compiler,
     /* The real Qt vertex shader carries exactly one uniform buffer: the
      * qt_Matrix MVP (a single mat4, 64 bytes). The fragment stage carries none. */
     if(resources.uniform_buffers.size() > 1) return false;
-    if(stage != spv::ExecutionModelVertex && !resources.uniform_buffers.empty())
+    if(!generic && stage != spv::ExecutionModelVertex && !resources.uniform_buffers.empty())
        return false;
+    if(generic){
+        if(resources.sampled_images.size()>(textured?1u:0u))return false;
+        if(stage==spv::ExecutionModelVertex && (!resources.sampled_images.empty() || resources.stage_inputs.size()>3))return false;
+        for(const auto &input:resources.stage_inputs){
+            const auto &t=compiler.get_type(input.type_id);
+            if(t.basetype!=spirv_cross::SPIRType::Float || t.columns!=1 || t.vecsize>4)return false;
+            if(stage==spv::ExecutionModelVertex && compiler.get_decoration(input.id,spv::DecorationLocation)>2)return false;
+        }
+        if(stage==spv::ExecutionModelFragment)
+            return resources.stage_outputs.size()==1 && is_float_vec(compiler,resources.stage_outputs[0],4) &&
+                compiler.get_decoration(resources.stage_outputs[0].id,spv::DecorationLocation)==0;
+        return true;
+    }
     if(stage==spv::ExecutionModelVertex){
         if(v6){
             /* Real Qt shape: position(float2)@0 + color(vec4)@1 + opacity(float)@2
@@ -48,7 +61,7 @@ bool supported_resources(const spirv_cross::CompilerMSL &compiler,
             for(const auto &input:resources.stage_inputs){
                 uint32_t loc=compiler.get_decoration(input.id,spv::DecorationLocation);
                 if(loc==0&&is_float_vec(compiler,input,2))have_pos=1;
-                else if(loc==1&&is_float_vec(compiler,input,4))have_color=1;
+                else if(loc==1&&(is_float_vec(compiler,input,4)||is_float_vec(compiler,input,2)))have_color=1;
                 else if(loc==2&&is_float_vec(compiler,input,1))have_opacity=1;
                 else return false;
             }
@@ -56,7 +69,7 @@ bool supported_resources(const spirv_cross::CompilerMSL &compiler,
             if(resources.stage_outputs.size()!=2)return false;
             int out_color=0,out_opacity=0;
             for(const auto &out:resources.stage_outputs){
-                if(is_float_vec(compiler,out,4))out_color=1;
+                if(is_float_vec(compiler,out,4)||is_float_vec(compiler,out,2))out_color=1;
                 else if(is_float_vec(compiler,out,1))out_opacity=1;
                 else return false;
             }
@@ -100,7 +113,7 @@ bool supported_resources(const spirv_cross::CompilerMSL &compiler,
         if(!textured&&!resources.sampled_images.empty())return false;
         int in_color=0,in_opacity=0;
         for(const auto &input:resources.stage_inputs){
-            if(is_float_vec(compiler,input,4))in_color=1;
+            if(is_float_vec(compiler,input,4)||is_float_vec(compiler,input,2))in_color=1;
             else if(is_float_vec(compiler,input,1))in_opacity=1;
             else return false;
         }
@@ -135,7 +148,9 @@ bool checked_header(const rdmetal_draw_header &h,size_t bytes,size_t prefix){
         h.version!=RDMETAL_DRAW_VERSION_V3&&
         h.version!=RDMETAL_DRAW_VERSION_V4&&
         h.version!=RDMETAL_DRAW_VERSION_V5&&
-        h.version!=RDMETAL_DRAW_VERSION_V6)||
+        h.version!=RDMETAL_DRAW_VERSION_V6&&
+        h.version!=RDMETAL_DRAW_VERSION_V7&&
+        h.version!=RDMETAL_DRAW_VERSION_V8)||
        h.flags||!h.target_handle||h.total_bytes!=bytes||
        !h.target_width||!h.target_height||
        h.target_width>4096||h.target_height>4096||
@@ -155,6 +170,8 @@ bool checked_header(const rdmetal_draw_header &h,size_t bytes,size_t prefix){
     if(h.version==RDMETAL_DRAW_VERSION_V4&&prefix!=sizeof(rdmetal_draw_header_v4))return false;
     if(h.version==RDMETAL_DRAW_VERSION_V5&&prefix!=sizeof(rdmetal_draw_header_v5))return false;
     if(h.version==RDMETAL_DRAW_VERSION_V6&&prefix!=sizeof(rdmetal_draw_header_v6))return false;
+    if(h.version==RDMETAL_DRAW_VERSION_V7&&prefix!=sizeof(rdmetal_draw_header_v7))return false;
+    if(h.version==RDMETAL_DRAW_VERSION_V8&&prefix!=sizeof(rdmetal_draw_header_v8))return false;
     /* The v3 tail (attr1/index/uniform) and the exact vertex-bounds check are
      * validated by rdgpu_draw_execute once the index data is available. */
     return true;
@@ -167,23 +184,46 @@ int rdgpu_draw_execute_with_depth(const void *packet,size_t bytes,
                        RDGPUDrawTextureComplete tex_complete,
                        void *tex_context,void *depth_texture){
     if(!packet||!resolve||bytes<sizeof(rdmetal_draw_header)||
-       bytes>sizeof(rdmetal_draw_header_v6)+2*RDMETAL_DRAW_MAX_SHADER_WORDS*4+
+       bytes>sizeof(rdmetal_draw_header_v8)+2*RDMETAL_DRAW_MAX_SHADER_WORDS*4+
              RDMETAL_DRAW_MAX_VERTEX_BYTES+RDMETAL_DRAW_MAX_INDEX_BYTES+
-             RDMETAL_DRAW_MAX_UNIFORM_BYTES)return RDGPU_DRAW_BAD_PACKET;
+             2u*RDMETAL_DRAW_MAX_STAGE_UNIFORM_BYTES)return RDGPU_DRAW_BAD_PACKET;
     rdmetal_draw_header h;
     memcpy(&h,packet,sizeof h);
-    const bool v6 = h.version==RDMETAL_DRAW_VERSION_V6;
-    const bool v5 = h.version==RDMETAL_DRAW_VERSION_V5 || v6;
+    const bool v8 = h.version==RDMETAL_DRAW_VERSION_V8;
+    const bool v7 = h.version==RDMETAL_DRAW_VERSION_V7 || v8;
+    bool v6 = h.version==RDMETAL_DRAW_VERSION_V6;
+    const bool v5 = h.version==RDMETAL_DRAW_VERSION_V5 || v6 || v7;
     const bool v4 = h.version==RDMETAL_DRAW_VERSION_V4 || v5;
     const bool v3 = h.version==RDMETAL_DRAW_VERSION_V3 || v4;
     const bool v2tex = h.version==RDMETAL_DRAW_VERSION_TEXTURE;
-    const size_t prefix = v6 ? sizeof(rdmetal_draw_header_v6) :
+    const size_t prefix = v8 ? sizeof(rdmetal_draw_header_v8) : v7 ? sizeof(rdmetal_draw_header_v7) :
+                          v6 ? sizeof(rdmetal_draw_header_v6) :
                           v5 ? sizeof(rdmetal_draw_header_v5) :
                           v4 ? sizeof(rdmetal_draw_header_v4) :
                           v3 ? sizeof(rdmetal_draw_header_v3) :
                           v2tex ? sizeof(rdmetal_draw_header_v2) :
                                   sizeof(rdmetal_draw_header);
-    if(!checked_header(h,bytes,prefix))return RDGPU_DRAW_BAD_PACKET;
+    if(bytes<prefix || !checked_header(h,bytes,prefix))return RDGPU_DRAW_BAD_PACKET;
+    uint32_t fs_uniform_bytes=0, vertex_flags=0;
+    if(v8){
+        rdmetal_draw_header_v8 h8;memcpy(&h8,packet,sizeof h8);
+        if((h8.vertex_flags&~1u) || h8.fragment_uniform_bytes>RDMETAL_DRAW_MAX_STAGE_UNIFORM_BYTES)return RDGPU_DRAW_BAD_PACKET;
+        fs_uniform_bytes=h8.fragment_uniform_bytes;vertex_flags=h8.vertex_flags;
+    }
+    rdmetal_draw_header_v7 state7={};
+    if(v7){
+        memcpy(&state7,packet,sizeof state7);
+        if(state7.color_write_mask>15 || state7.front_ccw>1 ||
+           (state7.base.attr2_format!=RDMETAL_DRAW_ATTR_NONE &&
+            state7.base.attr2_format!=RDMETAL_DRAW_ATTR_FLOAT) ||
+           (state7.base.attr2_format==RDMETAL_DRAW_ATTR_NONE && state7.base.attr2_offset))
+            return RDGPU_DRAW_BAD_PACKET;
+        for(const auto &st:state7.stencil)
+            if(st.enabled>1 || st.compare>7 || st.fail_op>7 ||
+               st.depth_fail_op>7 || st.pass_op>7 || st.read_mask>255 ||
+               st.write_mask>255 || st.reference>255)return RDGPU_DRAW_BAD_PACKET;
+        v6=v8 || state7.base.attr2_format==RDMETAL_DRAW_ATTR_FLOAT;
+    }
     uint32_t depth_flags=0,depth_compare=7;
     bool has_depth=false;
     if(v5){
@@ -195,7 +235,7 @@ int rdgpu_draw_execute_with_depth(const void *packet,size_t bytes,
             if(!depth_texture)return RDGPU_DRAW_BAD_PACKET;
             depth_flags=d.depth_flags;depth_compare=d.depth_compare;
             has_depth=true;
-        } else if(!v6){
+        } else if(h.version!=RDMETAL_DRAW_VERSION_V6 && !v8){
             /* V5 always carries a depth lease; only V6 may omit one. */
             return RDGPU_DRAW_BAD_PACKET;
         }
@@ -234,8 +274,9 @@ int rdgpu_draw_execute_with_depth(const void *packet,size_t bytes,
         textured = texture_handle != 0;
         if(v6){
             /* Real Qt layout: attr1 is color (u8x4 unorm) before opacity. */
-            if(attr1_format!=RDMETAL_DRAW_ATTR_U8X4_UNORM||
-               attr1_offset+4>h.vertex_stride)return RDGPU_DRAW_BAD_PACKET;
+            if((attr1_format!=RDMETAL_DRAW_ATTR_U8X4_UNORM && attr1_format!=RDMETAL_DRAW_ATTR_FLOAT2)||
+               (attr1_format==RDMETAL_DRAW_ATTR_FLOAT2?8u:4u)>h.vertex_stride ||
+               attr1_offset>h.vertex_stride-(attr1_format==RDMETAL_DRAW_ATTR_FLOAT2?8u:4u))return RDGPU_DRAW_BAD_PACKET;
         } else {
             /* attr1 must be float2 (texcoord) at a sane offset; canonical
              * layout is float3 pos + float2 uv. */
@@ -249,7 +290,7 @@ int rdgpu_draw_execute_with_depth(const void *packet,size_t bytes,
                uint64_t(index_count)*isize>RDMETAL_DRAW_MAX_INDEX_BYTES)
                 return RDGPU_DRAW_BAD_PACKET;
         } else if(index_count)return RDGPU_DRAW_BAD_PACKET;
-        if(uniform_bytes&&uniform_bytes!=RDMETAL_DRAW_MAX_UNIFORM_BYTES)
+        if(v8 ? uniform_bytes>RDMETAL_DRAW_MAX_STAGE_UNIFORM_BYTES : (uniform_bytes&&uniform_bytes!=RDMETAL_DRAW_MAX_UNIFORM_BYTES))
             return RDGPU_DRAW_BAD_PACKET;
         if(textured&&(!texture_handle||!texture_generation))return RDGPU_DRAW_BAD_PACKET;
         if(!textured&&texture_generation)return RDGPU_DRAW_BAD_PACKET;
@@ -259,8 +300,8 @@ int rdgpu_draw_execute_with_depth(const void *packet,size_t bytes,
             attr2_format=v6h.attr2_format;
             attr2_offset=v6h.attr2_offset;
             /* attr2 is the R32_FLOAT opacity following color in the vertex. */
-            if(attr2_format!=RDMETAL_DRAW_ATTR_FLOAT||
-               attr2_offset+4>h.vertex_stride)return RDGPU_DRAW_BAD_PACKET;
+            if((attr2_format!=RDMETAL_DRAW_ATTR_FLOAT && !(v8 && attr2_format==RDMETAL_DRAW_ATTR_NONE))||
+               (attr2_format==RDMETAL_DRAW_ATTR_FLOAT && (h.vertex_stride<4 || attr2_offset>h.vertex_stride-4)))return RDGPU_DRAW_BAD_PACKET;
         }
     } else if(v2tex){
         rdmetal_draw_header_v2 v2;
@@ -271,6 +312,9 @@ int rdgpu_draw_execute_with_depth(const void *packet,size_t bytes,
         texture_handle=v2.texture_handle;
         texture_generation=v2.texture_generation;
     }
+    uint64_t required=uint64_t(prefix)+uint64_t(h.vertex_shader_words+h.fragment_shader_words)*4+
+        h.vertex_bytes+uint64_t(index_count)*(index_type==RDMETAL_DRAW_INDEX_U16?2:index_type==RDMETAL_DRAW_INDEX_U32?4:0)+uniform_bytes+fs_uniform_bytes;
+    if(required!=bytes)return RDGPU_DRAW_BAD_PACKET;
     const uint8_t *payload=(const uint8_t *)packet+prefix;
     std::vector<uint32_t> vs(h.vertex_shader_words),fs(h.fragment_shader_words);
     memcpy(vs.data(),payload,vs.size()*4);payload+=vs.size()*4;
@@ -286,7 +330,7 @@ int rdgpu_draw_execute_with_depth(const void *packet,size_t bytes,
             uint64_t(h.vertex_bytes)+
             uint64_t(index_type!=RDMETAL_DRAW_INDEX_NONE?
                 uint64_t(index_count)*(index_type==RDMETAL_DRAW_INDEX_U16?2:4):0)+
-            uint64_t(uniform_bytes);
+            uint64_t(uniform_bytes)+fs_uniform_bytes;
         if(total!=bytes)return RDGPU_DRAW_BAD_PACKET;
     }
     /* Vertex-bounds check: for indexed draws the vertex buffer must cover the
@@ -317,12 +361,44 @@ int rdgpu_draw_execute_with_depth(const void *packet,size_t bytes,
     std::string vertexMSL,fragmentMSL,vertexEntry,fragmentEntry;
     try {
         spirv_cross::CompilerMSL vertex(vs),fragment(fs);
+        auto common=vertex.get_common_options();
+        common.vertex.flip_vert_y=(vertex_flags&1u)!=0;
+        vertex.set_common_options(common);
+        auto options=vertex.get_msl_options();
+        options.enable_decoration_binding=true;
+        vertex.set_msl_options(options);fragment.set_msl_options(options);
         for (const auto &ub : vertex.get_shader_resources().uniform_buffers)
            vertex.set_decoration(ub.id, spv::DecorationBinding, 1u);
+        for (const auto &ub : fragment.get_shader_resources().uniform_buffers)
+           fragment.set_decoration(ub.id,spv::DecorationBinding,1u);
+        /* Mesa's default uniform block can be an array in UniformConstant
+         * storage rather than a Block-decorated struct. Reflect those too;
+         * SPIRV-Cross otherwise assigns buffer(0), aliasing vertex data. */
+        for(auto *compiler : {&vertex,&fragment}) {
+            unsigned buffers=0;
+            compiler->get_ir().for_each_typed_id<spirv_cross::SPIRVariable>(
+                [&](uint32_t id,const spirv_cross::SPIRVariable &var) {
+                    const auto &type=compiler->get_type(var.basetype);
+                    bool numeric=type.basetype==spirv_cross::SPIRType::UInt ||
+                                 type.basetype==spirv_cross::SPIRType::Int ||
+                                 type.basetype==spirv_cross::SPIRType::Float;
+                    if((var.storage==spv::StorageClassUniform || var.storage==spv::StorageClassUniformConstant) &&
+                       (type.basetype==spirv_cross::SPIRType::Struct || numeric)) {
+                        ++buffers;
+                        compiler->set_decoration(id,spv::DecorationBinding,1u);
+                        spirv_cross::MSLResourceBinding binding;
+                        binding.stage=compiler->get_execution_model();
+                        binding.desc_set=compiler->get_decoration(id,spv::DecorationDescriptorSet);
+                        binding.binding=1;binding.msl_buffer=1;
+                        compiler->add_msl_resource_binding(binding);
+                    }
+                });
+            if(buffers>1)return RDGPU_DRAW_UNSUPPORTED;
+        }
         if(vertex.get_execution_model()!=spv::ExecutionModelVertex||
            fragment.get_execution_model()!=spv::ExecutionModelFragment||
-           !supported_resources(vertex,spv::ExecutionModelVertex,textured,v6)||
-           !supported_resources(fragment,spv::ExecutionModelFragment,textured,v6))
+           !supported_resources(vertex,spv::ExecutionModelVertex,textured,v6,v8)||
+           !supported_resources(fragment,spv::ExecutionModelFragment,textured,v6,v8))
             return RDGPU_DRAW_UNSUPPORTED;
         auto vertexPoints=vertex.get_entry_points_and_stages();
         auto fragmentPoints=fragment.get_entry_points_and_stages();
@@ -416,6 +492,14 @@ int rdgpu_draw_execute_with_depth(const void *packet,size_t bytes,
                 pipeline.colorAttachments[0].sourceAlphaBlendFactor=MTLBlendFactorOne;
                 pipeline.colorAttachments[0].destinationRGBBlendFactor=MTLBlendFactorOneMinusSourceAlpha;
                 pipeline.colorAttachments[0].destinationAlphaBlendFactor=MTLBlendFactorOneMinusSourceAlpha;
+                if(v7){
+                    uint32_t mask=state7.color_write_mask;
+                    pipeline.colorAttachments[0].writeMask=(MTLColorWriteMask)(
+                        ((mask&1u)?MTLColorWriteMaskRed:0) |
+                        ((mask&2u)?MTLColorWriteMaskGreen:0) |
+                        ((mask&4u)?MTLColorWriteMaskBlue:0) |
+                        ((mask&8u)?MTLColorWriteMaskAlpha:0));
+                }
                 if(has_depth){
                     id<MTLTexture> depth=(__bridge id<MTLTexture>)depth_texture;
                     if(depth.width!=h.target_width||depth.height!=h.target_height||
@@ -439,7 +523,7 @@ int rdgpu_draw_execute_with_depth(const void *packet,size_t bytes,
                     layout.attributes[1].offset=attr1_offset;
                     layout.attributes[1].bufferIndex=0;
                 }
-                if(v6){
+                if(v6 && attr2_format!=RDMETAL_DRAW_ATTR_NONE){
                     layout.attributes[2].format=MTLVertexFormatFloat;
                     layout.attributes[2].offset=attr2_offset;
                     layout.attributes[2].bufferIndex=0;
@@ -457,11 +541,14 @@ int rdgpu_draw_execute_with_depth(const void *packet,size_t bytes,
                          (int)h.attribute_format, (int)attr1_format, (int)attr1_offset,
                          (int)attr2_offset, (int)h.vertex_stride);
                 key += lay;
+                if(v7) key += "|mask=" + std::to_string(state7.color_write_mask);
                 id<MTLRenderPipelineState> state =
                     (g_cached_pipeline && g_cached_pipeline_key == key) ? g_cached_pipeline : nil;
                 if (!state) {
                     state = [device newRenderPipelineStateWithDescriptor:pipeline error:&error];
                     if (state) { g_cached_pipeline = state; g_cached_pipeline_key = key; }
+                    else fprintf(stderr,"RDMETAL_DRAW_PIPELINE_FAIL %s\n",
+                        error?[[error localizedDescription] UTF8String]:"unknown error");
                 }
                 id<MTLCommandQueue> queue = g_cached_queue ? g_cached_queue :
                     (g_cached_queue = [device newCommandQueue]);
@@ -495,11 +582,35 @@ int rdgpu_draw_execute_with_depth(const void *packet,size_t bytes,
                         MTLDepthStencilDescriptor *ds=[MTLDepthStencilDescriptor new];
                         ds.depthCompareFunction=(depth_flags&1u)?compare[depth_compare]:MTLCompareFunctionAlways;
                         ds.depthWriteEnabled=(depth_flags&2u)!=0;
+                        if(v7){
+                            static const MTLStencilOperation ops[]={
+                                MTLStencilOperationKeep,MTLStencilOperationZero,
+                                MTLStencilOperationReplace,MTLStencilOperationIncrementClamp,
+                                MTLStencilOperationDecrementClamp,MTLStencilOperationIncrementWrap,
+                                MTLStencilOperationDecrementWrap,MTLStencilOperationInvert};
+                            MTLStencilDescriptor *faces[2]={nil,nil};
+                            for(unsigned face=0;face<2;++face){
+                                const auto &st=state7.stencil[face];
+                                MTLStencilDescriptor *sd=[MTLStencilDescriptor new];
+                                sd.stencilCompareFunction=st.enabled?compare[st.compare]:MTLCompareFunctionAlways;
+                                sd.stencilFailureOperation=st.enabled?ops[st.fail_op]:MTLStencilOperationKeep;
+                                sd.depthFailureOperation=st.enabled?ops[st.depth_fail_op]:MTLStencilOperationKeep;
+                                sd.depthStencilPassOperation=st.enabled?ops[st.pass_op]:MTLStencilOperationKeep;
+                                sd.readMask=st.read_mask;sd.writeMask=st.enabled?st.write_mask:0;
+                                faces[face]=sd;
+                            }
+                            ds.frontFaceStencil=faces[0];ds.backFaceStencil=faces[1];
+                            [encoder setFrontFacingWinding:state7.front_ccw?MTLWindingCounterClockwise:MTLWindingClockwise];
+                            [encoder setStencilFrontReferenceValue:state7.stencil[0].reference
+                                              backReferenceValue:state7.stencil[1].reference];
+                        }
                         [encoder setDepthStencilState:[device newDepthStencilStateWithDescriptor:ds]];
                     }
                     [encoder setVertexBuffer:vertex offset:0 atIndex:0];
                     if(uniform_bytes)
                        [encoder setVertexBytes:uniform_data length:uniform_bytes atIndex:1];
+                    if(fs_uniform_bytes)
+                       [encoder setFragmentBytes:uniform_data+uniform_bytes length:fs_uniform_bytes atIndex:1];
                     MTLScissorRect scissor={scissor_x,scissor_y,
                                             scissor_width,scissor_height};
                     [encoder setScissorRect:scissor];

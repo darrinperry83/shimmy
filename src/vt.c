@@ -269,6 +269,12 @@ int vt_console_active_open(void) {
     return fd;
 }
 
+void vt_console_active_rewind(void) {
+    pthread_mutex_lock(&g_lock);
+    vt_console_active_publish();
+    pthread_mutex_unlock(&g_lock);
+}
+
 int vt_console_active_owns_fd(int fd) {
     if (fd < 0 || g_console_active_r < 0) return 0;
     struct stat a, b;

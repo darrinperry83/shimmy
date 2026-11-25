@@ -2592,7 +2592,12 @@ static long sys_ppoll(struct pollfd* ufds, unsigned long nfds, const struct lin_
               EV_SET(&chg[nc++], (uintptr_t)ufds[i].fd, EVFILT_WRITE, EV_ADD, 0, 0, NULL);
           }
           struct timespec kts, *kw = NULL;
-          if (wait_ms >= 0) {
+          // poll already found work. The socket recheck must only merge
+          // readiness, never block and withhold those ready descriptors.
+          if (r > 0) {
+            kts.tv_sec = 0; kts.tv_nsec = 0;
+            kw = &kts;
+          } else if (wait_ms >= 0) {
             int el = (int)(now_ms() - poll_t0);
             int remaining = wait_ms > el ? wait_ms - el : 0;
             kts.tv_sec = remaining / 1000; kts.tv_nsec = (long)(remaining % 1000) * 1000000L;

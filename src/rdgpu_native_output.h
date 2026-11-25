@@ -18,7 +18,7 @@ extern "C" {
 int rdgpu_native_output(size_t index, uint32_t* w, uint32_t* h, double* scale);
 
 // Geometry for the two virtual DRM connectors. Connector 1 follows the first
-// active external display; connector 2 follows the active builtin display.
+// online external display; connector 2 follows the online builtin display.
 // Returns -1 when that display is not currently available. Unlike the nested
 // Wayland output above, this mapping must not change when the guest window moves.
 int rdgpu_drm_connector_output(uint32_t connector_id, uint32_t* w, uint32_t* h);

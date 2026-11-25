@@ -29,7 +29,8 @@ static long draw_transport(void *unused,const RDGPUDrawBatchRequest *batch,
     (void)unused;
     const struct rdmetal_draw_header_v5 *h=packet;
     assert(batch->packet_bytes==bytes);
-    assert(h->base.base.base.base.version==RDMETAL_DRAW_VERSION_V5);
+    assert(h->base.base.base.base.version==RDMETAL_DRAW_VERSION_V5 ||
+           h->base.base.base.base.version==RDMETAL_DRAW_VERSION_V7);
     assert(h->depth_flags==3 && h->depth_compare==1);
     return 88;
 }
@@ -67,6 +68,27 @@ int main(void) {
     draw.depth_flags=3;draw.depth_compare=1;
     assert(rdgpu_guest_syscall(&state,RDGPU_GUEST_DRAW_BATCH,image,
                               (uintptr_t)&draw,sizeof draw,0,0)==88);
+    assert(rdgpu_guest_syscall(&state,RDGPU_GUEST_DRAW_POLL,image,88,0,0,0)==0);
+    struct rdmetal_draw_header_v7 draw7={0};
+    draw7.base.base=draw;
+    ((struct rdmetal_draw_header *)&draw7)->version=RDMETAL_DRAW_VERSION_V7;
+    ((struct rdmetal_draw_header *)&draw7)->total_bytes=sizeof draw7;
+    draw7.color_write_mask=15;
+    draw7.base.base.depth_handle=image; /* color is not a depth capability */
+    assert(rdgpu_guest_syscall(&state,RDGPU_GUEST_DRAW_BATCH,image,
+                              (uintptr_t)&draw7,sizeof draw7,0,0)==-EPERM);
+    draw7.base.base.depth_handle=separate;
+    state.slots[1].width=32;
+    assert(rdgpu_guest_syscall(&state,RDGPU_GUEST_DRAW_BATCH,image,
+                              (uintptr_t)&draw7,sizeof draw7,0,0)==-EPERM);
+    state.slots[1].width=16;
+    assert(rdgpu_guest_syscall(&state,RDGPU_GUEST_CLEAR_DEPTH_STENCIL,
+                              separate,0x3e800000u,7,3,0)==77);
+    assert(rdgpu_guest_syscall(&state,RDGPU_GUEST_DRAW_BATCH,image,
+                              (uintptr_t)&draw7,sizeof draw7,0,0)==-EBUSY);
+    assert(rdgpu_guest_syscall(&state,RDGPU_WAIT,separate,77,0,0,0)==0);
+    assert(rdgpu_guest_syscall(&state,RDGPU_GUEST_DRAW_BATCH,image,
+                              (uintptr_t)&draw7,sizeof draw7,0,0)==88);
     assert(rdgpu_guest_syscall(&state,RDGPU_GUEST_DRAW_POLL,image,88,0,0,0)==0);
     assert(rdgpu_guest_syscall(&state,RDGPU_RELEASE,separate,0,0,0,0)==0);
     puts("guest depth clear validates and carries broker lease");

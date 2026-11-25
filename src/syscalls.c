@@ -5445,10 +5445,13 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     int w = lseek_whence_l2m((int)a2);
     if (w < 0) return -LX_EINVAL;
     // The active-console sysfs file is backed by a pipe (for epoll wakeup), which has no offset.
-    // logind does lseek(fd, 0, SEEK_SET) before reading and treats a failure as fatal, so fake a
-    // successful seek-to-start; the pipe read already starts at the oldest pending line.
-    if (vt_console_active_owns_fd((int)a0))
-      return (w == SEEK_SET && a1 == 0) ? 0 : -LX_EINVAL;
+    // logind rewinds before rereading. Refresh the current value on seek-to-start
+    // so an earlier read cannot leave its next console query with an empty pipe.
+    if (vt_console_active_owns_fd((int)a0)) {
+      if (w != SEEK_SET || a1 != 0) return -LX_EINVAL;
+      vt_console_active_rewind();
+      return 0;
+    }
     char dpath[GPATH_MAX] = {0};
     if (cgroup_dir_path((int)a0, dpath, sizeof dpath) != 0)
       (void)guest_path_of_fd((int)a0, dpath, sizeof dpath);
@@ -5485,6 +5488,9 @@ long linux_syscall(unsigned long nr, unsigned long a0, unsigned long a1, unsigne
     char *read_staged = read_count ? malloc(read_count) : NULL;
     if (read_count && !read_staged) return -LX_ENOMEM;
     long r = herr((long)read((int)a0, read_staged, read_count));
+    // A sysfs attribute reaches EOF after its current value. Its notification
+    // pipe is nonblocking, so an exhausted value appears as EAGAIN on Darwin.
+    if (r == -LX_EAGAIN && vt_console_active_owns_fd((int)a0)) r = 0;
     if (r > 0 && gmem_guest_copyout_checked(a1, read_staged, (size_t)r) != 0)
       r = -LX_EFAULT; // A guest mapping may change after the preflight.
     if (getenv("RDREADDBG") && (int)a0 == 69) {

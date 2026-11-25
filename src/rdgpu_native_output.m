@@ -54,7 +54,10 @@ int rdgpu_drm_connector_output(uint32_t connector_id, uint32_t* w, uint32_t* h) 
         NSNumber* number = screen.deviceDescription[@"NSScreenNumber"];
         if (!number) continue;
         CGDirectDisplayID did = (CGDirectDisplayID)number.unsignedIntValue;
-        if (!CGDisplayIsActive(did) || (BOOL)CGDisplayIsBuiltin(did) != wantBuiltin)
+        // A sleeping panel is still connected. IsActive drops to false while
+        // the host display sleeps, which otherwise removes every KMS mode and
+        // leaves KWin and its clients with no output after boot.
+        if (!CGDisplayIsOnline(did) || (BOOL)CGDisplayIsBuiltin(did) != wantBuiltin)
             continue;
         NSRect frame = screen.frame;
         double scale = (double)screen.backingScaleFactor;
