@@ -1,5 +1,19 @@
 # Status — current checkpoint 27 November 2026
 
+The active user milestone is now **full systemd init boot into an Arch installer**.
+A complete, independently pinned installer root is prepared: 172 packages,
+including Bash, pacman and arch-install-scripts, the full package database, and
+381 packaged systemd unit files. Its Linux PID 1 reference boots the normal
+sysinit/basic/multi-user graph and reaches `rdxnu-installer.target`, with 114
+active units and no failed units. Journald, D-Bus, logind, udevd, console getty,
+networkd and resolved are active. This remains a Linux reference: native XNU
+init boot, interactive input, online package transactions and installation to a
+target root remain unproven. See [installer/README.md](installer/README.md) and
+[installer/evidence.json](installer/evidence.json). The next kernel work is the
+coherent init lifecycle in [LINUX-INIT.md](LINUX-INIT.md), followed by the runtime
+filesystem contracts needed to boot this same package environment. The existing
+XNU runtime kernel and regression package pins are unchanged.
+
 The native service-launch batch now passes on custom XNU kernel
 `1E73AC27-14B3-3EDD-9F8B-4B31342E0A85`: pipe2/dup/dup3 and bounded fcntl,
 sessions/process groups, umask, native resource-limit updates/enforcement, and

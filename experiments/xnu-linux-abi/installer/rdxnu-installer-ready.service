@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Arch installer init and package environment
+Requires=multi-user.target console-getty.service systemd-networkd.service systemd-resolved.service
+After=multi-user.target console-getty.service systemd-networkd.service systemd-resolved.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/rdxnu-installer-ready
+RemainAfterExit=yes
+StandardOutput=journal+console
+StandardError=journal+console

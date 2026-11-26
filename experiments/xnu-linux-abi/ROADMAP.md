@@ -1,5 +1,16 @@
 # Arch userspace on XNU with Apple drivers and Darwin applications
 
+**Immediate milestone — 27 November 2026:** full systemd init boot into a usable
+Arch Linux ARM installer, then install/reboot into a persistent target root.
+The [installer root and Linux reference](installer/README.md) are prepared and
+the complete target reaches 114 active units with no failures under real Linux
+PID 1. Native XNU init/installer gates remain false. The next implementation
+batch must establish the [native Linux init domain](LINUX-INIT.md), then connect
+the full root to truthful runtime filesystem/device interfaces. Require native
+unit boot, interactive console, networking/package transactions and a disposable
+installation round trip before calling the installer working. Keep individual
+ABI tests as regressions; do not substitute their success for this milestone.
+
 **Architecture update — 26 November 2026:** the user selected [XNU serving the
 Linux ABI](LINUX-PERSONALITY.md), with XNU owning memory, execution and Apple
 devices. Reuse the shim's compatibility contracts in the kernel personality.
@@ -65,7 +76,7 @@ not complete any interactive-console or Arch-boot milestone.
 
 ## Target and constraints
 
-The next development-environment acceptance target is Codex CLI executing
+After the full init/installer milestone, the development-environment target is Codex CLI executing
 inside the Arch environment in the disposable VM: inspect/edit the checkout,
 run commands and tests, then perform an authenticated online request. Track
 process/wait, PTY/signal, libc/TLS, filesystem and networking/HTTPS behavior

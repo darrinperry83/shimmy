@@ -1,0 +1,6 @@
+[Unit]
+Description=RDXNU Arch Linux ARM installer
+Requires=multi-user.target rdxnu-installer-ready.service systemd-networkd.service systemd-resolved.service
+Wants=console-getty.service
+After=multi-user.target rdxnu-installer-ready.service
+AllowIsolate=yes

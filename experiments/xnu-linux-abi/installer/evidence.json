@@ -1,0 +1,280 @@
+{
+  "objective": "Full native XNU systemd init boot into an Arch Linux ARM installer, followed by a target-root install/reboot round trip",
+  "root_artifact": {
+    "base_image": "sha256:0151e70bd01e7e4c891e903edf1dacba81656f04c6150bfce78d5a570e4df443",
+    "installer_image": "sha256:79937beba503e348a102790addd5f76c5ef55ebea5877547b5438bb8729ddf4c",
+    "packages_image": "sha256:e7baf916dbc99767a0e8c787f876ede62b632aa1ab3f90fcd80db7e1217b340a",
+    "root_archive": "out/installer/79937beba503e348/rootfs.tar.gz",
+    "archive_sha256": "647f73a696cfd7a0c364303ee383ba22a92dea1e0db0c95e5c4b0a636cc181ae",
+    "archive_bytes": 441237402,
+    "archive_members": 47043,
+    "package_count": 172,
+    "systemd_unit_file_count": 381,
+    "packages_sha256": "330c9292c34f73045618ee24bc2c5e15ff0923d2647d02ad597ea8b255edc62e",
+    "required_files": {
+      "etc/pacman.conf": {
+        "sha256": "73cfbc401786a7b08c9ed61dbe000b78994e060d8b5a5b14d6de4a037fdc3d5f",
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0
+      },
+      "etc/systemd/network/20-installer.network": {
+        "sha256": "3c0023ce4a077925e827c2af9af9a19a695d7df2d24d4cff73a1b0ea6a9105ee",
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0
+      },
+      "etc/systemd/system/console-getty.service.d/20-installer.conf": {
+        "sha256": "345320f8c06ceff71b3c2c5920db61ead35f200f7d7d85f64793b14087f73bd0",
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0
+      },
+      "etc/systemd/system/rdxnu-installer-ready.service": {
+        "sha256": "5f384020112bd7432d309ea499c8bbae66eda0be18af10fc3b0f8a7eb4174673",
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0
+      },
+      "etc/systemd/system/rdxnu-installer.target": {
+        "sha256": "06185195096b41832d20d557971815e46650153be9291c11ef508141c2f59e68",
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0
+      },
+      "usr/bin/arch-chroot": {
+        "sha256": "56c50ac2f6d58325d4f5eaa0a0e359ca3019bffe08b7b37468de3bddae09e8d5",
+        "mode": "0o755",
+        "uid": 0,
+        "gid": 0
+      },
+      "usr/bin/bash": {
+        "sha256": "d120d580a7fa09f22742a9648b836c32cdd321d56b0fd622f18016b092ffa3a1",
+        "mode": "0o755",
+        "uid": 0,
+        "gid": 0
+      },
+      "usr/bin/genfstab": {
+        "sha256": "533def1f341f2111604f17615e0ea6e34017a87a717dd4964fa1a1052528b944",
+        "mode": "0o755",
+        "uid": 0,
+        "gid": 0
+      },
+      "usr/bin/pacman": {
+        "sha256": "543b7d0dddf8d852c72a6de88ce8d5ab3b63c41e1b3907217570759826cfe31a",
+        "mode": "0o755",
+        "uid": 0,
+        "gid": 0
+      },
+      "usr/bin/pacstrap": {
+        "sha256": "c0cbe2eb3e77a2a4437b03021ec1e63f31f20888778cd3c70ff49d2368371207",
+        "mode": "0o755",
+        "uid": 0,
+        "gid": 0
+      },
+      "usr/lib/ld-linux-aarch64.so.1": {
+        "sha256": "b1f2738bdb51e6419d7062f96c8a44bd68853698dc5ac624fa6ca9f9b03d456d",
+        "mode": "0o755",
+        "uid": 0,
+        "gid": 0
+      },
+      "usr/lib/libc.so.6": {
+        "sha256": "6ab264fb4e8df9942b0fb75b48fcd5c30b2f081d8dfaa6c25d7be1d3fce5b2ab",
+        "mode": "0o755",
+        "uid": 0,
+        "gid": 0
+      },
+      "usr/lib/systemd/system/basic.target": {
+        "sha256": "7d97dda25769ba30dff93d7aa2818151d968c843281767b720b3eabf09563f0b",
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0
+      },
+      "usr/lib/systemd/system/multi-user.target": {
+        "sha256": "e73d44a251ac878da0ca66ec437e3890345fec9684ff1374c57e012b95266b7f",
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0
+      },
+      "usr/lib/systemd/system/sysinit.target": {
+        "sha256": "4d7fdd6b1a2f15647d69d886519c7809ed3adc493e8bd5bb3f88d360dda965eb",
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0
+      },
+      "usr/lib/systemd/systemd": {
+        "sha256": "004fff95f0c063820367d1f2276f7034604735b4e177a5c38d3ddb02a44139c2",
+        "mode": "0o755",
+        "uid": 0,
+        "gid": 0
+      },
+      "usr/lib/systemd/systemd-executor": {
+        "sha256": "07b86c60c51c377b719ef92c8773d0bc4ffc985bc5de4bf405eb14eccd8073d9",
+        "mode": "0o755",
+        "uid": 0,
+        "gid": 0
+      },
+      "usr/local/libexec/rdxnu-installer-ready": {
+        "sha256": "57dd608372e52355bd349f013fe549c62e1a872824f04ffa375e3012cd4cfadb",
+        "mode": "0o755",
+        "uid": 0,
+        "gid": 0
+      },
+      "etc/hosts": {
+        "sha256": "b69b2c741be48691edabe3771c644c70473ccd6aa8effd9f17cc07fa129917f9",
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0
+      },
+      "etc/hostname": {
+        "sha256": "38c3f79edee3ef54d2be75a822c522d7cdd3c28d330fa986970a13233cd5096b",
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0
+      }
+    },
+    "overlay_sha256": {
+      "rdxnu-installer.target": "06185195096b41832d20d557971815e46650153be9291c11ef508141c2f59e68",
+      "rdxnu-installer-ready.service": "5f384020112bd7432d309ea499c8bbae66eda0be18af10fc3b0f8a7eb4174673",
+      "console-autologin.conf": "345320f8c06ceff71b3c2c5920db61ead35f200f7d7d85f64793b14087f73bd0",
+      "20-installer.network": "3c0023ce4a077925e827c2af9af9a19a695d7df2d24d4cff73a1b0ea6a9105ee",
+      "hosts": "b69b2c741be48691edabe3771c644c70473ccd6aa8effd9f17cc07fa129917f9",
+      "hostname": "38c3f79edee3ef54d2be75a822c522d7cdd3c28d330fa986970a13233cd5096b",
+      "ready.sh": "57dd608372e52355bd349f013fe549c62e1a872824f04ffa375e3012cd4cfadb"
+    },
+    "package_transaction_command": [
+      "sh",
+      "-c",
+      "pacman --disable-sandbox -Syu --needed --noconfirm arch-install-scripts"
+    ],
+    "complete_package_root_built": true,
+    "linux_full_init_reference_pass": false,
+    "xnu_full_init_boot_pass": false,
+    "xnu_installer_pass": false,
+    "limits": "Package-root artifact only. Native init/adoption, runtime filesystems, complete units, console, networking and target installation require runtime proof."
+  },
+  "linux_reference": {
+    "installer_manifest": "out/installer/79937beba503e348/manifest.json",
+    "installer_archive_sha256": "647f73a696cfd7a0c364303ee383ba22a92dea1e0db0c95e5c4b0a636cc181ae",
+    "installer_image": "sha256:79937beba503e348a102790addd5f76c5ef55ebea5877547b5438bb8729ddf4c",
+    "booted_archive_image": "sha256:99e11f21cf9d467ccc5aff018ba46da6aee9dae241e9ac9ddcf5c97b15d5facf",
+    "linux_full_init_reference_pass": true,
+    "manager_exit_status": 0,
+    "active_units": 114,
+    "failed_units": [],
+    "required_unit_states": {
+      "sysinit.target": {
+        "unit": "sysinit.target",
+        "load": "loaded",
+        "active": "active",
+        "sub": "active",
+        "job": "",
+        "description": "System Initialization"
+      },
+      "basic.target": {
+        "unit": "basic.target",
+        "load": "loaded",
+        "active": "active",
+        "sub": "active",
+        "job": "",
+        "description": "Basic System"
+      },
+      "multi-user.target": {
+        "unit": "multi-user.target",
+        "load": "loaded",
+        "active": "active",
+        "sub": "active",
+        "job": "",
+        "description": "Multi-User System"
+      },
+      "rdxnu-installer.target": {
+        "unit": "rdxnu-installer.target",
+        "load": "loaded",
+        "active": "active",
+        "sub": "active",
+        "job": "",
+        "description": "RDXNU Arch Linux ARM installer"
+      },
+      "console-getty.service": {
+        "unit": "console-getty.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "job": "",
+        "description": "Console Getty"
+      },
+      "systemd-networkd.service": {
+        "unit": "systemd-networkd.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "job": "",
+        "description": "Network Management"
+      },
+      "systemd-resolved.service": {
+        "unit": "systemd-resolved.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "job": "",
+        "description": "Network Name Resolution"
+      },
+      "rdxnu-installer-ready.service": {
+        "unit": "rdxnu-installer-ready.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "exited",
+        "job": "",
+        "description": "Check Arch installer init and package environment"
+      },
+      "systemd-journald.service": {
+        "unit": "systemd-journald.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "job": "",
+        "description": "Journal Service"
+      },
+      "dbus-broker.service": {
+        "unit": "dbus-broker.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "job": "",
+        "description": "D-Bus System Message Bus"
+      },
+      "systemd-logind.service": {
+        "unit": "systemd-logind.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "job": "",
+        "description": "User Login Management"
+      },
+      "systemd-udevd.service": {
+        "unit": "systemd-udevd.service",
+        "load": "loaded",
+        "active": "active",
+        "sub": "running",
+        "job": "",
+        "description": "Rule-based Manager for Device Events and Files"
+      }
+    },
+    "logs": {
+      "boot.log": "6cffdf06ed1e3eeba8ef5a644f987f484a6ce02161846bd8a8055bd564313c7f",
+      "units.json": "d3b84610427ceaaa74de26e46f7a465de08c0bcd2c9a5ea4ee6ece82d832012d",
+      "boot-target.txt": "2e496c6744c6b34e2028d94876b3ab33754115f99656b8ab629a88d9429c2d0b",
+      "packages.txt": "330c9292c34f73045618ee24bc2c5e15ff0923d2647d02ad597ea8b255edc62e"
+    },
+    "xnu_full_init_boot_pass": false,
+    "xnu_installer_pass": false,
+    "interactive_console_input_pass": false,
+    "target_disk_install_pass": false,
+    "scope": "Full installer target in a real Linux PID 1 container; container device conditions apply. No native XNU init, interactive console or target installation qualification."
+  },
+  "native_baseline_commit": "2172f0cc411ac814f23734aaea4bd71e2e0a6bfa",
+  "native_full_init_boot_pass": false,
+  "native_installer_pass": false,
+  "native_install_roundtrip_pass": false,
+  "next_kernel_gate": "Coherent native Linux init domain: identity translation, orphan adoption, wait/signal ownership, exec continuity and init-death teardown; retain native Darwin services."
+}

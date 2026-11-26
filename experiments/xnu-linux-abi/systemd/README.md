@@ -5,6 +5,13 @@ XNU Linux personality. Keep its binary and libraries unchanged. The existing
 shim is the first source of compatibility behavior and regression cases; do
 not restart those implementations from scratch.
 
+The immediate acceptance target is now full init boot into the
+[Arch installer root](../installer/README.md), not a minimal service-only proof.
+The complete root and full-target Linux PID 1 reference are available; native
+XNU init/installer gates remain false. The next kernel gate is coherent
+[init-domain identity and adoption](../LINUX-INIT.md), followed by truthful
+runtime filesystems and the complete native unit graph.
+
 ## Measurable gates
 
 1. Execute the original Arch loader with systemd's dependency closure and obtain
