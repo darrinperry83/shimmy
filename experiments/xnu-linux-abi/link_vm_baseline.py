@@ -26,7 +26,11 @@ def main():
     parser.add_argument('--with-linux-memory', action='store_true')
     parser.add_argument('--with-linux-filemap', action='store_true')
     parser.add_argument('--with-linux-files', action='store_true')
+    parser.add_argument('--with-linux-startup', action='store_true')
+    parser.add_argument('--startup-entry-mode', choices=('patched','stock','source-control'), default='patched')
     args = parser.parse_args()
+    if args.with_linux_startup:
+        args.with_linux_files = True
     if args.with_linux_files:
         args.with_linux_filemap = True
     if args.with_linux_filemap:
@@ -72,6 +76,10 @@ def main():
         target = target.with_name(target.name + '-filemap')
     if args.with_linux_files:
         target = target.with_name(target.name + '-files')
+    if args.with_linux_startup:
+        target = target.with_name(target.name + '-startup')
+        if args.startup_entry_mode != 'patched':
+            target = target.with_name(target.name + '-' + args.startup_entry_mode)
     report = json.loads((target / 'build-result.json').read_text())
     if report.get('linux_core_experiment', False) != args.with_linux_core:
         raise ValueError('Linux core build option mismatch')
@@ -81,6 +89,10 @@ def main():
         raise ValueError('Linux filemap build option mismatch')
     if report.get('linux_files_experiment', False) != args.with_linux_files:
         raise ValueError('Linux files build option mismatch')
+    if report.get('linux_startup_experiment', False) != args.with_linux_startup:
+        raise ValueError('Linux startup build option mismatch')
+    if args.with_linux_startup and report.get('startup_entry_mode','patched') != args.startup_entry_mode:
+        raise ValueError('startup entry mode mismatch')
     if report['state'] != 'built' or report['svc_probe_present'] != args.with_svc_probe or not report['source_restored']:
         raise ValueError('baseline build did not complete with restored sources')
     kernel = Path(report['kernel'])
@@ -117,6 +129,8 @@ def main():
         'linux_memory_experiment': report.get('linux_memory_experiment', False),
         'linux_filemap_experiment': report.get('linux_filemap_experiment', False),
         'linux_files_experiment': report.get('linux_files_experiment', False),
+        'linux_startup_experiment': report.get('linux_startup_experiment', False),
+        'startup_entry_mode': report.get('startup_entry_mode'),
         'bti_disabled': report.get('bti_disabled', False),
         'bti_enforcement_disabled': report.get('bti_enforcement_disabled', False)}
     (target / 'collection-result.json').write_text(json.dumps(result, indent=2) + '\n')

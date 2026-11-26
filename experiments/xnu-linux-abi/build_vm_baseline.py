@@ -33,7 +33,12 @@ def main():
     parser.add_argument('--with-linux-memory', action='store_true', help='XNU-backed Linux memory personality test')
     parser.add_argument('--with-linux-filemap', action='store_true', help='private file mapping and fixed replacement test')
     parser.add_argument('--with-linux-files', action='store_true', help='native descriptor/path and Linux stat ABI test')
+    parser.add_argument('--with-linux-startup', action='store_true', help='heap, native TLS preservation and libc startup')
+    parser.add_argument('--startup-entry-mode', choices=('patched','stock','source-control'), default='patched',
+                        help='startup diagnostic: isolate source-built entry from KDK entry')
     args = parser.parse_args()
+    if args.with_linux_startup:
+        args.with_linux_files = True
     if args.with_linux_files:
         args.with_linux_filemap = True
     if args.with_linux_filemap:
@@ -77,6 +82,10 @@ def main():
         target = target.with_name(target.name + '-filemap')
     if args.with_linux_files:
         target = target.with_name(target.name + '-files')
+    if args.with_linux_startup:
+        target = target.with_name(target.name + '-startup')
+        if args.startup_entry_mode != 'patched':
+            target = target.with_name(target.name + '-' + args.startup_entry_mode)
     target.mkdir(parents=True, exist_ok=True)
     with (OUT / 'kernel-build.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -105,6 +114,9 @@ def main():
             if args.with_linux_files:
                 import files_prepare
                 extra_edits = files_prepare.overlay(XNU, extra_edits)
+            if args.with_linux_startup:
+                import startup_prepare
+                extra_edits = startup_prepare.overlay(XNU, extra_edits, entry_mode=args.startup_entry_mode)
             build_source = build_source.replace(b'if (p && rdxnu_linux_probe(state, p))',
                 b'if (p && (rdxnu_linux_dispatch(state, p) || rdxnu_linux_probe(state, p)))')
             build_source = build_source.replace(b'#include \"rdxnu_linux_probe.h\"',
@@ -129,6 +141,10 @@ def main():
         if args.with_linux_core:
             core, core_report = linux_core_prepare.verified_core()
             command.append(f'LD_KERNEL_LIBS=-lcc_kext {core}')
+        if args.with_linux_startup and args.startup_entry_mode != 'stock':
+            kdk = next(value.split('=',1)[1] for value in command if value.startswith('KDKROOT='))
+            support, support_report = startup_prepare.support_archive(target,kdk)
+            command.append(f'RDXNU_KERNEL_SUPPORT_ARCHIVE={support}')
         report = {'command': command, 'svc_probe_present': args.with_svc_probe,
                   'svc_source_sha256': hashlib.sha256(build_source).hexdigest(),
                   'other_prepared_build_support_retained': True, 'state': 'building',
@@ -143,6 +159,10 @@ def main():
         report['linux_memory_experiment'] = args.with_linux_memory
         report['linux_filemap_experiment'] = args.with_linux_filemap
         report['linux_files_experiment'] = args.with_linux_files
+        report['linux_startup_experiment'] = args.with_linux_startup
+        report['startup_entry_mode'] = args.startup_entry_mode if args.with_linux_startup else None
+        if args.with_linux_startup and args.startup_entry_mode != 'stock':
+            report['startup_support_archive'] = support_report
         if args.with_linux_core:
             report['linux_core_sha256'] = core_report['core_sha256']
         report['elf_source_sha256'] = {str(path.relative_to(XNU)): hashlib.sha256(after).hexdigest()
@@ -160,6 +180,8 @@ def main():
             report.update(returncode=code, state='built' if code == 0 else 'failed')
             if code:
                 raise RuntimeError(f'baseline build failed ({code}); see {target / "build.log"}')
+            if args.with_linux_startup and args.startup_entry_mode != 'stock':
+                report['startup_assembly_offsets'] = startup_prepare.verify_offsets(target)
             kernel = target / f'obj/{args.configuration}_ARM64_VMAPPLE/kernel.{args.configuration.lower()}.vmapple'
             data = kernel.read_bytes()
             if (b'rdxnu_linux_probe' in data) != args.with_svc_probe:

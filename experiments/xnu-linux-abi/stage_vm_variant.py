@@ -15,7 +15,7 @@ OUT = ABI / 'out/vmapple'
 BASELINE = 'baseline-no-lto-no-bti-svc-probe-elf-arch-loader-linux-console-terminal'
 
 
-def stage(name, candidate, core=False, memory=False, filemap=False, files=False):
+def stage(name, candidate, core=False, memory=False, filemap=False, files=False, startup=False):
     report = json.loads((candidate / 'collection-result.json').read_text())
     build = json.loads((candidate / 'build-result.json').read_text())
     data = Path(report['collection']).read_bytes()
@@ -29,6 +29,8 @@ def stage(name, candidate, core=False, memory=False, filemap=False, files=False)
         raise ValueError('unexpected Linux filemap build profile')
     if report.get('linux_files_experiment', False) != files:
         raise ValueError('unexpected Linux files build profile')
+    if report.get('linux_startup_experiment', False) != startup:
+        raise ValueError('unexpected Linux startup build profile')
     if not report['exact_control_driver_uuids'] or not report['bti_enforcement_disabled'] or report['configuration'] != 'DEVELOPMENT':
         raise ValueError('expected diagnostic VM driver-preserving candidate')
     results = OUT / 'results'
@@ -91,6 +93,46 @@ def stage(name, candidate, core=False, memory=False, filemap=False, files=False)
         boot = boot.replace('"$base/display-output" "$base/filemap-run" "$base/filemap-probe"',
                             '"$base/files-run" "$base/files-probe"\n' +
                             '"$base/display-output" "$base/files-run" "$base/files-probe"')
+    if startup:
+        verification=json.loads((ABI/'out/startup/verification.json').read_text())
+        if 'XNU_STARTUP_PERSONALITY_PASS' not in verification.get('linux_reference',''):
+            raise ValueError('Linux startup reference must pass before staging')
+        if hashlib.sha256((ABI/'out/startup/startup-probe').read_bytes()).hexdigest()!=verification['linux_elf_sha256']:
+            raise ValueError('Linux startup fixture changed')
+        for filename in ('startup-probe','startup-run'):
+            artifact=ABI/'out/startup'/filename
+            digest=hashlib.sha256(artifact.read_bytes()).hexdigest()
+            shutil.copy2(artifact,results/filename)
+            extra_files+=f'[ "$("$directory/sha256" "$share/{filename}")" = {digest} ] || exit 1\n'
+            extra_files+=f'cp "$share/{filename}" "$data/Library/RDXNU-P0/{filename}"\nchmod 755 "$data/Library/RDXNU-P0/{filename}"\nchown root:wheel "$data/Library/RDXNU-P0/{filename}"\n'
+        reference=json.loads((ABI/'out/systemd/reference.json').read_text())
+        if not reference['linux_reference_pass']:raise ValueError('systemd Linux reference missing')
+        for relative,digest in reference['files'].items():
+            artifact=ABI/'out/systemd/rootfs'/relative
+            if hashlib.sha256(artifact.read_bytes()).hexdigest()!=digest:raise ValueError(f'systemd artifact changed: {relative}')
+            staged=results/'systemd'/relative;staged.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copy2(artifact,staged)
+            extra_files+=f'[ "$("$directory/sha256" "$share/systemd/{relative}")" = {digest} ] || exit 1\n'
+            extra_files+=f'mkdir -p "$data/Library/RDXNU-P0/systemd/{Path(relative).parent}"\ncp "$share/systemd/{relative}" "$data/Library/RDXNU-P0/systemd/{relative}"\nchmod 755 "$data/Library/RDXNU-P0/systemd/{relative}"\n'
+        (results/'systemd-expected-version.txt').write_text(reference['version_output'])
+        extra_files+='cp "$share/systemd-expected-version.txt" "$data/Library/RDXNU-P0/systemd-expected-version.txt"\n'
+        systemd_test='''"$base/startup-run" "$base/startup-probe"
+systemdlog=/var/tmp/rdxnu-systemd-version.log
+if "$base/run-arch" "$base/systemd/usr/lib/ld-linux-aarch64.so.1" --inhibit-cache --library-path "$base/systemd/usr/lib/systemd:$base/systemd/usr/lib" "$base/systemd/usr/lib/systemd/systemd" --version > "$systemdlog" 2>&1; then
+    head -n 2 "$systemdlog" > /var/tmp/rdxnu-systemd-version-only.log
+    if cmp -s /var/tmp/rdxnu-systemd-version-only.log "$base/systemd-expected-version.txt"; then
+        echo XNU_SYSTEMD_VERSION_PASS
+    else
+        echo XNU_SYSTEMD_VERSION_OUTPUT_MISMATCH
+    fi
+else
+    echo XNU_SYSTEMD_VERSION_NOT_YET
+fi
+cat "$systemdlog"
+"$base/display-output" /bin/cat "$systemdlog"'''
+        boot=boot.replace('"$base/display-output" "$base/files-run" "$base/files-probe"',systemd_test)
+        boot=boot.replace('    if [ -d "$shared" ]; then',
+            '    if [ -d "$shared" ]; then\n        cp /var/tmp/rdxnu-systemd-version.log "$shared/systemd-version.log" 2>/dev/null || true')
     boot = boot.replace('terminal.log', f'{name}.log').replace('terminal-boot.log', f'{name}-boot.log')
     boot = boot.replace('rdxnu-terminal-display.log', f'rdxnu-{name}-display.log')
     boot = boot.replace('"$shared/terminal-display.log"', f'"$shared/{name}-display.log"')
@@ -153,6 +195,11 @@ def main(kind='core'):
         candidate = stage('filemap', OUT / (BASELINE + '-memory-filemap'), memory=True, filemap=True)
     elif kind == 'files':
         candidate = stage('files', OUT / (BASELINE + '-memory-filemap-files'), memory=True, filemap=True, files=True)
+    elif kind == 'startup':
+        candidate = stage('startup', OUT / (BASELINE + '-memory-filemap-files-startup'), memory=True, filemap=True, files=True, startup=True)
+    elif kind in ('startup-stock','startup-source-control'):
+        suffix=kind.removeprefix('startup-')
+        candidate = stage(kind, OUT / (BASELINE + '-memory-filemap-files-startup-' + suffix), memory=True, filemap=True, files=True, startup=True)
     else:
         raise ValueError('unknown VM test variant')
     print(json.dumps({'rollback': rollback, 'candidate': candidate}, indent=2))
@@ -161,5 +208,5 @@ def main(kind='core'):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('kind',choices=('core','memory','filemap','files'))
+    parser.add_argument('kind',choices=('core','memory','filemap','files','startup','startup-stock','startup-source-control'))
     main(parser.parse_args().kind)
