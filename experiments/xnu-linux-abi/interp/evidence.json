@@ -1,0 +1,102 @@
+{
+  "state": "direct_arch_exec_native_root_live_xnu_pass",
+  "linux_reference": {
+    "image": "sha256:0151e70bd01e7e4c891e903edf1dacba81656f04c6150bfce78d5a570e4df443",
+    "plan_check": "INTERP_PLAN_PASS: dynamic program, independent interpreter bias, malformed and nested interpreter controls\n",
+    "stdout": "ARCH_DIRECT_CHILD_PASS\nLINUX_INTERP_PASS\nINTERP_ERROR_CONTROLS_PASS\nsystemd 262 (262.2-1-arch)\n+PAM +AUDIT -SELINUX +APPARMOR -IMA +IPE +SMACK +SECCOMP +GNUTLS +OPENSSL +ACL +BLKID +CURL +ELFUTILS +FIDO2 +IDN2 +KMOD +LIBCRYPTSETUP +LIBCRYPTSETUP_PLUGINS +LIBFDISK +PCRE2 +PWQUALITY +P11KIT +QRENCODE +TPM2 +BZIP2 +LZ4 +XZ +ZLIB +ZSTD +BPF_FRAMEWORK -BTF +XKBCOMMON +UTMP +LIBARCHIVE\nXNU_INTERP_PERSONALITY_PASS: direct Arch exec, auxv/TLS, native root and credentials, interpreter errors, child reap; native parent intact\n",
+    "stderr": "Failed to determine current OOM score adjustment value, ignoring: No such file or directory\n",
+    "files": {
+      "den/ld-linux-aarch64.so.1": "b1f2738bdb51e6419d7062f96c8a44bd68853698dc5ac624fa6ca9f9b03d456d",
+      "err/ld-linux-aarch64.so.1": "8c09c8f41b72d901d888c5017b2181e253bd371428c234a4f8ebdda57b9f4672",
+      "usr/bin/broken-probe": "33fa7158f242b7b1f160dc403eea9dbfa64c492129a5820e9e3246294a29cfd0",
+      "usr/bin/denied-probe": "77fe4381047454437a200411bca5ab90936737b933d87febc304cc6545d6d47c",
+      "usr/bin/interp-probe": "af21268db8942728c5a5f4e37be6a6d7cb1762e1fe5b0939b17c8ea0540774e0",
+      "usr/bin/missing-probe": "ca6a6d8678c8f0667b38e967eb6554427f438efbf0c9e9c06cb47dbc23fda38d",
+      "usr/bin/printf": "61d8c99214afa144e0c0b922798adadbf00ef08d7635c3ca1fb62ade854be51f",
+      "usr/lib/ld-linux-aarch64.so.1": "b1f2738bdb51e6419d7062f96c8a44bd68853698dc5ac624fa6ca9f9b03d456d",
+      "usr/lib/libc.so.6": "6ab264fb4e8df9942b0fb75b48fcd5c30b2f081d8dfaa6c25d7be1d3fce5b2ab",
+      "usr/lib/libgcc_s.so.1": "ac598673a4bf67c0295b6609e46b1fafd0d4adf3f80a513d61ac49ecff772e48",
+      "usr/lib/libm.so.6": "71ed8de709c40acd4fd0177258fc71251a5acdb1d075122409ad42529d6c7a4e",
+      "usr/lib/systemd/libsystemd-core-262.2-1.so": "d5cd707fb041747a74821a94c02fff63f58733b5937adfecedc6df772c239a82",
+      "usr/lib/systemd/libsystemd-shared-262.2-1.so": "ecbd239a8516c7d4c2767e6dfe1549a1564fded185a10ca84e4a40c68bc31868",
+      "usr/lib/systemd/systemd": "004fff95f0c063820367d1f2276f7034604735b4e177a5c38d3ddb02a44139c2"
+    }
+  },
+  "xnu_runtime": {
+    "kernel_uuid": "10A390BE-A623-3DF9-8337-20BD4F3C71DD",
+    "collection_sha256": "98d4c6b6cb6783ad6411cf165ff162750d8ec1602147a9d0b1164462fb3fb15b",
+    "staged_name": "interp-10a390be-27516bf8",
+    "interp_runtime_pass": true,
+    "startup_runtime_pass": true,
+    "paths_runtime_pass": true,
+    "process_runtime_pass": true,
+    "arch_child_exec_runtime_pass": true,
+    "systemd_version_runtime_pass": true,
+    "native_parent": 701,
+    "linux_child": 702,
+    "manager_native_parent_result": 1,
+    "manager_runtime_pass": false,
+    "systemd_version": "systemd 262 (262.2-1-arch)",
+    "stderr_present": false,
+    "stderr": "",
+    "proof_logs": {
+      "boot": {
+        "path": "out/interp/runtime-proof/interp-10a390be-27516bf8-boot.log",
+        "sha256": "05b25f5f5a1549df31f5d4f1f200a50739d518960d956be32bfd9ac730c4a1d4"
+      },
+      "stdout": {
+        "path": "out/interp/runtime-proof/interp-10a390be-27516bf8-stdout.log",
+        "sha256": "6a821ad92e73fa2844775b41141d4e8f0c301d4b425209194d9727e300517cc1"
+      },
+      "stderr": {
+        "path": "out/interp/runtime-proof/interp-10a390be-27516bf8-stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "interp": {
+        "path": "out/interp/runtime-proof/interp-10a390be-27516bf8-interp.log",
+        "sha256": "b9201f90e6efc2f9bf3060a09819694cf861e5226c407548a026d535cc591c4c"
+      },
+      "interp-stderr": {
+        "path": "out/interp/runtime-proof/interp-10a390be-27516bf8-interp-stderr.log",
+        "sha256": "ba338deec5d8b7843a7f561fbe026977fed2fbfbab933df6a0294bae318540d0"
+      },
+      "manager-attempt": {
+        "path": "out/interp/runtime-proof/interp-10a390be-27516bf8-manager-attempt.log",
+        "sha256": "d538a1f8ef11ca600c2253381988e4d7d380a96e29dc219ab0332e5d69e6b4f5"
+      }
+    },
+    "limits": "Single-thread-per-process fork/exec/wait and systemd --version; no PID 1, service-manager, complete filesystem isolation, or physical-driver qualification",
+    "kernel_sha256": "0fb27056d91f365d626ccd8008f141d64ac3ba27ecae899392011538c73fd1b6",
+    "compiled_source_sha256": {
+      "bsd/kern/kern_exec.c": "3c2fe75959536e44b66628214e3f86ab3d7bd8b5f38e85532f2c17cf1863a616",
+      "bsd/kern/kern_fork.c": "124ce50e2237f08bacfa658331c1c9222d14b4ad23b5b6b78d39defff679cd18",
+      "bsd/sys/proc_internal.h": "390652f03c6f1fea018b4a0231f00b8b5bda39b62ee285479bfd2f9a21f62725",
+      "bsd/kern/rdxnu_elf_plan.h": "6179ed2ec315f8e215ea79285a2de56060dc43091588577691f1894ff4f00428",
+      "bsd/kern/rdxnu_linux_exec.h": "4ffbaa926251d45249eb191f78807a12e286c16ce3299f06e8d0364869a5f5d4",
+      "osfmk/console/video_console.c": "97a88233315edb1c82be9ffc4c63458c4b5751a8b593b58f5a0c16985059d1c1",
+      "bsd/kern/kern_mman.c": "4482bcef867679b030d0c521c54e6c99ef75ad32f7e8148b520b8f6e1baada04",
+      "bsd/kern/kern_descrip.c": "54ee3509f9749249e30c802c1f7f8931a6d00ba30f93067e3ac36125762afc63",
+      "bsd/vfs/vfs_syscalls.c": "2e44425fcf4687b55595d49d1b9ddde81944c245dc2f82ad63e0703886276ec1",
+      "bsd/kern/rdxnu_linux_stat.h": "e652b1151cfacbacf2e9d3f5d62f4000eaa165ae75997872e2f3287740793e67",
+      "bsd/vfs/rdxnu_linux_stat.h": "e652b1151cfacbacf2e9d3f5d62f4000eaa165ae75997872e2f3287740793e67",
+      "bsd/kern/kern_exit.c": "39f47d063749ee133b9ab2dd6e97834919d3ba5d23e320f47c21a004e8e7e155",
+      "bsd/sys/resourcevar.h": "1c8390e42ecc05834d73fb2b4436af13b9aff86c7e5e0c2a0af1c61f85334fda",
+      "bsd/sys/user.h": "5c1c4f0f14fe2ad55cf073fe68e137451f4326a21426c7c28d3a63b4e445d4ec",
+      "osfmk/arm64/genassym.c": "a58d32b559b81b7d7a4421bf29d2465aca0ec125ffcb09736a5c87c8bd1f83cc",
+      "osfmk/conf/files.arm64": "1d0c6a5aa6c3b3d825605123b8d7282710724f21c31e0a3c87c234698dbb95ba",
+      "makedefs/MakeInc.def": "fb2036284f689edb88006d5e293aa955b97d164e597f772d2ade4f5b5e2e9fae",
+      "osfmk/arm64/rdxnu_linux_entry.s": "8a0a820bb2466ad174da83bb528354803565f7677b0f15e18ad905e692ae17de",
+      "bsd/kern/rdxnu_linux_machine.inc": "4cbcb5bea86b20c4bcd738d3e8574680c92202c575e96fe4639ec94967957722",
+      "bsd/kern/rdxnu_linux_state.h": "c0671277f3fd0f2a3558fd1aba97e40bdd997e4b89d136cc5ecbff2a06a8543e",
+      "bsd/kern/rdxnu_linux_statx.h": "8f15282d8c3881bd127f9c658146225e9b614fc48d3287b04d5f24f395df1fd7",
+      "bsd/vfs/rdxnu_linux_statx.h": "8f15282d8c3881bd127f9c658146225e9b614fc48d3287b04d5f24f395df1fd7",
+      "bsd/kern/rdxnu_interp_image.h": "7f2e1e71bf0758655a5884799852d1b444bfef687626fdbe0e57c967f64363f1"
+    },
+    "assembly_offsets": {
+      "control_definitions": 336,
+      "existing_definitions_unchanged": true,
+      "native_thread_size": "1696"
+    }
+  },
+  "scope": "Direct PT_INTERP, bounded ELF TLS and auxiliary vector, native chroot path scope and credentials; unchanged Arch child/systemd version and prior gates; no systemd manager or PID/init namespace pass"
+}

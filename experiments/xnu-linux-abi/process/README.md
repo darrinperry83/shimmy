@@ -51,8 +51,9 @@ Execve (221) delegates to XNU's exec implementation and the existing ELF loader.
 The fixture forks and executes the unchanged Arch loader, which loads the
 unchanged Arch printf and matching libc. The executable emits
 `ARCH_CHILD_EXEC_PASS`; its Linux parent must receive status zero and reap it.
-The explicit loader is still required: automatic PT_INTERP/rootfs resolution
-has not been implemented. Missing-path and bad-argv failures must preserve TLS.
+This profile still uses the explicit loader. The opt-in
+[interpreter follow-up](../interp/README.md) now proves direct PT_INTERP exec
+inside a native chroot without changing this earlier checkpoint. Missing-path and bad-argv failures must preserve TLS.
 
 The fixture also checks independent parent/child data and heap changes,
 TLS/x18 and signal-mask inheritance, a forced blocking wait, no-event WNOHANG,

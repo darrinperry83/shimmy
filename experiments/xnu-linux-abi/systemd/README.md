@@ -89,3 +89,12 @@ unbooted-context guard; gate 2 remains unproven on XNU.
 Each port should identify the reused shim contract/tests, the native backend,
 and any remaining limitations. Existing shim test results do not automatically
 prove the new kernel backend. See [update policy](../UPDATE-POLICY.md).
+
+The [direct-exec checkpoint](../interp/README.md) on kernel
+10A390BE-A623-3DF9-8337-20BD4F3C71DD now executes unchanged Arch systemd
+by its ordinary `/usr/lib/systemd/systemd` path inside a native chroot.
+The kernel resolves PT_INTERP and the Arch loader owns library/TLS setup.
+The dynamic probe, original Arch child exec and all previous regression
+gates pass. This is a prerequisite for normal service ExecStart paths,
+not systemd manager startup. The minimal root's missing-proc warning matches
+Linux exactly; the existing outside-root version gate still has empty stderr.

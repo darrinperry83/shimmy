@@ -32,3 +32,9 @@ one at the same unbooted-context guard as the Linux control. This happens in
 See [evidence.json](evidence.json). The next manager boundary is a coherent Linux
 init/runtime context, together with the required event and filesystem views;
 changing only getpid or creating a boot marker would not establish that context.
+
+The [direct-exec prerequisite](../interp/README.md) now passes on XNU:
+normal Arch executable paths use kernel PT_INTERP with native chroot lookup,
+without a userspace loader command. This also runs unchanged systemd --version
+inside the minimal Arch root. Manager/init identity, proc/cgroup and event
+interfaces remain separate work; no boot marker or PID 1 override was added.

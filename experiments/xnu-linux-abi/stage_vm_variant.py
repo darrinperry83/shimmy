@@ -15,7 +15,7 @@ OUT = ABI / 'out/vmapple'
 BASELINE = 'baseline-no-lto-no-bti-svc-probe-elf-arch-loader-linux-console-terminal'
 
 
-def stage(name, candidate, core=False, memory=False, filemap=False, files=False, startup=False, paths=False, process=False):
+def stage(name, candidate, core=False, memory=False, filemap=False, files=False, startup=False, paths=False, process=False, interp=False):
     report = json.loads((candidate / 'collection-result.json').read_text())
     build = json.loads((candidate / 'build-result.json').read_text())
     data = Path(report['collection']).read_bytes()
@@ -35,6 +35,8 @@ def stage(name, candidate, core=False, memory=False, filemap=False, files=False,
         raise ValueError('unexpected Linux paths build profile')
     if report.get('linux_process_experiment',False) != process:
         raise ValueError('unexpected Linux process build profile')
+    if report.get('linux_interp_experiment',False) != interp:
+        raise ValueError('unexpected Linux interpreter build profile')
     if not report['exact_control_driver_uuids'] or not report['bti_enforcement_disabled'] or report['configuration'] != 'DEVELOPMENT':
         raise ValueError('expected diagnostic VM driver-preserving candidate')
     if startup:
@@ -50,6 +52,9 @@ def stage(name, candidate, core=False, memory=False, filemap=False, files=False,
             for filename in ('process-probe','process-run'):
                 material+=(ABI/'out/process'/filename).read_bytes()
             material+=(ABI/'out/process/arch-printf').read_bytes()
+        if interp:
+            material+=(ABI/'out/interp/verification.json').read_bytes()
+            material+=(ABI/'out/interp/interp-run').read_bytes()
         token=hashlib.sha256(material).hexdigest()[:8]
         name+=f'-{report["kernel_uuid"][:8].lower()}-{token}'
     results = OUT / 'results'
@@ -192,6 +197,26 @@ cat "$systemderr"
         extra_files+=f'cp "$share/{staged_name}" "$data/Library/RDXNU-P0/arch-printf"\nchmod 755 "$data/Library/RDXNU-P0/arch-printf"\nchown root:wheel "$data/Library/RDXNU-P0/arch-printf"\n'
         boot=boot.replace('"$base/paths-run" "$base/paths-probe"',
             '"$base/paths-run" "$base/paths-probe"\n"$base/process-run" "$base/process-probe"')
+    if interp:
+        verification=json.loads((ABI/'out/interp/verification.json').read_text())
+        if not verification['linux_reference_pass']:raise ValueError('interpreter Linux reference must pass')
+        root='$data/Library/RDXNU-P0/interp-root'
+        for relative,digest in verification['files'].items():
+            artifact=ABI/'out/interp/rootfs'/relative
+            if hashlib.sha256(artifact.read_bytes()).hexdigest()!=digest:raise ValueError(f'interpreter root changed: {relative}')
+            staged_name=f'{name}-root/{relative}'
+            staged=results/staged_name;staged.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(artifact,staged)
+            mode=644 if relative.startswith('den/') else 755
+            extra_files+=f'[ "$("$directory/sha256" "$share/{staged_name}")" = {digest} ] || exit 1\n'
+            extra_files+=f'mkdir -p "{root}/{Path(relative).parent}"\ncp "$share/{staged_name}" "{root}/{relative}"\nchmod {mode} "{root}/{relative}"\nchown root:wheel "{root}/{relative}"\n'
+        extra_files+=f'ln -sfn usr/lib "{root}/lib"\nln -sfn usr/bin "{root}/bin"\n'
+        artifact=ABI/'out/interp/interp-run';digest=hashlib.sha256(artifact.read_bytes()).hexdigest()
+        staged_name=f'{name}-interp-run';shutil.copy2(artifact,results/staged_name)
+        extra_files+=f'[ "$("$directory/sha256" "$share/{staged_name}")" = {digest} ] || exit 1\n'
+        extra_files+=f'cp "$share/{staged_name}" "$data/Library/RDXNU-P0/interp-run"\nchmod 755 "$data/Library/RDXNU-P0/interp-run"\nchown root:wheel "$data/Library/RDXNU-P0/interp-run"\n'
+        boot=boot.replace('cat "$systemderr"','cat "$systemderr"\nif "$base/interp-run" "$base/interp-root" > /var/tmp/rdxnu-interp.log 2> /var/tmp/rdxnu-interp-stderr.log; then\n    echo XNU_INTERP_NATIVE_PARENT_RESULT=0\nelse\n    echo XNU_INTERP_NATIVE_PARENT_RESULT=$?\nfi\ncat /var/tmp/rdxnu-interp.log\ncat /var/tmp/rdxnu-interp-stderr.log\nexport_logs')
+        boot=boot.replace('    if [ -d "$shared" ]; then',
+            '    if [ -d "$shared" ]; then\n        for suffix in "" -stderr; do\n            if [ -f "/var/tmp/rdxnu-interp${suffix}.log" ]; then cp "/var/tmp/rdxnu-interp${suffix}.log" "$shared/'+name+'-interp${suffix}.log"; fi\n        done')
     if startup:
         # A leftover directory is not proof the host share is mounted.
         old_mount='''    shared='/Volumes/My Shared Files/results'
@@ -302,6 +327,8 @@ def main(kind='core'):
         candidate = stage('filemap', OUT / (BASELINE + '-memory-filemap'), memory=True, filemap=True)
     elif kind == 'files':
         candidate = stage('files', OUT / (BASELINE + '-memory-filemap-files'), memory=True, filemap=True, files=True)
+    elif kind == 'interp':
+        candidate = stage('interp', OUT / (BASELINE + '-memory-filemap-files-startup-kdk-bridge-paths-process-interp'), memory=True, filemap=True, files=True, startup=True, paths=True, process=True, interp=True)
     elif kind == 'process':
         candidate = stage('process', OUT / (BASELINE + '-memory-filemap-files-startup-kdk-bridge-paths-process'), memory=True, filemap=True, files=True, startup=True, paths=True, process=True)
     elif kind == 'paths':
@@ -319,5 +346,5 @@ def main(kind='core'):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('kind',choices=('core','memory','filemap','files','paths','process','startup','startup-stock','startup-source-control','startup-kdk-bridge'))
+    parser.add_argument('kind',choices=('core','memory','filemap','files','paths','process','interp','startup','startup-stock','startup-source-control','startup-kdk-bridge'))
     main(parser.parse_args().kind)

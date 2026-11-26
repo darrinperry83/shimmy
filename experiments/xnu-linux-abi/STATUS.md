@@ -582,3 +582,33 @@ The VM display retains its preboot image; no live Linux console or rendering
 backend is attached. This image does not represent current guest process state.
 After loader completion the guest replied to both fresh ICMP probes with no
 packet loss. It is left running headlessly with the loader candidate.
+
+
+## 26 November 2026: direct Arch executable paths on XNU
+
+Kernel 10A390BE-A623-3DF9-8337-20BD4F3C71DD passes the new opt-in
+`--with-linux-interp` checkpoint. XNU performs caller-root vnode lookup and
+native exec/MAC permission checks for PT_INTERP before task replacement, then
+maps program and interpreter into the native task. The unchanged Arch loader
+initializes TLS and dependencies. The dynamic Linux probe verifies auxv,
+actual exec filename independent of argv[0], environment, TLS, native chroot
+path scope, and missing/denied/short interpreter errors preserving its state.
+It forks and directly execs unchanged Arch printf, then reaps it. Unchanged
+Arch systemd --version also executes directly in the root. Both stdout and
+stderr match the immutable Linux reference, including the expected missing
+proc warning. Existing outside-root version output still has empty stderr.
+All earlier gates, Darwin parent/wait control and absent-WindowServer check
+pass on the same boot, with visible Apple-driver console output.
+
+Raw kernel SHA-256: 0fb27056d91f365d626ccd8008f141d64ac3ba27ecae899392011538c73fd1b6.
+Collection SHA-256: 98d4c6b6cb6783ad6411cf165ff162750d8ec1602147a9d0b1164462fb3fb15b.
+Staged identity: interp-10a390be-27516bf8.
+See [interp/evidence.json](interp/evidence.json) for exact fixture/package
+hashes, frozen proof-log hashes and unchanged native assembly offsets.
+
+This removes the explicit-loader prerequisite for bounded dynamic service
+executables. It does not establish a systemd manager, PID/init namespace,
+procfs, complete filesystem sandbox, ASLR/text locking, interactive shell or
+physical hardware support. The manager negative control still exits one
+at its ordinary unbooted-context guard. The coherent Linux init/runtime
+context and manager event interfaces remain the next systemd boundaries.

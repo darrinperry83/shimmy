@@ -24,7 +24,11 @@ including an unchanged Arch child and a native Darwin wait control; see
 [process/README.md](process/README.md). A real Linux manager success/failure
 reference is recorded in [manager/README.md](manager/README.md). The current
 XNU manager attempt stops at the unbooted-context guard, so its init/runtime
-context must be established before claiming a service-manager pass.
+context must be established before claiming a service-manager pass. The direct
+ELF interpreter prerequisite now passes: native root/credential lookup resolves
+PT_INTERP and unchanged Arch printf/systemd execute by ordinary paths. See
+[interp/README.md](interp/README.md). This remains separate from a Linux
+init/runtime context or manager pass.
 
 
 Current plan, 26 November 2026. This is the implementation sequence; STATUS.md
