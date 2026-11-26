@@ -4,9 +4,16 @@
 Linux ABI](LINUX-PERSONALITY.md), with XNU owning memory, execution and Apple
 devices. Reuse the shim's compatibility contracts in the kernel personality.
 The hosted Linux-core prototype remains a separate subsystem experiment; its
-memory bootstrap is not a dependency for the shell. The active first memory
-gate is anonymous mappings, protections and unmapping backed by XNU's task map.
-Arch Bash and systemd remain unproven.
+memory bootstrap is not a dependency for the shell. Anonymous and private-file
+mapping gates now pass on XNU. The immediate application target is the original
+Arch systemd package; see [systemd/README.md](systemd/README.md) for gates and
+the existing shim reuse map. Arch Bash and systemd remain unproven on XNU.
+Keep XNU, personality and Arch package updates independently versioned and
+promote tested combinations under [UPDATE-POLICY.md](UPDATE-POLICY.md).
+
+The next file-operation gate also passes on Linux and live XNU; see
+[files/README.md](files/README.md). Heap growth and libc/TLS/signal startup
+remain next for the original systemd binary.
 
 
 Current plan, 26 November 2026. This is the implementation sequence; STATUS.md
@@ -26,6 +33,14 @@ the ELF/dynamic-linker syscall subset becomes sufficient. Output proof alone doe
 not complete any interactive-console or Arch-boot milestone.
 
 ## Target and constraints
+
+The next development-environment acceptance target is Codex CLI executing
+inside the Arch environment in the disposable VM: inspect/edit the checkout,
+run commands and tests, then perform an authenticated online request. Track
+process/wait, PTY/signal, libc/TLS, filesystem and networking/HTTPS behavior
+needed by the selected CLI build. This is unproven. Keep the existing host
+XNU/Apple collection build tools until an in-guest build toolchain is actually
+validated. The VM remains a development fixture, not the final runtime design.
 
 - Genuine Arch Linux ARM AArch64 packages and root filesystem.
 - Custom XNU owns physical CPUs, scheduling, memory and Apple driver environment.

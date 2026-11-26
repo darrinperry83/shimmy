@@ -57,7 +57,18 @@ tested Linux ABI target, source pins and behavioral regressions so compatibility
 changes are reviewable. The earlier source-intake tooling remains useful for
 optional Linux subsystem imports, not as an automatic stock-image converter.
 
-Next shell steps: file-backed mappings and heap growth; descriptor/path/file
-metadata operations; TLS and thread initialization; signal and terminal
-contracts; then original Arch Bash startup and external commands. Each stage
-must preserve the current ELF, loader, PTY and Darwin-parent controls.
+The private-file-mapping extension now passes Linux/XNU comparison tests,
+including RX execution and fixed replacement; see `memory/filemap-evidence.json`.
+Its file descriptors are inherited from a native controller. A separate
+[file-operation checkpoint](files/README.md) now passes on Linux and live XNU:
+Linux opens its own data file, obtains Linux-layout metadata through native
+XNU lookup, and preserves the mapping after closing the descriptor. Full
+dynamic loading remains unproven.
+
+The immediate application target is now original Arch systemd, beginning with
+its loader/libc startup and then a minimal service-manager target. Heap growth,
+descriptor/path/file metadata, TLS/thread initialization and signal contracts
+are prerequisites shared with the shell. See [systemd/README.md](systemd/README.md)
+for measurable gates and the shim implementation/test reuse map. Each stage
+must preserve the current ELF, loader, PTY and Darwin-parent controls. Follow
+[UPDATE-POLICY.md](UPDATE-POLICY.md) for independent XNU/personality/Arch updates.

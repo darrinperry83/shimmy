@@ -15,7 +15,7 @@ OUT = ABI / 'out/vmapple'
 BASELINE = 'baseline-no-lto-no-bti-svc-probe-elf-arch-loader-linux-console-terminal'
 
 
-def stage(name, candidate, core=False, memory=False):
+def stage(name, candidate, core=False, memory=False, filemap=False, files=False):
     report = json.loads((candidate / 'collection-result.json').read_text())
     build = json.loads((candidate / 'build-result.json').read_text())
     data = Path(report['collection']).read_bytes()
@@ -25,6 +25,10 @@ def stage(name, candidate, core=False, memory=False):
         raise ValueError('unexpected kernel build profile')
     if report.get('linux_memory_experiment', False) != memory:
         raise ValueError('unexpected Linux memory build profile')
+    if report.get('linux_filemap_experiment', False) != filemap:
+        raise ValueError('unexpected Linux filemap build profile')
+    if report.get('linux_files_experiment', False) != files:
+        raise ValueError('unexpected Linux files build profile')
     if not report['exact_control_driver_uuids'] or not report['bti_enforcement_disabled'] or report['configuration'] != 'DEVELOPMENT':
         raise ValueError('expected diagnostic VM driver-preserving candidate')
     results = OUT / 'results'
@@ -55,6 +59,38 @@ def stage(name, candidate, core=False, memory=False):
             raise ValueError('unexpected terminal display test')
         boot = boot.replace(anchor, '"$base/memory-run" "$base/memory-probe"\n' +
                             '"$base/display-output" "$base/memory-run" "$base/memory-probe"')
+    if filemap:
+        verification = json.loads((ABI / 'out/memory/filemap-verification.json').read_text())
+        if 'XNU_FILEMAP_PERSONALITY_PASS' not in verification.get('linux_reference',''):
+            raise ValueError('Linux filemap reference must pass before staging')
+        elf = ABI / 'out/memory/filemap-probe'
+        if hashlib.sha256(elf.read_bytes()).hexdigest() != verification['linux_elf_sha256']:
+            raise ValueError('Linux filemap fixture changed')
+        for filename in ('filemap-probe','filemap-run'):
+            artifact = ABI / 'out/memory' / filename
+            digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+            shutil.copy2(artifact,results / filename)
+            extra_files += f'[ "$("$directory/sha256" "$share/{filename}")" = {digest} ] || exit 1\n'
+            extra_files += f'cp "$share/{filename}" "$data/Library/RDXNU-P0/{filename}"\nchmod 755 "$data/Library/RDXNU-P0/{filename}"\nchown root:wheel "$data/Library/RDXNU-P0/{filename}"\n'
+        boot = boot.replace('"$base/display-output" "$base/memory-run" "$base/memory-probe"',
+                            '"$base/filemap-run" "$base/filemap-probe"\n' +
+                            '"$base/display-output" "$base/filemap-run" "$base/filemap-probe"')
+    if files:
+        verification = json.loads((ABI / 'out/files/verification.json').read_text())
+        if 'XNU_FILES_PERSONALITY_PASS' not in verification.get('linux_reference',''):
+            raise ValueError('Linux files reference must pass before staging')
+        elf = ABI / 'out/files/files-probe'
+        if hashlib.sha256(elf.read_bytes()).hexdigest() != verification['linux_elf_sha256']:
+            raise ValueError('Linux files fixture changed')
+        for filename in ('files-probe','files-run'):
+            artifact = ABI / 'out/files' / filename
+            digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+            shutil.copy2(artifact,results / filename)
+            extra_files += f'[ "$("$directory/sha256" "$share/{filename}")" = {digest} ] || exit 1\n'
+            extra_files += f'cp "$share/{filename}" "$data/Library/RDXNU-P0/{filename}"\nchmod 755 "$data/Library/RDXNU-P0/{filename}"\nchown root:wheel "$data/Library/RDXNU-P0/{filename}"\n'
+        boot = boot.replace('"$base/display-output" "$base/filemap-run" "$base/filemap-probe"',
+                            '"$base/files-run" "$base/files-probe"\n' +
+                            '"$base/display-output" "$base/files-run" "$base/files-probe"')
     boot = boot.replace('terminal.log', f'{name}.log').replace('terminal-boot.log', f'{name}-boot.log')
     boot = boot.replace('rdxnu-terminal-display.log', f'rdxnu-{name}-display.log')
     boot = boot.replace('"$shared/terminal-display.log"', f'"$shared/{name}-display.log"')
@@ -113,6 +149,10 @@ def main(kind='core'):
         candidate = stage('core', OUT / (BASELINE + '-linux-core'), core=True)
     elif kind == 'memory':
         candidate = stage('memory', OUT / (BASELINE + '-memory'), memory=True)
+    elif kind == 'filemap':
+        candidate = stage('filemap', OUT / (BASELINE + '-memory-filemap'), memory=True, filemap=True)
+    elif kind == 'files':
+        candidate = stage('files', OUT / (BASELINE + '-memory-filemap-files'), memory=True, filemap=True, files=True)
     else:
         raise ValueError('unknown VM test variant')
     print(json.dumps({'rollback': rollback, 'candidate': candidate}, indent=2))
@@ -121,5 +161,5 @@ def main(kind='core'):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('kind',choices=('core','memory'))
+    parser.add_argument('kind',choices=('core','memory','filemap','files'))
     main(parser.parse_args().kind)

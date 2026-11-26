@@ -136,6 +136,14 @@ static int rd_linux_errno(int error)
     case ENOMEM: return 12; case EACCES: return 13; case EFAULT: return 14;
     case EINVAL: return 22; case ENOSPC: return 28; case EPIPE: return 32;
     case EFBIG: return 27; case EISDIR: return 21; case ENXIO: return 6;
+    case EEXIST: return 17; case ENODEV: return 19; case EOVERFLOW: return 75;
+    case ENOTDIR: return 20; case ENAMETOOLONG: return 36; case ELOOP: return 40;
+    case EMFILE: return 24; case ENFILE: return 23; case ESPIPE: return 29;
+    case EROFS: return 30; case E2BIG: return 7; case ENOSYS: return 38;
+    case ENOTSUP: return 95;
+#if EOPNOTSUPP != ENOTSUP
+    case EOPNOTSUPP: return 95;
+#endif
     default: return 5;
     }
 }

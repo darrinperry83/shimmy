@@ -8,6 +8,33 @@ memory operations; the same ELF now passes on real Linux and live custom XNU,
 and its result is visible through the Apple display output host. This is the
 active route toward the shell. Evidence: [memory/evidence.json](memory/evidence.json).
 
+The next private-file-mapping gate also passes on real Linux and live XNU
+(`238B1961-DF68-30ED-9368-DD2E7B7C35D3`): private data with an unchanged backing
+file, execution from an RX file mapping, offsets, fixed file/anonymous
+replacement with intact neighboring memory, and Linux error behavior. Native
+Darwin's directory-mapping error remains unchanged. All earlier controls pass,
+and the result is visible without WindowServer. Evidence:
+[memory/filemap-evidence.json](memory/filemap-evidence.json). Heap growth,
+Linux file-open/metadata support, full dynamic linking and Bash remain work.
+
+The file-open/metadata checkpoint now passes on live XNU kernel
+`2A795DD5-D68C-30A6-84B0-7237329792AC`: the unchanged Linux fixture opens its
+own data file, checks Linux metadata against a native Darwin parent, exercises
+path/symlink/fd/error behavior and 64-bit offsets, then executes a file mapping
+after closing its descriptor. The result is visible through the Apple display
+path. Earlier ELF, Arch loader, PTY and memory/filemap controls pass on the same
+boot with WindowServer absent. See [files/README.md](files/README.md) and
+[files/evidence.json](files/evidence.json). This uses the native filesystem
+namespace; Arch rootfs policy, heap/TLS/signal startup and systemd remain work.
+
+The immediate application target is now original Arch systemd; see
+[systemd/README.md](systemd/README.md). Its captured binary/library closure
+passes the version command on reference Linux, with a syscall entry/return
+trace in `out/systemd/reference.json`. Systemd has not run on XNU yet. Port the
+shim's existing behavior/tests to native kernel backends and keep XNU,
+personality and Arch package updates independently versioned under
+[UPDATE-POLICY.md](UPDATE-POLICY.md).
+
 The earlier [Linux source-port investigation](../linux-on-xnu/README.md) is
 preserved as an optional subsystem experiment rather than the shell dependency.
 Source candidates and update inputs are pinned and audited; the intake tool passes

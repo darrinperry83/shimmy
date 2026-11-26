@@ -24,7 +24,13 @@ def main():
     parser.add_argument('--with-linux-terminal', action='store_true')
     parser.add_argument('--with-linux-core', action='store_true')
     parser.add_argument('--with-linux-memory', action='store_true')
+    parser.add_argument('--with-linux-filemap', action='store_true')
+    parser.add_argument('--with-linux-files', action='store_true')
     args = parser.parse_args()
+    if args.with_linux_files:
+        args.with_linux_filemap = True
+    if args.with_linux_filemap:
+        args.with_linux_memory = True
     if args.with_linux_core and args.with_linux_memory:
         parser.error('the hosted Linux-core and XNU memory experiments are separate variants')
     if args.with_linux_core or args.with_linux_memory:
@@ -62,11 +68,19 @@ def main():
         target = target.with_name(target.name + '-linux-core')
     if args.with_linux_memory:
         target = target.with_name(target.name + '-memory')
+    if args.with_linux_filemap:
+        target = target.with_name(target.name + '-filemap')
+    if args.with_linux_files:
+        target = target.with_name(target.name + '-files')
     report = json.loads((target / 'build-result.json').read_text())
     if report.get('linux_core_experiment', False) != args.with_linux_core:
         raise ValueError('Linux core build option mismatch')
     if report.get('linux_memory_experiment', False) != args.with_linux_memory:
         raise ValueError('Linux memory build option mismatch')
+    if report.get('linux_filemap_experiment', False) != args.with_linux_filemap:
+        raise ValueError('Linux filemap build option mismatch')
+    if report.get('linux_files_experiment', False) != args.with_linux_files:
+        raise ValueError('Linux files build option mismatch')
     if report['state'] != 'built' or report['svc_probe_present'] != args.with_svc_probe or not report['source_restored']:
         raise ValueError('baseline build did not complete with restored sources')
     kernel = Path(report['kernel'])
@@ -101,6 +115,8 @@ def main():
         'linux_terminal_experiment': report.get('linux_terminal_experiment', False),
         'linux_core_experiment': report.get('linux_core_experiment', False),
         'linux_memory_experiment': report.get('linux_memory_experiment', False),
+        'linux_filemap_experiment': report.get('linux_filemap_experiment', False),
+        'linux_files_experiment': report.get('linux_files_experiment', False),
         'bti_disabled': report.get('bti_disabled', False),
         'bti_enforcement_disabled': report.get('bti_enforcement_disabled', False)}
     (target / 'collection-result.json').write_text(json.dumps(result, indent=2) + '\n')

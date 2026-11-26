@@ -31,7 +31,13 @@ def main():
     parser.add_argument('--with-linux-terminal', action='store_true')
     parser.add_argument('--with-linux-core', action='store_true', help='isolated opt-in freestanding Linux-core host test')
     parser.add_argument('--with-linux-memory', action='store_true', help='XNU-backed Linux memory personality test')
+    parser.add_argument('--with-linux-filemap', action='store_true', help='private file mapping and fixed replacement test')
+    parser.add_argument('--with-linux-files', action='store_true', help='native descriptor/path and Linux stat ABI test')
     args = parser.parse_args()
+    if args.with_linux_files:
+        args.with_linux_filemap = True
+    if args.with_linux_filemap:
+        args.with_linux_memory = True
     if args.with_linux_core and args.with_linux_memory:
         parser.error('the hosted Linux-core and XNU memory experiments are separate variants')
     if args.with_linux_core or args.with_linux_memory:
@@ -67,6 +73,10 @@ def main():
         target = target.with_name(target.name + '-linux-core')
     if args.with_linux_memory:
         target = target.with_name(target.name + '-memory')
+    if args.with_linux_filemap:
+        target = target.with_name(target.name + '-filemap')
+    if args.with_linux_files:
+        target = target.with_name(target.name + '-files')
     target.mkdir(parents=True, exist_ok=True)
     with (OUT / 'kernel-build.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -92,6 +102,9 @@ def main():
             if args.with_linux_memory:
                 import memory_prepare
                 extra_edits = memory_prepare.overlay(XNU, extra_edits)
+            if args.with_linux_files:
+                import files_prepare
+                extra_edits = files_prepare.overlay(XNU, extra_edits)
             build_source = build_source.replace(b'if (p && rdxnu_linux_probe(state, p))',
                 b'if (p && (rdxnu_linux_dispatch(state, p) || rdxnu_linux_probe(state, p)))')
             build_source = build_source.replace(b'#include \"rdxnu_linux_probe.h\"',
@@ -128,6 +141,8 @@ def main():
         report['linux_terminal_experiment'] = args.with_linux_terminal
         report['linux_core_experiment'] = args.with_linux_core
         report['linux_memory_experiment'] = args.with_linux_memory
+        report['linux_filemap_experiment'] = args.with_linux_filemap
+        report['linux_files_experiment'] = args.with_linux_files
         if args.with_linux_core:
             report['linux_core_sha256'] = core_report['core_sha256']
         report['elf_source_sha256'] = {str(path.relative_to(XNU)): hashlib.sha256(after).hexdigest()
