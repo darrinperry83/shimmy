@@ -21,7 +21,9 @@ assertion, demonstrating the next missing backend. The clock-enabled follow-up
 19096E49-FD42-3D4E-AFC4-95F315780A47 passes the expanded fixture and the unchanged
 systemd version command with exact Linux-reference version/feature output and
 zero exit status. The console displays that output without WindowServer.
-Configuration-path warnings remain on stderr; this is not a manager/PID 1 pass.
+That checkpoint retained configuration-path warnings on stderr. The later
+[path checkpoint](../paths/README.md) clears them with native O_PATH/statx/mount
+identity and requires empty stderr. Neither is a manager/PID 1 pass.
 See evidence.json for identities, original package/library hashes, and proof logs.
 
 Startup artifacts use names derived from the kernel UUID, fixture binaries, and
@@ -86,8 +88,8 @@ on the current process-exit path, but futex wake/robust cleanup and distinct
 thread exit are not proven. Linux thread creation remains unsupported.
 
 The Linux-ignored mmap DENYWRITE and EXECUTABLE bits are decoded without passing
-them to Darwin. O_PATH/statx/general fcntl and rootfs namespace work from the
-file-operation gate remain incomplete.
+them to Darwin. The later path checkpoint adds O_PATH, statx and a bounded
+fcntl subset. General fcntl and rootfs namespace work remain incomplete.
 
 ## Native clock backend
 

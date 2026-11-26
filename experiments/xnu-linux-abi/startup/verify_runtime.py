@@ -28,20 +28,25 @@ def verify(name):
                    'XNU_FILES_PERSONALITY_PASS','XNU_STARTUP_PERSONALITY_PASS','XNU_SYSTEMD_VERSION_PASS'):
         if marker not in boot:raise ValueError(f'missing live gate: {marker}')
     if 'LINUX_STARTUP_RESULT status=0 ' not in boot:raise ValueError('startup fixture did not exit zero')
+    paths=staged.get('linux_paths_experiment',False)
+    if paths:
+        if 'XNU_PATHS_PERSONALITY_PASS' not in boot or 'LINUX_PATHS_RESULT status=0 ' not in boot:
+            raise ValueError('path-descriptor fixture did not pass')
     stdout_path=RESULTS/'systemd-version.log';stderr_path=RESULTS/'systemd-version-stderr.log'
     stdout=stdout_path.read_text();stderr=stderr_path.read_text()
+    if paths and stderr:raise ValueError(f'path profile systemd stderr is not empty: {stderr}')
     reference=json.loads((ABI/'out/systemd/reference.json').read_text())
     expected=reference['version_output']
     if not stdout.startswith(expected):raise ValueError('systemd stdout differs from Linux reference')
     match=re.fullmatch(r'ARCH_ELF_RESULT child=([1-9][0-9]*) status=0 parent=([1-9][0-9]*)\nARCH_ELF_COMMAND_PASS\n',stdout[len(expected):])
     if not match:raise ValueError('missing successful native-parent result or unexpected stdout')
-    proof=ABI/'out/startup/runtime-proof';proof.mkdir(exist_ok=True)
+    proof=ABI/'out'/('paths' if paths else 'startup')/'runtime-proof';proof.mkdir(exist_ok=True)
     evidence={}
     for label,path in (('boot',boot_path),('stdout',stdout_path),('stderr',stderr_path)):
         frozen=proof/f'{name}-{label}.log';shutil.copy2(path,frozen)
         evidence[label]=dict(path=str(frozen.relative_to(ABI)),sha256=digest(frozen))
     return dict(kernel_uuid=staged['kernel_uuid'],collection_sha256=staged['sha256'],
-        staged_name=name,startup_runtime_pass=True,systemd_version_runtime_pass=True,
+        staged_name=name,startup_runtime_pass=True,paths_runtime_pass=bool(paths),systemd_version_runtime_pass=True,
         native_parent=int(match[2]),linux_child=int(match[1]),
         systemd_version=expected.splitlines()[0],stderr_present=bool(stderr),
         stderr=stderr,proof_logs=evidence,

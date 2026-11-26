@@ -26,9 +26,12 @@ def main():
     parser.add_argument('--with-linux-memory', action='store_true')
     parser.add_argument('--with-linux-filemap', action='store_true')
     parser.add_argument('--with-linux-files', action='store_true')
+    parser.add_argument('--with-linux-paths', action='store_true', help='native O_PATH descriptors and statx')
     parser.add_argument('--with-linux-startup', action='store_true')
     parser.add_argument('--startup-entry-mode', choices=('kdk-bridge','stock'), default='kdk-bridge')
     args = parser.parse_args()
+    if args.with_linux_paths:
+        args.with_linux_startup = True
     if args.with_linux_startup:
         args.with_linux_files = True
     if args.with_linux_files:
@@ -80,6 +83,8 @@ def main():
         target = target.with_name(target.name + '-startup')
         if args.startup_entry_mode != 'patched':
             target = target.with_name(target.name + '-' + args.startup_entry_mode)
+    if args.with_linux_paths:
+        target = target.with_name(target.name + '-paths')
     report = json.loads((target / 'build-result.json').read_text())
     if report.get('linux_core_experiment', False) != args.with_linux_core:
         raise ValueError('Linux core build option mismatch')
@@ -91,6 +96,8 @@ def main():
         raise ValueError('Linux files build option mismatch')
     if report.get('linux_startup_experiment', False) != args.with_linux_startup:
         raise ValueError('Linux startup build option mismatch')
+    if report.get('linux_paths_experiment',False) != args.with_linux_paths:
+        raise ValueError('Linux paths build option mismatch')
     if args.with_linux_startup and report.get('startup_entry_mode','patched') != args.startup_entry_mode:
         raise ValueError('startup entry mode mismatch')
     if report['state'] != 'built' or report['svc_probe_present'] != args.with_svc_probe or not report['source_restored']:
@@ -134,6 +141,7 @@ def main():
         'linux_files_experiment': report.get('linux_files_experiment', False),
         'linux_startup_experiment': report.get('linux_startup_experiment', False),
         'startup_entry_mode': report.get('startup_entry_mode'),
+        'linux_paths_experiment': report.get('linux_paths_experiment',False),
         'bti_disabled': report.get('bti_disabled', False),
         'bti_enforcement_disabled': report.get('bti_enforcement_disabled', False)}
     if args.with_linux_startup and args.startup_entry_mode == 'kdk-bridge':

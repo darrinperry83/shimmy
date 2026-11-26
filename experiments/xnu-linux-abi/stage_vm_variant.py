@@ -15,7 +15,7 @@ OUT = ABI / 'out/vmapple'
 BASELINE = 'baseline-no-lto-no-bti-svc-probe-elf-arch-loader-linux-console-terminal'
 
 
-def stage(name, candidate, core=False, memory=False, filemap=False, files=False, startup=False):
+def stage(name, candidate, core=False, memory=False, filemap=False, files=False, startup=False, paths=False):
     report = json.loads((candidate / 'collection-result.json').read_text())
     build = json.loads((candidate / 'build-result.json').read_text())
     data = Path(report['collection']).read_bytes()
@@ -31,6 +31,8 @@ def stage(name, candidate, core=False, memory=False, filemap=False, files=False,
         raise ValueError('unexpected Linux files build profile')
     if report.get('linux_startup_experiment', False) != startup:
         raise ValueError('unexpected Linux startup build profile')
+    if report.get('linux_paths_experiment',False) != paths:
+        raise ValueError('unexpected Linux paths build profile')
     if not report['exact_control_driver_uuids'] or not report['bti_enforcement_disabled'] or report['configuration'] != 'DEVELOPMENT':
         raise ValueError('expected diagnostic VM driver-preserving candidate')
     if startup:
@@ -39,6 +41,9 @@ def stage(name, candidate, core=False, memory=False, filemap=False, files=False,
         material=Path(__file__).read_bytes()
         for filename in ('startup-probe','startup-run'):
             material+=(ABI/'out/startup'/filename).read_bytes()
+        if paths:
+            for filename in ('paths-probe','paths-run'):
+                material+=(ABI/'out/paths'/filename).read_bytes()
         token=hashlib.sha256(material).hexdigest()[:8]
         name+=f'-{report["kernel_uuid"][:8].lower()}-{token}'
     results = OUT / 'results'
@@ -144,6 +149,21 @@ cat "$systemderr"
         boot=boot.replace('"$base/display-output" "$base/files-run" "$base/files-probe"',systemd_test)
         boot=boot.replace('    if [ -d "$shared" ]; then',
             '    if [ -d "$shared" ]; then\n        cp /var/tmp/rdxnu-systemd-version.log "$shared/systemd-version.log" 2>/dev/null || true\n        cp /var/tmp/rdxnu-systemd-version-stderr.log "$shared/systemd-version-stderr.log" 2>/dev/null || true')
+    if paths:
+        verification=json.loads((ABI/'out/paths/verification.json').read_text())
+        if 'XNU_PATHS_PERSONALITY_PASS' not in verification.get('linux_reference',''):
+            raise ValueError('Linux paths reference must pass before staging')
+        if hashlib.sha256((ABI/'out/paths/paths-probe').read_bytes()).hexdigest()!=verification['linux_elf_sha256']:
+            raise ValueError('Linux paths fixture changed')
+        for filename in ('paths-probe','paths-run'):
+            artifact=ABI/'out/paths'/filename
+            digest=hashlib.sha256(artifact.read_bytes()).hexdigest()
+            staged_name=f'{name}-{filename}'
+            shutil.copy2(artifact,results/staged_name)
+            extra_files+=f'[ "$("$directory/sha256" "$share/{staged_name}")" = {digest} ] || exit 1\n'
+            extra_files+=f'cp "$share/{staged_name}" "$data/Library/RDXNU-P0/{filename}"\nchmod 755 "$data/Library/RDXNU-P0/{filename}"\nchown root:wheel "$data/Library/RDXNU-P0/{filename}"\n'
+        boot=boot.replace('"$base/startup-run" "$base/startup-probe"',
+            '"$base/startup-run" "$base/startup-probe"\n"$base/paths-run" "$base/paths-probe"')
     if startup:
         # A leftover directory is not proof the host share is mounted.
         old_mount='''    shared='/Volumes/My Shared Files/results'
@@ -174,6 +194,7 @@ cat "$systemderr"
                '"$base/filemap-run" "$base/filemap-probe"',
                '"$base/files-run" "$base/files-probe"',
                '"$base/startup-run" "$base/startup-probe"')
+        if paths:gates+=('"$base/paths-run" "$base/paths-probe"',)
         for gate in gates:
             if boot.count(gate)!=1:raise ValueError(f'missing/duplicate startup log gate: {gate}')
             boot=boot.replace(gate,gate+'\nexport_logs')
@@ -239,6 +260,8 @@ def main(kind='core'):
         candidate = stage('filemap', OUT / (BASELINE + '-memory-filemap'), memory=True, filemap=True)
     elif kind == 'files':
         candidate = stage('files', OUT / (BASELINE + '-memory-filemap-files'), memory=True, filemap=True, files=True)
+    elif kind == 'paths':
+        candidate = stage('paths', OUT / (BASELINE + '-memory-filemap-files-startup-kdk-bridge-paths'), memory=True, filemap=True, files=True, startup=True, paths=True)
     elif kind == 'startup':
         candidate = stage('startup', OUT / (BASELINE + '-memory-filemap-files-startup'), memory=True, filemap=True, files=True, startup=True)
     elif kind in ('startup-stock','startup-source-control','startup-kdk-bridge'):
@@ -252,5 +275,5 @@ def main(kind='core'):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('kind',choices=('core','memory','filemap','files','startup','startup-stock','startup-source-control','startup-kdk-bridge'))
+    parser.add_argument('kind',choices=('core','memory','filemap','files','paths','startup','startup-stock','startup-source-control','startup-kdk-bridge'))
     main(parser.parse_args().kind)

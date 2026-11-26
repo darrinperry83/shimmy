@@ -57,9 +57,12 @@ Darwin parent controls and earlier ELF, loader, PTY, memory and file gates pass;
 WindowServer is absent. See [runtime evidence](../startup/evidence.json).
 
 This proves gate 1 only. It does not establish PID 1 or a running manager.
-Directory-chasing/config reads still emit Operation not supported warnings;
-O_PATH/general path semantics and Arch rootfs isolation remain work. These
-warnings are retained on stderr, separately from the version comparison.
+The [path follow-up](../paths/README.md) on kernel
+4977C3F3-284E-322C-86F7-39C7FA62F17C passes O_PATH, held/unlinked symlinks,
+statx and native mount identity. The version command now has empty stderr,
+with all prior controls passing. See [path evidence](../paths/evidence.json).
+General VFS semantics, procfs descriptor reopening and Arch rootfs isolation
+remain work. The runtime verifier requires empty stderr for this profile.
 Printed build features describe the package, not implemented kernel facilities.
 Heap, bounded signal operations, native TLS/x18 preservation and native clock
 backends now exist; caught signal frames, thread creation, futexes, event

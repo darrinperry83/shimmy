@@ -15,7 +15,9 @@ promote tested combinations under [UPDATE-POLICY.md](UPDATE-POLICY.md).
 The next file-operation gate also passes on Linux and live XNU; see
 [files/README.md](files/README.md). Heap growth, bounded libc/signal startup,
 native TLS/x18 preservation and clocks now pass the live startup fixture;
-see [startup/README.md](startup/README.md). The next systemd gate is manager
+see [startup/README.md](startup/README.md). Native path descriptors, statx and
+mount identity now pass as well; systemd --version has empty stderr. See
+[paths/README.md](paths/README.md). The next systemd gate is manager
 startup and real child-service lifecycle, with required paths/events/process
 contracts implemented from recorded failures.
 

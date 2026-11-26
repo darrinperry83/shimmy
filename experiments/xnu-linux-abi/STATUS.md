@@ -41,7 +41,12 @@ The earlier public-source entry replacement failed native boot; the stock-entry
 control passed earlier gates and failed exactly at the TLS check.
 
 This is a loader/libc application gate, not PID 1 or a service-manager pass.
-Systemd still reports unsupported config-directory/path operations. Threading,
+The path follow-up on kernel `4977C3F3-284E-322C-86F7-39C7FA62F17C` now
+passes native O_PATH descriptors, held/unlinked symlinks and inodes, bounded
+fcntl, basic statx and native mount identity. The unchanged systemd version
+command matches the Linux reference and has empty stderr; all earlier controls
+pass with WindowServer absent. See [paths/README.md](paths/README.md) and
+[paths/evidence.json](paths/evidence.json). Threading,
 caught Linux signals, futex/event semantics, coherent init lifecycle, rootfs
 isolation and interactive hardware input remain work. See
 [systemd/README.md](systemd/README.md) and keep XNU, personality and Arch updates

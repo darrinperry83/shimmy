@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "scope": "VMAPPLE path-descriptor and statx checkpoint; systemd version only",
+  "linux_reference": {
+    "linux_elf_sha256": "2cb66b916c7a2d9eb2cf05af90d03f27bdd5f04db69bde93a529edfd56fbf21d",
+    "xnu_runtime_proven": false,
+    "linux_image": "sha256:0151e70bd01e7e4c891e903edf1dacba81656f04c6150bfce78d5a570e4df443",
+    "linux_reference": "LINUX_PATHS_RESULT status=0 native_parent=1 bytes=156\nXNU_PATHS_PERSONALITY_PASS: O_PATH permissions/no data I/O, directory lookup, held/unlinked symlinks and inodes, dup/close, statx; native parent intact\n"
+  },
+  "kernel_sha256": "c8988ceaf609245181eb147763a756e9e3d7d2488f7999c17aed786c87f2f14f",
+  "runtime": {
+    "kernel_uuid": "4977C3F3-284E-322C-86F7-39C7FA62F17C",
+    "collection_sha256": "47cc5fd7d74979a24ae783ad5a1e859b7a0f38d958940be1e878c673c42d52c7",
+    "staged_name": "paths-4977c3f3-f7528509",
+    "startup_runtime_pass": true,
+    "paths_runtime_pass": true,
+    "systemd_version_runtime_pass": true,
+    "native_parent": 681,
+    "linux_child": 682,
+    "systemd_version": "systemd 262 (262.2-1-arch)",
+    "stderr_present": false,
+    "stderr": "",
+    "proof_logs": {
+      "boot": {
+        "path": "out/paths/runtime-proof/paths-4977c3f3-f7528509-boot.log",
+        "sha256": "fcf60b6016388d1fdfd49b4c30391897ddef891aa57116545e13fd484356fc20"
+      },
+      "stdout": {
+        "path": "out/paths/runtime-proof/paths-4977c3f3-f7528509-stdout.log",
+        "sha256": "a67e46e83c21459cba8766b4ca1e24a95a2d54255d5881950e348a3a1df8fe08"
+      },
+      "stderr": {
+        "path": "out/paths/runtime-proof/paths-4977c3f3-f7528509-stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "limits": "Single-thread startup and systemd --version only; no PID 1, service-manager, rootfs isolation, or physical-driver qualification"
+  },
+  "source_restored": true,
+  "visible_console_verified": true,
+  "native_apfs_control": "DARWIN_SYMLINK_CONTROL before=4 after=-1 errno=22 inode_retained=1 nlink=0 size=4",
+  "native_readlink_negative_control": {
+    "kernel_uuid": "7B8A56E3-D146-3205-AAA3-BC793B6DED76",
+    "path": "out/paths/runtime-proof/native-readlink-negative-boot.log",
+    "sha256": "500131c9dd58678bf45805e7e0a106e56f3cd5cfce6eec0fbeb562f77eaaa78d",
+    "failure": "Held symlink readlink after unlink/replacement; stage 125"
+  },
+  "basic_statx_control": {
+    "kernel_uuid": "0BC93334-894F-3023-9279-F44DC92295F4",
+    "paths_pass": true,
+    "systemd_version_exit_zero": true,
+    "systemd_stderr": "EUNATCH because statx omitted required mount identity",
+    "boot_sha256": "762f3a40f13bfaab897f7d9b472bc886be02bd35853abe49f4a2c64870e27189"
+  },
+  "mount_identity": "XNU vfs_mount_id + 1; STATX_MNT_ID, no device-number approximation or unique-ID mask claim",
+  "limits": [
+    "No PID 1/service-manager qualification",
+    "Native filesystem namespace; no Arch rootfs isolation or procfs fd reopening",
+    "No complete fcntl/poll/select or explicit statx sync modes",
+    "Symlink snapshot acquisition race and mutable synthetic links unqualified",
+    "No physical-driver or hardware-keyboard qualification"
+  ]
+}
