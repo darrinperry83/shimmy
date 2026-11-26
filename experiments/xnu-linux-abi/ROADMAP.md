@@ -28,7 +28,10 @@ context must be established before claiming a service-manager pass. The direct
 ELF interpreter prerequisite now passes: native root/credential lookup resolves
 PT_INTERP and unchanged Arch printf/systemd execute by ordinary paths. See
 [interp/README.md](interp/README.md). This remains separate from a Linux
-init/runtime context or manager pass.
+init/runtime context or manager pass. Native eventfd
+counters and bounded ppoll readiness now pass as the first event-loop
+checkpoint; see [events/README.md](events/README.md). Epoll, timerfd and signal
+descriptors remain separate work before a manager event loop is qualified.
 
 
 Current plan, 26 November 2026. This is the implementation sequence; STATUS.md

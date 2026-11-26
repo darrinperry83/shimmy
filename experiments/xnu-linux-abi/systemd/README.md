@@ -98,3 +98,11 @@ The dynamic probe, original Arch child exec and all previous regression
 gates pass. This is a prerequisite for normal service ExecStart paths,
 not systemd manager startup. The minimal root's missing-proc warning matches
 Linux exactly; the existing outside-root version gate still has empty stderr.
+
+The [native event checkpoint](../events/README.md) now passes eventfd2 and
+bounded ppoll through XNU fileglob/kqueue backends on kernel
+D8C3FEDC-45FB-3AD3-9380-276D9B151910. Its unchanged Linux fixture forces
+blocking readiness, empty-counter read and saturated-counter write wakeups,
+and checks dup/fork/exec counter lifetime. Earlier gates also pass on that
+boot. Epoll, timerfd, signalfd and coherent init/runtime views remain work;
+this does not advance the manager/service acceptance gate.

@@ -15,7 +15,7 @@ OUT = ABI / 'out/vmapple'
 BASELINE = 'baseline-no-lto-no-bti-svc-probe-elf-arch-loader-linux-console-terminal'
 
 
-def stage(name, candidate, core=False, memory=False, filemap=False, files=False, startup=False, paths=False, process=False, interp=False):
+def stage(name, candidate, core=False, memory=False, filemap=False, files=False, startup=False, paths=False, process=False, interp=False, events=False):
     report = json.loads((candidate / 'collection-result.json').read_text())
     build = json.loads((candidate / 'build-result.json').read_text())
     data = Path(report['collection']).read_bytes()
@@ -37,6 +37,8 @@ def stage(name, candidate, core=False, memory=False, filemap=False, files=False,
         raise ValueError('unexpected Linux process build profile')
     if report.get('linux_interp_experiment',False) != interp:
         raise ValueError('unexpected Linux interpreter build profile')
+    if report.get('linux_events_experiment',False) != events:
+        raise ValueError('unexpected Linux event build profile')
     if not report['exact_control_driver_uuids'] or not report['bti_enforcement_disabled'] or report['configuration'] != 'DEVELOPMENT':
         raise ValueError('expected diagnostic VM driver-preserving candidate')
     if startup:
@@ -55,6 +57,9 @@ def stage(name, candidate, core=False, memory=False, filemap=False, files=False,
         if interp:
             material+=(ABI/'out/interp/verification.json').read_bytes()
             material+=(ABI/'out/interp/interp-run').read_bytes()
+        if events:
+            for filename in ('events-probe','events-run'):
+                material+=(ABI/'out/events'/filename).read_bytes()
         token=hashlib.sha256(material).hexdigest()[:8]
         name+=f'-{report["kernel_uuid"][:8].lower()}-{token}'
     results = OUT / 'results'
@@ -217,6 +222,18 @@ cat "$systemderr"
         boot=boot.replace('cat "$systemderr"','cat "$systemderr"\nif "$base/interp-run" "$base/interp-root" > /var/tmp/rdxnu-interp.log 2> /var/tmp/rdxnu-interp-stderr.log; then\n    echo XNU_INTERP_NATIVE_PARENT_RESULT=0\nelse\n    echo XNU_INTERP_NATIVE_PARENT_RESULT=$?\nfi\ncat /var/tmp/rdxnu-interp.log\ncat /var/tmp/rdxnu-interp-stderr.log\nexport_logs')
         boot=boot.replace('    if [ -d "$shared" ]; then',
             '    if [ -d "$shared" ]; then\n        for suffix in "" -stderr; do\n            if [ -f "/var/tmp/rdxnu-interp${suffix}.log" ]; then cp "/var/tmp/rdxnu-interp${suffix}.log" "$shared/'+name+'-interp${suffix}.log"; fi\n        done')
+    if events:
+        verification=json.loads((ABI/'out/events/verification.json').read_text())
+        if 'XNU_EVENTS_PERSONALITY_PASS' not in verification.get('linux_reference',''):
+            raise ValueError('Linux event reference must pass before staging')
+        if hashlib.sha256((ABI/'out/events/events-probe').read_bytes()).hexdigest()!=verification['linux_elf_sha256']:
+            raise ValueError('Linux event fixture changed')
+        for filename in ('events-probe','events-run'):
+            artifact=ABI/'out/events'/filename;digest=hashlib.sha256(artifact.read_bytes()).hexdigest()
+            staged_name=f'{name}-{filename}';shutil.copy2(artifact,results/staged_name)
+            extra_files+=f'[ "$("$directory/sha256" "$share/{staged_name}")" = {digest} ] || exit 1\n'
+            extra_files+=f'cp "$share/{staged_name}" "$data/Library/RDXNU-P0/{filename}"\nchmod 755 "$data/Library/RDXNU-P0/{filename}"\nchown root:wheel "$data/Library/RDXNU-P0/{filename}"\n'
+        boot=boot.replace('"$base/process-run" "$base/process-probe"','"$base/process-run" "$base/process-probe"\n"$base/events-run" "$base/events-probe"')
     if startup:
         # A leftover directory is not proof the host share is mounted.
         old_mount='''    shared='/Volumes/My Shared Files/results'
@@ -249,6 +266,7 @@ cat "$systemderr"
                '"$base/startup-run" "$base/startup-probe"')
         if paths:gates+=('"$base/paths-run" "$base/paths-probe"',)
         if process:gates+=('"$base/process-run" "$base/process-probe"',)
+        if events:gates+=('"$base/events-run" "$base/events-probe"',)
         for gate in gates:
             if boot.count(gate)!=1:raise ValueError(f'missing/duplicate startup log gate: {gate}')
             boot=boot.replace(gate,gate+'\nexport_logs')
@@ -327,6 +345,8 @@ def main(kind='core'):
         candidate = stage('filemap', OUT / (BASELINE + '-memory-filemap'), memory=True, filemap=True)
     elif kind == 'files':
         candidate = stage('files', OUT / (BASELINE + '-memory-filemap-files'), memory=True, filemap=True, files=True)
+    elif kind == 'events':
+        candidate = stage('events', OUT / (BASELINE + '-memory-filemap-files-startup-kdk-bridge-paths-process-interp-events'), memory=True, filemap=True, files=True, startup=True, paths=True, process=True, interp=True, events=True)
     elif kind == 'interp':
         candidate = stage('interp', OUT / (BASELINE + '-memory-filemap-files-startup-kdk-bridge-paths-process-interp'), memory=True, filemap=True, files=True, startup=True, paths=True, process=True, interp=True)
     elif kind == 'process':
@@ -346,5 +366,5 @@ def main(kind='core'):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('kind',choices=('core','memory','filemap','files','paths','process','interp','startup','startup-stock','startup-source-control','startup-kdk-bridge'))
+    parser.add_argument('kind',choices=('core','memory','filemap','files','paths','process','interp','events','startup','startup-stock','startup-source-control','startup-kdk-bridge'))
     main(parser.parse_args().kind)

@@ -34,12 +34,15 @@ def main():
     parser.add_argument('--with-linux-filemap', action='store_true', help='private file mapping and fixed replacement test')
     parser.add_argument('--with-linux-files', action='store_true', help='native descriptor/path and Linux stat ABI test')
     parser.add_argument('--with-linux-paths', action='store_true', help='native O_PATH descriptors and statx')
+    parser.add_argument('--with-linux-events', action='store_true', help='native eventfd counter and bounded ppoll')
     parser.add_argument('--with-linux-interp', action='store_true', help='native direct ELF PT_INTERP execution')
     parser.add_argument('--with-linux-process', action='store_true', help='native Linux fork and waitid lifecycle')
     parser.add_argument('--with-linux-startup', action='store_true', help='heap, native TLS preservation and libc startup')
     parser.add_argument('--startup-entry-mode', choices=('kdk-bridge','stock'), default='kdk-bridge',
                         help='startup diagnostic: preserve KDK entry with TLS hooks or use stock calls')
     args = parser.parse_args()
+    if args.with_linux_events:
+        args.with_linux_interp = True
     if args.with_linux_interp:
         args.with_linux_process = True
     if args.with_linux_process:
@@ -101,6 +104,8 @@ def main():
         target = target.with_name(target.name + '-process')
     if args.with_linux_interp:
         target = target.with_name(target.name + '-interp')
+    if args.with_linux_events:
+        target = target.with_name(target.name + '-events')
     target.mkdir(parents=True, exist_ok=True)
     with (OUT / 'kernel-build.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -141,6 +146,9 @@ def main():
             if args.with_linux_interp:
                 import interp_prepare
                 extra_edits = interp_prepare.overlay(XNU, extra_edits)
+            if args.with_linux_events:
+                import events_prepare
+                extra_edits = events_prepare.overlay(XNU, extra_edits)
             build_source = build_source.replace(b'if (p && rdxnu_linux_probe(state, p))',
                 b'if (p && (rdxnu_linux_dispatch(state, p) || rdxnu_linux_probe(state, p)))')
             build_source = build_source.replace(b'#include \"rdxnu_linux_probe.h\"',
@@ -185,6 +193,7 @@ def main():
         report['linux_files_experiment'] = args.with_linux_files
         report['linux_startup_experiment'] = args.with_linux_startup
         report['linux_paths_experiment'] = args.with_linux_paths
+        report['linux_events_experiment'] = args.with_linux_events
         report['linux_interp_experiment'] = args.with_linux_interp
         report['linux_process_experiment'] = args.with_linux_process
         report['startup_entry_mode'] = args.startup_entry_mode if args.with_linux_startup else None

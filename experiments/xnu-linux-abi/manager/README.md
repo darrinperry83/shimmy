@@ -38,3 +38,8 @@ normal Arch executable paths use kernel PT_INTERP with native chroot lookup,
 without a userspace loader command. This also runs unchanged systemd --version
 inside the minimal Arch root. Manager/init identity, proc/cgroup and event
 interfaces remain separate work; no boot marker or PID 1 override was added.
+
+The first native event-loop primitive is now qualified separately in
+[events/README.md](../events/README.md): eventfd2 plus bounded ppoll, with
+real kqueue readiness and native descriptor lifetime. This is not an epoll
+implementation and does not change the manager's unbooted-context result.

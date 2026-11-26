@@ -1,0 +1,93 @@
+{
+  "state": "native_eventfd_and_bounded_ppoll_live_xnu_pass",
+  "linux_reference": {
+    "linux_elf_sha256": "62cdaf1381ede52c6b0c59012ed5ffc4aa109028650733a31000f8bf8f099121",
+    "linux_image": "sha256:0151e70bd01e7e4c891e903edf1dacba81656f04c6150bfce78d5a570e4df443",
+    "linux_reference": "NATIVE_EVENT_CONTROL_PASS\nLINUX_EVENTS_RESULT status=0 native_parent=1 releases=3 output=EVENT_PHASE_1\nEVENT_CHILD_1\nEVENT_PHASE_2\nEVENT_CHILD_2\nEVENT_PHASE_3\nEVENT_CHILD_3\nEVENTS_EXEC_FD_PASS\nLINUX_EVENTS_PASS\nXNU_EVENTS_PERSONALITY_PASS: counter/semaphore, copy faults, dup/fork/exec lifetime, readiness, timeout and three forced blocking wakeups; native parent intact\n",
+    "linux_kernel": "6.8.0-117-generic"
+  },
+  "xnu_runtime": {
+    "kernel_uuid": "D8C3FEDC-45FB-3AD3-9380-276D9B151910",
+    "collection_sha256": "1d8700fb080c31d77f7eac13fe7ea1509643ebc7763f6b89fd1bfd80f05ed6af",
+    "staged_name": "events-d8c3fedc-76505887",
+    "events_runtime_pass": true,
+    "interp_runtime_pass": true,
+    "startup_runtime_pass": true,
+    "paths_runtime_pass": true,
+    "process_runtime_pass": true,
+    "arch_child_exec_runtime_pass": true,
+    "systemd_version_runtime_pass": true,
+    "native_parent": 754,
+    "linux_child": 755,
+    "manager_native_parent_result": 1,
+    "manager_runtime_pass": false,
+    "systemd_version": "systemd 262 (262.2-1-arch)",
+    "stderr_present": false,
+    "stderr": "",
+    "proof_logs": {
+      "boot": {
+        "path": "out/events/runtime-proof/events-d8c3fedc-76505887-boot.log",
+        "sha256": "33526550cdad61402127a74bc301368d2cd5c2806c62968d05989803316c4a4f"
+      },
+      "stdout": {
+        "path": "out/events/runtime-proof/events-d8c3fedc-76505887-stdout.log",
+        "sha256": "69fbc5ddfdc0a93661427d0aec6925ff9116364108763910c128cb1d7ad3cff3"
+      },
+      "stderr": {
+        "path": "out/events/runtime-proof/events-d8c3fedc-76505887-stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "interp": {
+        "path": "out/events/runtime-proof/events-d8c3fedc-76505887-interp.log",
+        "sha256": "b9201f90e6efc2f9bf3060a09819694cf861e5226c407548a026d535cc591c4c"
+      },
+      "interp-stderr": {
+        "path": "out/events/runtime-proof/events-d8c3fedc-76505887-interp-stderr.log",
+        "sha256": "ba338deec5d8b7843a7f561fbe026977fed2fbfbab933df6a0294bae318540d0"
+      },
+      "manager-attempt": {
+        "path": "out/events/runtime-proof/events-d8c3fedc-76505887-manager-attempt.log",
+        "sha256": "7289c9fcb038f6b1b330fd918a4596240bdb216b24c932d30d160cdddd6894c1"
+      }
+    },
+    "limits": "Single-thread-per-process fork/exec/wait and systemd --version; no PID 1, service-manager, complete filesystem isolation, or physical-driver qualification",
+    "kernel_sha256": "c03fe4475b7fb89f84f9eb90b8a701474b630855c8ac6a1f4dddf4ff4a2c93ef",
+    "compiled_source_sha256": {
+      "bsd/kern/kern_exec.c": "3c2fe75959536e44b66628214e3f86ab3d7bd8b5f38e85532f2c17cf1863a616",
+      "bsd/kern/kern_fork.c": "124ce50e2237f08bacfa658331c1c9222d14b4ad23b5b6b78d39defff679cd18",
+      "bsd/sys/proc_internal.h": "390652f03c6f1fea018b4a0231f00b8b5bda39b62ee285479bfd2f9a21f62725",
+      "bsd/kern/rdxnu_elf_plan.h": "6179ed2ec315f8e215ea79285a2de56060dc43091588577691f1894ff4f00428",
+      "bsd/kern/rdxnu_linux_exec.h": "ad16edf4d71b952af3468581e41fe32a321d91518d70874712ab2c8a9ab7c25d",
+      "osfmk/console/video_console.c": "97a88233315edb1c82be9ffc4c63458c4b5751a8b593b58f5a0c16985059d1c1",
+      "bsd/kern/kern_mman.c": "4482bcef867679b030d0c521c54e6c99ef75ad32f7e8148b520b8f6e1baada04",
+      "bsd/kern/kern_descrip.c": "1c0f33ead17d86586b438b27387c40ca6d3fb88e866178e246879f93c51949de",
+      "bsd/vfs/vfs_syscalls.c": "2e44425fcf4687b55595d49d1b9ddde81944c245dc2f82ad63e0703886276ec1",
+      "bsd/kern/rdxnu_linux_stat.h": "e652b1151cfacbacf2e9d3f5d62f4000eaa165ae75997872e2f3287740793e67",
+      "bsd/vfs/rdxnu_linux_stat.h": "e652b1151cfacbacf2e9d3f5d62f4000eaa165ae75997872e2f3287740793e67",
+      "bsd/kern/kern_exit.c": "39f47d063749ee133b9ab2dd6e97834919d3ba5d23e320f47c21a004e8e7e155",
+      "bsd/sys/resourcevar.h": "1c8390e42ecc05834d73fb2b4436af13b9aff86c7e5e0c2a0af1c61f85334fda",
+      "bsd/sys/user.h": "5c1c4f0f14fe2ad55cf073fe68e137451f4326a21426c7c28d3a63b4e445d4ec",
+      "osfmk/arm64/genassym.c": "a58d32b559b81b7d7a4421bf29d2465aca0ec125ffcb09736a5c87c8bd1f83cc",
+      "osfmk/conf/files.arm64": "1d0c6a5aa6c3b3d825605123b8d7282710724f21c31e0a3c87c234698dbb95ba",
+      "makedefs/MakeInc.def": "fb2036284f689edb88006d5e293aa955b97d164e597f772d2ade4f5b5e2e9fae",
+      "osfmk/arm64/rdxnu_linux_entry.s": "8a0a820bb2466ad174da83bb528354803565f7677b0f15e18ad905e692ae17de",
+      "bsd/kern/rdxnu_linux_machine.inc": "4cbcb5bea86b20c4bcd738d3e8574680c92202c575e96fe4639ec94967957722",
+      "bsd/kern/rdxnu_linux_state.h": "c0671277f3fd0f2a3558fd1aba97e40bdd997e4b89d136cc5ecbff2a06a8543e",
+      "bsd/kern/rdxnu_linux_statx.h": "8f15282d8c3881bd127f9c658146225e9b614fc48d3287b04d5f24f395df1fd7",
+      "bsd/vfs/rdxnu_linux_statx.h": "8f15282d8c3881bd127f9c658146225e9b614fc48d3287b04d5f24f395df1fd7",
+      "bsd/kern/rdxnu_interp_image.h": "7f2e1e71bf0758655a5884799852d1b444bfef687626fdbe0e57c967f64363f1",
+      "bsd/sys/file_internal.h": "91c9d018b6f2239ef31e69fdb5bbb7db183616a2a9e10110de05c8baf36870f2",
+      "bsd/sys/event_private.h": "8b5f9f78dbffaada17422e60de6f5e2ffce6b6328ca8b8ddca412baf7c2926dc",
+      "bsd/kern/kern_event.c": "cd21c413c913fa293627d8f9a32ff1f04dda01b971dd184f0bbff9ad4c598787",
+      "bsd/kern/sys_generic.c": "4d08fe810b3af145c47dced9b776a3793bb34fade9d1a3bd88122e4584be4505"
+    },
+    "assembly_offsets": {
+      "control_definitions": 336,
+      "existing_definitions_unchanged": true,
+      "native_thread_size": "1696"
+    },
+    "forced_blocking_wakeups": 3,
+    "event_counter_exec_inheritance_pass": true
+  },
+  "scope": "Native eventfd counter/semaphore, XNU kqueue-backed IN/OUT readiness and bounded ppoll, descriptor dup/fork/exec lifetime; all prior checkpoints on same boot; no epoll or systemd manager qualification"
+}

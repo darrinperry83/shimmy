@@ -612,3 +612,43 @@ procfs, complete filesystem sandbox, ASLR/text locking, interactive shell or
 physical hardware support. The manager negative control still exits one
 at its ordinary unbooted-context guard. The coherent Linux init/runtime
 context and manager event interfaces remain the next systemd boundaries.
+
+
+## 26 November 2026: native Linux event counter and poll readiness
+
+Kernel D8C3FEDC-45FB-3AD3-9380-276D9B151910 passes the new opt-in
+`--with-linux-events` profile. Linux eventfd2 creates a real XNU fileglob
+backed by a mutex-protected counter, native read/write sleeps and native
+kqueue IN/OUT filters. Native descriptor references preserve shared state
+through dup, fork and an actual ELF exec, with close-on-exec respected.
+Ppoll uses native poll's snapshot, kqueue registration and blocking scan,
+with bounded flags/array/timeout conversion and truthful unsupported errors.
+No userspace rendezvous socket, readiness-rescan worker or second fd registry
+is introduced. Existing file/filter type values and native assembly offsets
+are preserved; only private enum values are appended.
+
+The unchanged Linux fixture passes counter/semaphore, saturation/EAGAIN,
+copy-fault and transfer-size controls, descriptor lifetime, readiness, invalid
+fd/timespec/pointer cases and timeout. A native supervisor holds back the
+peer until it proves each of three separate waits is blocked: poll, empty
+read and saturated write. All three release and the fixture exits zero.
+A Darwin native pipe/kqueue control and all earlier checkpoints pass on
+the same boot. The outside-root systemd version gate still has empty stderr;
+direct exec/chroot stdout and stderr still exactly match Linux. WindowServer
+is absent at the check and the event proof is visible on the Apple-driver
+console. The manager diagnostic remains at the unbooted-context guard.
+
+Raw kernel SHA-256: c03fe4475b7fb89f84f9eb90b8a701474b630855c8ac6a1f4dddf4ff4a2c93ef.
+Collection SHA-256: 1d8700fb080c31d77f7eac13fe7ea1509643ebc7763f6b89fd1bfd80f05ed6af.
+Staged identity: events-d8c3fedc-76505887.
+See [events/evidence.json](events/evidence.json) for source identities,
+fixture hash, reference kernel/image and frozen proof-log hashes.
+
+Limits remain explicit: no atomic ppoll signal mask, at most 128 entries,
+IN/OUT readiness and millisecond native timeout granularity. Anonymous
+fstat metadata, F_SETFL, full vector-I/O/ioctl behavior and concurrent-thread
+close races are not qualified. The Linux reference is kernel 6.8.0-117-generic
+with the independently pinned Arch image; the image alone does not pin Linux.
+Epoll, timerfd, signalfd, proc/cgroups and coherent init/runtime context remain
+next systemd work. No manager, interactive shell or physical-driver pass is
+claimed. rdmetal and scanout are unchanged.

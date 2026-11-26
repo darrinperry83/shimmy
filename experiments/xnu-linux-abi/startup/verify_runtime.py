@@ -48,6 +48,15 @@ def verify(name):
             raise ValueError('direct exec output/stderr differs from Linux reference')
         if output.read_text() not in boot or errors.read_text() not in boot:raise ValueError('interpreter logs do not match named boot')
         interp_logs=[('interp',output),('interp-stderr',errors)]
+    events=staged.get('linux_events_experiment',False)
+    if events:
+        for marker in ('NATIVE_EVENT_CONTROL_PASS','LINUX_EVENTS_PASS','EVENTS_EXEC_FD_PASS','XNU_EVENTS_PERSONALITY_PASS'):
+            if boot.count(marker)!=1:raise ValueError(f'missing/duplicate event gate: {marker}')
+        if not re.search(r'LINUX_EVENTS_RESULT status=0 native_parent=[1-9][0-9]* releases=3 output=',boot):
+            raise ValueError('event fixture did not exit zero after three blocking releases')
+        for phase in range(1,4):
+            for label in ('CHILD','PHASE'):
+                if boot.count(f'EVENT_{label}_{phase}\n')!=1:raise ValueError('event blocking handshake mismatch')
     manager_result=None
     if process:
         diagnostic=re.search(r'^XNU_MANAGER_ATTEMPT_NATIVE_PARENT_RESULT=(\d+)$',boot,re.M)
@@ -62,7 +71,7 @@ def verify(name):
     match=re.fullmatch(r'ARCH_ELF_RESULT child=([1-9][0-9]*) status=0 parent=([1-9][0-9]*)\nARCH_ELF_COMMAND_PASS\n',stdout[len(expected):])
     if not match:raise ValueError('missing successful native-parent result or unexpected stdout')
     if stdout not in boot:raise ValueError('systemd stdout does not match the named boot log')
-    proof=ABI/'out'/('interp' if interp else 'process' if process else 'paths' if paths else 'startup')/'runtime-proof';proof.mkdir(exist_ok=True)
+    proof=ABI/'out'/('events' if events else 'interp' if interp else 'process' if process else 'paths' if paths else 'startup')/'runtime-proof';proof.mkdir(exist_ok=True)
     evidence={}
     logs=[('boot',boot_path),('stdout',stdout_path),('stderr',stderr_path)]+interp_logs
     if process:logs.append(('manager-attempt',RESULTS/f'{name}-manager-attempt.log'))
@@ -70,7 +79,7 @@ def verify(name):
         frozen=proof/f'{name}-{label}.log';shutil.copy2(path,frozen)
         evidence[label]=dict(path=str(frozen.relative_to(ABI)),sha256=digest(frozen))
     return dict(kernel_uuid=staged['kernel_uuid'],collection_sha256=staged['sha256'],
-        staged_name=name,interp_runtime_pass=bool(interp),startup_runtime_pass=True,paths_runtime_pass=bool(paths),process_runtime_pass=bool(process),arch_child_exec_runtime_pass=bool(process),systemd_version_runtime_pass=True,
+        staged_name=name,events_runtime_pass=bool(events),interp_runtime_pass=bool(interp),startup_runtime_pass=True,paths_runtime_pass=bool(paths),process_runtime_pass=bool(process),arch_child_exec_runtime_pass=bool(process),systemd_version_runtime_pass=True,
         native_parent=int(match[2]),linux_child=int(match[1]),
         manager_native_parent_result=manager_result,manager_runtime_pass=False,
         systemd_version=expected.splitlines()[0],stderr_present=bool(stderr),
@@ -82,7 +91,7 @@ def main():
     parser.add_argument('staged_name')
     args=parser.parse_args()
     result=verify(args.staged_name)
-    directory=ABI/'out'/('interp' if result['interp_runtime_pass'] else 'process' if result['process_runtime_pass'] else 'startup')
+    directory=ABI/'out'/('events' if result['events_runtime_pass'] else 'interp' if result['interp_runtime_pass'] else 'process' if result['process_runtime_pass'] else 'startup')
     (directory/'runtime-verification.json').write_text(json.dumps(result,indent=2)+'\n')
     print(json.dumps(result,indent=2))
 
