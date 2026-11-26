@@ -1,5 +1,13 @@
 # Linux personality in XNU: first experiment
 
+The selected direction is [XNU serving the Linux ABI](LINUX-PERSONALITY.md),
+with XNU managing memory, execution and Apple devices. Reuse the existing shim's
+contracts in native kernel backends. The hosted Linux-core investigation is
+preserved separately; its independent page allocator is not the shell path.
+The working ELF/console/PTY controls remain the foundation. They do not yet
+establish an Arch shell or systemd boot.
+
+
 Current checkpoint: the marked P0 entry and a bounded static Linux ELF now pass
 on the VM kernel alongside Darwin controls. See elf/README.md and ROADMAP.md.
 The design below describes the original P0 entry; it is not full Linux support.

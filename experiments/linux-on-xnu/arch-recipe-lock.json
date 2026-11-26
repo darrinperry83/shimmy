@@ -1,0 +1,16 @@
+{
+  "repository": "https://github.com/archlinuxarm/PKGBUILDs",
+  "commit": "ea9007dfea9a2ce30e486da522408710f0e88412",
+  "files": {
+    "PKGBUILD": {
+      "url": "https://raw.githubusercontent.com/archlinuxarm/PKGBUILDs/ea9007dfea9a2ce30e486da522408710f0e88412/core/linux-aarch64/PKGBUILD",
+      "sha256": "49855fcf130888acceedd824b60893b0cf32bcca6c60fdc28fe7d017a5b2e52a"
+    },
+    "config": {
+      "url": "https://raw.githubusercontent.com/archlinuxarm/PKGBUILDs/ea9007dfea9a2ce30e486da522408710f0e88412/core/linux-aarch64/config",
+      "sha256": "0dc3af6f901f07a011fa250719b48c4bfd2c93a895aad09ab4dddef358270810"
+    }
+  },
+  "executed": false,
+  "kernel_built": false
+}

@@ -1,0 +1,53 @@
+{
+  "repository": "https://github.com/lkl/linux",
+  "commit": "d0f76a77e8c2ca68bd7d96190b8da09040eab072",
+  "linux_source_version": "6.12.0",
+  "examined_files": {
+    "arch/lkl/Kconfig": "dd0d392a25dd3c08392d154de40381b2d94b38053b269ac5150fe937e34ffef0",
+    "arch/lkl/include/asm/elf.h": "6fcbf14437bfee8aec923739934f215d3a094d90837515d449914715486eda12",
+    "arch/lkl/include/asm/processor.h": "6378321f4da8fcad321c6c860c1797b8b3639bf300c1199adb0afc27aa85353f",
+    "arch/lkl/kernel/syscalls.c": "252ecda6c9eadb85ff0456d081014dfa6f34b7a23f31bdc2f881c7d33d8a62c3",
+    "arch/lkl/include/uapi/asm/host_ops.h": "a5ee5cf1d2410c81245975570f57fb65d939f2522bacf371d3565ee47e4e326e"
+  },
+  "observed": {
+    "elf_arch_check_rejects_all": true,
+    "mmu_start_thread_empty": true,
+    "userspace_signal_limitation_noted": true,
+    "smp_excluded": true
+  },
+  "xnu_host_backend_implemented": false,
+  "arch_process_support_proven": false,
+  "systemd_proven": false,
+  "native_darwin_reuse_candidate": {
+    "repository": "https://github.com/HuanchuanTech/lkl",
+    "branch": "darwin-fskit",
+    "commit": "c4d0895ead9badb52f7bbffe3d529c61c8fc9485",
+    "documented_scope": "fixed Linux 6.12 filesystem-only Mach-O build",
+    "compiler_requirement": "upstream LLVM 19",
+    "built_or_executed_here": true,
+    "examined_files": {
+      "tools/lkl/darwin/README.md": {
+        "url": "https://raw.githubusercontent.com/HuanchuanTech/lkl/c4d0895ead9badb52f7bbffe3d529c61c8fc9485/tools/lkl/darwin/README.md",
+        "sha256": "32aaf8b58ce99bd8a47bffe130ab41e168ce3babeba4d049f962fa3bcfb49681"
+      },
+      "tools/lkl/darwin/build.py": {
+        "url": "https://raw.githubusercontent.com/HuanchuanTech/lkl/c4d0895ead9badb52f7bbffe3d529c61c8fc9485/tools/lkl/darwin/build.py",
+        "sha256": "1be623b2eeceeea13c40653cb2f37ad068d71dd7f9f82085215644d1c6f8ec0e"
+      },
+      "tools/lkl/darwin/profile/kernel.config": {
+        "url": "https://raw.githubusercontent.com/HuanchuanTech/lkl/c4d0895ead9badb52f7bbffe3d529c61c8fc9485/tools/lkl/darwin/profile/kernel.config",
+        "sha256": "319898b8e31131e229232a1193e8652b1471dcbbc5867e70eab7dfd20139b402"
+      },
+      "arch/lkl/include/asm/elf.h": {
+        "url": "https://raw.githubusercontent.com/HuanchuanTech/lkl/c4d0895ead9badb52f7bbffe3d529c61c8fc9485/arch/lkl/include/asm/elf.h",
+        "sha256": "6fcbf14437bfee8aec923739934f215d3a094d90837515d449914715486eda12"
+      },
+      "arch/lkl/include/asm/processor.h": {
+        "url": "https://raw.githubusercontent.com/HuanchuanTech/lkl/c4d0895ead9badb52f7bbffe3d529c61c8fc9485/arch/lkl/include/asm/processor.h",
+        "sha256": "6378321f4da8fcad321c6c860c1797b8b3639bf300c1199adb0afc27aa85353f"
+      }
+    },
+    "elf_arch_check_rejects_all": true,
+    "runtime_evidence": "core-smoke/evidence.json"
+  }
+}

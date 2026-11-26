@@ -1,5 +1,11 @@
 # Interactive Linux shell bring-up
 
+Architecture steering: [XNU serves the Linux ABI](../LINUX-PERSONALITY.md).
+XNU owns memory, task/thread execution and Apple devices, reusing the shim's
+compatibility contracts inside the kernel personality. The hosted Linux-core
+experiment is separate. The existing ELF/PTY path is the shell foundation.
+
+
 The committed console checkpoint is `bb4af5d` on development. This next variant
 adds Linux AArch64 read (63) through XNU's native descriptor/tty implementation.
 It preserves the original Arch-loader and visible-console candidates in separate

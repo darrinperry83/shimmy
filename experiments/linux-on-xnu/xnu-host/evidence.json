@@ -1,0 +1,91 @@
+{
+  "state": "subsystem_experiment_deferred_to_xnu_memory_personality",
+  "linux_core": {
+    "source_commit": "c4d0895ead9badb52f7bbffe3d529c61c8fc9485",
+    "core_sha256": "99b676eee7f7728d473b4682fd74deb8a1d78cfa6f0a0813f2f8bd1a224c2c49",
+    "compiler": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+    "object_count": 714,
+    "namespaced_symbol_count": 44529,
+    "host_imports": [
+      "_bzero",
+      "_rdl_lkl_bug",
+      "_rdl_lkl_printf"
+    ],
+    "posix_host_or_libsystem_objects_linked": false,
+    "architecture": "arm64e",
+    "common_compile_flags": [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang",
+      "-arch",
+      "arm64e",
+      "-mkernel",
+      "-mmacosx-version-min=26.5",
+      "-ffreestanding",
+      "-nostdinc",
+      "-fno-builtin",
+      "-fno-common",
+      "-fno-strict-aliasing",
+      "-fno-stack-protector",
+      "-fno-stack-check",
+      "-mno-red-zone",
+      "-mno-implicit-float",
+      "-mno-outline-atomics",
+      "-mbranch-protection=none",
+      "-O2",
+      "-w",
+      "-std=gnu11",
+      "-fshort-wchar",
+      "-funsigned-char",
+      "-D__DISABLE_EXPORTS",
+      "-I/Users/dperry/rmatrixos-shim/experiments/linux-on-xnu/out/darwin-source/tools/lkl/darwin/profile/include",
+      "-I/Users/dperry/rmatrixos-shim/experiments/linux-on-xnu/out/darwin-source/tools/lkl/darwin/profile/lib",
+      "-I/Users/dperry/rmatrixos-shim/experiments/linux-on-xnu/out/darwin-source/lib/raid6"
+    ],
+    "booted_inside_xnu": false,
+    "build_input_sha256": {
+      "xnu-host/build_core.py": "7ac7d653b0a81c3666a9559589b5f2910810f6f45d410298bd0042e628e60029",
+      "xnu-host/compiler_compat.h": "1916754154e1c744da5ca69e41b22dd1f6dd7948f6d6e87731c099f21e9fc694",
+      "xnu-host/namespace_macho.py": "5415d2fdf555c364b55fdffcf011780ce22c45e9159c389beed55b07d4112509",
+      "xnu-host/trace_source.py": "afdcad974feb4597d1ad02c8f396fd7e96e04940275a914edf570d4242926a1b",
+      "out/darwin-source/tools/lkl/darwin/profile/objects.json": "e8af1e16683f9b645c7570d749514ea5454f4bf504ba52d5867d42e2bfa3bc5e",
+      "out/darwin-source/tools/lkl/darwin/macho_section_compat.h": "0461c12be30a04f66d07ab725e7e5539d5ff7f218f21b1b9b8b37006c530144c",
+      "out/darwin-source/tools/lkl/darwin/boot_glue.S": "68795b3eeadd34b89f29ee1795e906ac094895eb53edd3c98c222a888910aaa4"
+    },
+    "known_case_collision_paths": [
+      "include/uapi/linux/netfilter/xt_CONNMARK.h",
+      "include/uapi/linux/netfilter/xt_DSCP.h",
+      "include/uapi/linux/netfilter/xt_MARK.h",
+      "include/uapi/linux/netfilter/xt_RATEEST.h",
+      "include/uapi/linux/netfilter/xt_TCPMSS.h",
+      "include/uapi/linux/netfilter_ipv4/ipt_ECN.h",
+      "include/uapi/linux/netfilter_ipv4/ipt_TTL.h",
+      "include/uapi/linux/netfilter_ipv6/ip6t_HL.h"
+    ],
+    "memory_bootstrap_tracing": true,
+    "traced_source_sha256": "072a79e9b3fba40345a8487b886df1a38bdeb39de57a6d8b3d6f8ef8cf7587bb"
+  },
+  "kernel_uuid": "51865730-7801-3DE4-9FDF-368EBE3FE9C7",
+  "kernel_sha256": "f16d6a025523924a262cdca17efd4b9fce5f7608e90ac870684eef428209c84f",
+  "collection_sha256": "173ab489fa914092c1ab971d31aacc4dbc1b224b474ae0362f6b8287ec45a5b8",
+  "release_driver_entry_uuids_preserved": true,
+  "xnu_sources_restored": true,
+  "linux_core_runtime_pass": false,
+  "arch_shell_running": false,
+  "systemd_running": false,
+  "first_attempt": {
+    "kernel_uuid": "7514D505-07F1-31F7-8FE9-0DFB263559B9",
+    "existing_controls_passed": [
+      "KERNEL_LINUX_ABI_P0_PASS",
+      "LINUX_ELF_M1_PASS",
+      "ARCH_ELF_COMMAND_PASS",
+      "LINUX_PTY_READ_PASS",
+      "WINDOWSERVER_ABSENT_AT_CHECK_PASS"
+    ],
+    "outcome": "guest stopped exporting after LINUX_CORE_TEST_STARTING; no usable panic data recovered",
+    "linux_core_runtime_pass": false
+  },
+  "guest_darwin_remained_responsive": true,
+  "last_checkpoint": "CORE before free_area_init",
+  "ram_allocation_bytes": 67108864,
+  "reason_for_deferral": "User selected XNU ownership of memory/execution and reuse of the existing shim contracts in the kernel Linux personality.",
+  "runtime_log_sha256": "dc747972bc3a7e7627d8e5d6e1adcd63619e57deae8c455af44b21ed90f3a230"
+}

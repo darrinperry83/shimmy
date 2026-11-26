@@ -1,5 +1,28 @@
 # Status — current checkpoint 26 November 2026
 
+Selected direction: [XNU serves Arch's Linux ABI](LINUX-PERSONALITY.md), following
+the user's explicit decision that XNU should handle memory and other operations.
+The existing shim supplies substantial compatibility contracts to reuse. The
+new isolated `--with-linux-memory` variant uses XNU's task map for Linux ELF
+memory operations; the same ELF now passes on real Linux and live custom XNU,
+and its result is visible through the Apple display output host. This is the
+active route toward the shell. Evidence: [memory/evidence.json](memory/evidence.json).
+
+The earlier [Linux source-port investigation](../linux-on-xnu/README.md) is
+preserved as an optional subsystem experiment rather than the shell dependency.
+Source candidates and update inputs are pinned and audited; the intake tool passes
+four tests and a real-source run. A pinned Linux core has now been built as native
+Mach-O and passed pipe/epoll/VFS tests in a Darwin host process without a VM; see
+[core-smoke](../linux-on-xnu/core-smoke/README.md). An experimental
+[XNU host backend](../linux-on-xnu/xnu-host/README.md) now builds and links the
+freestanding ARM64e Linux core into a separate custom kernel. That kernel boots
+and passes the existing controls; its first Linux-core trigger stalled and
+startup tracing is under test. Arch process support, systemd and a converted
+Arch kernel remain unimplemented. Existing VM execution/display/
+PTY evidence below remains valid. Reuse its kernel personality and the shim's
+tested ABI contracts with native XNU backends.
+
+
 Current implementation sequence: [ROADMAP.md](ROADMAP.md). The kernel-entry
 probe and minimal static Linux ELF execution now pass in the VM; Arch boot
 remains unproven. Visible Linux output now passes; input is next. The sections below retain earlier investigation states and are chronological.

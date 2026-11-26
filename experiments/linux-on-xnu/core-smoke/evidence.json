@@ -1,0 +1,42 @@
+{
+  "state": "native_linux_core_subsystem_smoke_pass",
+  "source_commit": "c4d0895ead9badb52f7bbffe3d529c61c8fc9485",
+  "source_repository": "https://github.com/HuanchuanTech/lkl",
+  "linux_version": "6.12.0",
+  "compiler": "Homebrew clang version 19.1.7",
+  "library_sha256": "ac554e2204fb692925bf005a83069184f4477b0d8d2d39224853098579c2339a",
+  "library_rebuilt_this_run": false,
+  "library_provenance_note": "Without --build, this run tests the existing archive; source pin alone does not attest its build provenance.",
+  "binary_sha256": "5c0e1dae5f764f436f8f3fa1a2c45a8eb269d29dc054dc03fdb62b1908605ef4",
+  "test_source_sha256": "a5f536bbf6ce05b657d6e142268102b1c97e40d5d9f0d19fbc39340255d6ed7c",
+  "binary_format": "Mach-O 64-bit executable arm64",
+  "runtime_log_sha256": "4eceefbb31aca98b97a21c48c549ace49df47245a5c7e3a287ee6d2cba38de37",
+  "passed_markers": [
+    "LINUX_CORE_BOOT_PASS",
+    "LINUX_CORE_PIPE_EPOLL_PASS",
+    "LINUX_CORE_VFS_PASS",
+    "NATIVE_DARWIN_CONTROL_PASS",
+    "LINUX_CORE_SMOKE_PASS"
+  ],
+  "host_backend": "POSIX host operations in a native Darwin process",
+  "virtual_machine_used_for_this_build_or_test": false,
+  "custom_xnu_kernel_backend_implemented": false,
+  "linux_process_execution_proven": false,
+  "arch_shell_running": false,
+  "systemd_running": false,
+  "linux_user_kernel_memory_isolation_proven": false,
+  "smp_proven": false,
+  "latest_arch_kernel_supported": false,
+  "boot_configuration_changed": false,
+  "library_built_in_this_investigation": true,
+  "library_build_method": "pinned upstream tools/lkl/darwin/build.py; LLVM 19.1.7; jobs=8; native Darwin build",
+  "library_initial_build_log_sha256": "ff100cea69b0327482daf8ccfe1f5f63d54bc99a042949071c28423b9fc452d7",
+  "upstream_profile_validation": "7 tests passed",
+  "library_architectures": [
+    "x86_64",
+    "arm64"
+  ],
+  "runtime_architectures_tested": [
+    "arm64"
+  ]
+}

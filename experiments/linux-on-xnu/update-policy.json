@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "status": "design_not_implemented_release_pipeline",
+  "runtime": {
+    "linux_source_port_hosted_by_xnu": true,
+    "virtual_machine_allowed": false,
+    "hypervisor_allowed": false,
+    "cpu_emulation_allowed": false,
+    "stock_linux_image_conversion_supported": false
+  },
+  "source_tracks": {
+    "linux": "Arch Linux ARM linux-aarch64 source recipe plus hosted-port patches",
+    "apple": "independently pinned XNU, KDK, board driver collection and host backend"
+  },
+  "host_interface": {
+    "implemented": false,
+    "versioned": true,
+    "share_linux_or_xnu_private_structures": false
+  },
+  "initial_artifact_strategy": {
+    "separately_build_linux_core": true,
+    "reuse_compatible_xnu_build_outputs": true,
+    "relink_repackage_and_reboot_candidate": true,
+    "live_kernel_core_hot_swap_supported": false
+  },
+  "release": {
+    "intake_is_compatibility_proof": false,
+    "require_matching_source_recipe_configuration": true,
+    "require_linux_semantics_and_smp_checks": true,
+    "require_arch_systemd_boot": true,
+    "require_native_darwin_and_apple_service_checks": true,
+    "require_real_update_and_rollback_test": true,
+    "unattended_activation_enabled": false
+  }
+}

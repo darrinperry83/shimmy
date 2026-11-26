@@ -1,5 +1,14 @@
 # Arch userspace on XNU with Apple drivers and Darwin applications
 
+**Architecture update — 26 November 2026:** the user selected [XNU serving the
+Linux ABI](LINUX-PERSONALITY.md), with XNU owning memory, execution and Apple
+devices. Reuse the shim's compatibility contracts in the kernel personality.
+The hosted Linux-core prototype remains a separate subsystem experiment; its
+memory bootstrap is not a dependency for the shell. The active first memory
+gate is anonymous mappings, protections and unmapping backed by XNU's task map.
+Arch Bash and systemd remain unproven.
+
+
 Current plan, 26 November 2026. This is the implementation sequence; STATUS.md
 retains the chronological investigation history. Advance a milestone only with
 recorded runtime evidence. A successful build, static audit, or mock is not a

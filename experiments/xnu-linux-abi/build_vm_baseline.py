@@ -29,7 +29,13 @@ def main():
     parser.add_argument('--with-arch-loader', action='store_true')
     parser.add_argument('--with-linux-console', action='store_true')
     parser.add_argument('--with-linux-terminal', action='store_true')
+    parser.add_argument('--with-linux-core', action='store_true', help='isolated opt-in freestanding Linux-core host test')
+    parser.add_argument('--with-linux-memory', action='store_true', help='XNU-backed Linux memory personality test')
     args = parser.parse_args()
+    if args.with_linux_core and args.with_linux_memory:
+        parser.error('the hosted Linux-core and XNU memory experiments are separate variants')
+    if args.with_linux_core or args.with_linux_memory:
+        args.with_linux_terminal = True
     if args.with_linux_terminal:
         args.with_linux_console = True
     if args.with_linux_console:
@@ -57,6 +63,10 @@ def main():
         target = target.with_name(target.name + '-linux-console')
     if args.with_linux_terminal:
         target = target.with_name(target.name + '-terminal')
+    if args.with_linux_core:
+        target = target.with_name(target.name + '-linux-core')
+    if args.with_linux_memory:
+        target = target.with_name(target.name + '-memory')
     target.mkdir(parents=True, exist_ok=True)
     with (OUT / 'kernel-build.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -76,6 +86,12 @@ def main():
             if args.with_linux_terminal:
                 import terminal_prepare
                 extra_edits = terminal_prepare.overlay(XNU, extra_edits)
+            if args.with_linux_core:
+                import linux_core_prepare
+                extra_edits = linux_core_prepare.overlay(XNU, extra_edits)
+            if args.with_linux_memory:
+                import memory_prepare
+                extra_edits = memory_prepare.overlay(XNU, extra_edits)
             build_source = build_source.replace(b'if (p && rdxnu_linux_probe(state, p))',
                 b'if (p && (rdxnu_linux_dispatch(state, p) || rdxnu_linux_probe(state, p)))')
             build_source = build_source.replace(b'#include \"rdxnu_linux_probe.h\"',
@@ -97,6 +113,9 @@ def main():
             command.append('BUILD_LTO=0')
         if args.no_bti:
             command.append('BTI_BUILD=0')
+        if args.with_linux_core:
+            core, core_report = linux_core_prepare.verified_core()
+            command.append(f'LD_KERNEL_LIBS=-lcc_kext {core}')
         report = {'command': command, 'svc_probe_present': args.with_svc_probe,
                   'svc_source_sha256': hashlib.sha256(build_source).hexdigest(),
                   'other_prepared_build_support_retained': True, 'state': 'building',
@@ -107,6 +126,10 @@ def main():
         report['arch_loader_experiment'] = args.with_arch_loader
         report['linux_console_experiment'] = args.with_linux_console
         report['linux_terminal_experiment'] = args.with_linux_terminal
+        report['linux_core_experiment'] = args.with_linux_core
+        report['linux_memory_experiment'] = args.with_linux_memory
+        if args.with_linux_core:
+            report['linux_core_sha256'] = core_report['core_sha256']
         report['elf_source_sha256'] = {str(path.relative_to(XNU)): hashlib.sha256(after).hexdigest()
                                      for path, (before, after) in extra_edits.items()}
         result = target / 'build-result.json'

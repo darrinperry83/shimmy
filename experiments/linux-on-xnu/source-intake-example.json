@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "state": "source_intake_only",
+  "source_commit": "d0f76a77e8c2ca68bd7d96190b8da09040eab072",
+  "source_tree": "5525b91f3333687c57e00934e2378a3c87aa67eb",
+  "linux_makefile_version": "6.12.0",
+  "input_file_sha256": {
+    "Makefile": "8b7e1439b3c1fd36f12bbcf0fcf8e93caa8fe7fc1e7e7c744c6805d90c7234da",
+    "arch/arm64/Kconfig": "a0f22eb1d5a1601b1166c7550a08a6537b3ad5931db989b38a1bf3b3b2ecd17c",
+    "kernel/fork.c": "c8922f3d3d1bbf3190825940ffe089006de2dbaa134dbb26667c0b23e7ae2254",
+    "mm/mmap.c": "590721f62c718c191496173fa34cf1187c39f5043a272afd1065fb7358ab9f7d",
+    "fs/exec.c": "98f1bd0885d273637457bd6709d393b8deefd2b009ac273f9fc3d26d8509ccb5"
+  },
+  "working_tree_used_as_build_input": false,
+  "working_tree_dirty": false,
+  "arch_recipe": {
+    "sha256": "49855fcf130888acceedd824b60893b0cf32bcca6c60fdc28fe7d017a5b2e52a",
+    "literal_fields": {
+      "pkgbase": "linux-aarch64",
+      "_srcname": "linux-7.3",
+      "pkgver": "7.3.6",
+      "pkgrel": "1"
+    },
+    "executed": false,
+    "source_arrays_or_hooks_evaluated": false
+  },
+  "arch_config": {
+    "sha256": "0dc3af6f901f07a011fa250719b48c4bfd2c93a895aad09ab4dddef358270810",
+    "selected_baseline_options": {
+      "CONFIG_ARM64": "y",
+      "CONFIG_64BIT": "y",
+      "CONFIG_SMP": "y",
+      "CONFIG_MMU": "y",
+      "CONFIG_ARM64_4K_PAGES": "y",
+      "CONFIG_CGROUPS": "y",
+      "CONFIG_NAMESPACES": "y",
+      "CONFIG_DEVTMPFS": "y",
+      "CONFIG_PROC_FS": "y",
+      "CONFIG_SYSFS": "y",
+      "CONFIG_FUTEX": "y",
+      "CONFIG_EPOLL": "y"
+    },
+    "usable_hosted_port_configuration": false
+  },
+  "baseline_commit": null,
+  "changed_paths": [],
+  "review_domains": {},
+  "source_port_implemented": false,
+  "kernel_converted": false,
+  "kernel_built": false,
+  "boot_configuration_changed": false,
+  "systemd_on_xnu_proven": false,
+  "update_compatibility_proven": false,
+  "activation_allowed": false,
+  "next_gate": "Implement and validate a hosted Linux architecture port; intake is not compatibility.",
+  "recipe_source_version_match": false,
+  "input_warnings": [
+    "Arch recipe version differs from the examined Linux source; not a matching build input set"
+  ]
+}
