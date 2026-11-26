@@ -34,8 +34,8 @@ def main():
     parser.add_argument('--with-linux-filemap', action='store_true', help='private file mapping and fixed replacement test')
     parser.add_argument('--with-linux-files', action='store_true', help='native descriptor/path and Linux stat ABI test')
     parser.add_argument('--with-linux-startup', action='store_true', help='heap, native TLS preservation and libc startup')
-    parser.add_argument('--startup-entry-mode', choices=('patched','stock','source-control'), default='patched',
-                        help='startup diagnostic: isolate source-built entry from KDK entry')
+    parser.add_argument('--startup-entry-mode', choices=('kdk-bridge','stock'), default='kdk-bridge',
+                        help='startup diagnostic: preserve KDK entry with TLS hooks or use stock calls')
     args = parser.parse_args()
     if args.with_linux_startup:
         args.with_linux_files = True

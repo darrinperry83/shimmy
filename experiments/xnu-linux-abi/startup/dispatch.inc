@@ -3,6 +3,10 @@
 #include <sys/user.h>
 #include <sys/signalvar.h>
 #include "rdxnu_linux_state.h"
+#include "rdxnu_linux_machine.inc"
+_Static_assert(offsetof(struct uthread, rd_linux_enabled) - offsetof(struct uthread, rd_linux_tls) == 24, "entry metadata layout");
+const uint64_t rd_linux_uthread_tail_offset = offsetof(struct uthread, rd_linux_tls);
+
 static LCK_GRP_DECLARE(rd_linux_heap_group, "rdxnu_linux_heap");
 
 static struct rd_linux_proc_state *rd_linux_state_new(void)
@@ -136,10 +140,40 @@ static int64_t rd_linux_sigaction(struct proc *p, uint64_t number, user_addr_t a
     return error ? -rd_linux_errno(error) : 0;
 }
 
+/* Reuse the shim's clock-number/error contract; XNU owns the boot epoch.
+ * MONOTONIC uses native awake uptime; BOOTTIME includes native sleep time.
+ * Linux-specific NTP discipline and CPU clock IDs are not qualified here.
+ */
+#include <kern/clock.h>
+#include <mach/mach_time.h>
+static int64_t rd_linux_clock(uint64_t nr, int32_t clock_id, user_addr_t address)
+{
+    if (clock_id!=0 && clock_id!=1 && clock_id!=4 && clock_id!=7) return -22;
+    struct { int64_t sec, nsec; } result={0,0};
+    if (nr==114) {
+        if (!address) return 0; /* clock_getres permits a null output. */
+        mach_timebase_info_data_t base;
+        clock_timebase_info(&base);
+        uint64_t ns=((uint64_t)base.numer+base.denom-1)/base.denom;
+        if (!ns) ns=1;
+        result.sec=ns/1000000000ULL;result.nsec=ns%1000000000ULL;
+    } else if (clock_id==0) {
+        clock_sec_t secs;clock_nsec_t nsecs;
+        clock_get_calendar_nanotime(&secs,&nsecs);
+        result.sec=secs;result.nsec=nsecs;
+    } else {
+        uint64_t ns;
+        absolutetime_to_nanoseconds(clock_id==7 ? mach_continuous_time() : mach_absolute_time(),&ns);
+        result.sec=ns/1000000000ULL;result.nsec=ns%1000000000ULL;
+    }
+    return copyout(&result,address,sizeof(result)) ? -14 : 0;
+}
+
 static int64_t rd_linux_startup(struct proc *p, arm_saved_state_t *state, uint64_t nr)
 {
     uint64_t a0=get_saved_state_reg(state,0),a1=get_saved_state_reg(state,1);
     uint64_t a2=get_saved_state_reg(state,2),a3=get_saved_state_reg(state,3);
+    if (nr==113 || nr==114) return rd_linux_clock(nr,(int32_t)a0,a1);
     if (nr==214) return rd_linux_brk(p,a0);
     if (nr==178) return proc_getpid(p); /* Single-thread ELF checkpoint only. */
     if (nr==96) {

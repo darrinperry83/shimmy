@@ -1,0 +1,123 @@
+{
+  "schema": 1,
+  "scope": "VMAPPLE libc startup diagnostic; not PID 1 or physical hardware",
+  "linux_reference": {
+    "linux_elf_sha256": "b2738f07c6f1bbd6c4af48c3ddd38b3f6770158686cd64ac1281f1e17d9af5cb",
+    "xnu_runtime_proven": false,
+    "linux_image": "sha256:0151e70bd01e7e4c891e903edf1dacba81656f04c6150bfce78d5a570e4df443",
+    "linux_reference": "LINUX_STARTUP_RESULT status=0 native_parent=1 output=STARTUP_READY\nLINUX_STARTUP_PASS\nXNU_STARTUP_PERSONALITY_PASS: heap growth/shrink/collision, TLS/x18 through blocking read, signal ignore, libc support; native parent intact\n"
+  },
+  "stock_control": {
+    "kernel_uuid": "5B755EBE-2D1F-3919-9902-4A880D6FC15A",
+    "native_and_prior_linux_gates_pass": true,
+    "startup_exit_status": 116,
+    "expected_failure": "TLS/x18 preservation",
+    "boot_log_sha256": "5ef4ae95c584857f14b23e22f20021070f7e4997134357ac34b15c35b8498b0d",
+    "proof_log": "out/startup/runtime-proof/stock-boot.log",
+    "uses_legacy_experimental_machine_fields": true
+  },
+  "kdk_bridge": {
+    "kernel_uuid": "F82B3332-D5C2-37E0-AED5-BF4381229DE4",
+    "kernel_sha256": "364419db94a762a51e0f5b7213f6a81b89adbb6d6f1948ef806042a9eabb66d5",
+    "collection_sha256": "0226612dd3f13996432c1eb2626ab55df58bdfd33441a9068487be4c75f30783",
+    "archive": {
+      "original_sha256": "15880a9a5433d161afe1e6c3fec7ae48053fb1d57ac53f60849d6d0da4fdbbcb",
+      "modified_sha256": "14633e66636692ce2b5c82df7846911099f76efac37de1549bedf1ff96d7ead2",
+      "locore_original_sha256": "8a2c05e147337b2aaa37ad2057fafd5991314abada02400bf10266e4faa7f7ea",
+      "locore_modified_sha256": "cde93c48cabd7d1dedff04a79f95d2fde5f2600a50bd344cb09133d8dff8e315",
+      "redirected_imports": {
+        "_ml_sign_thread_state": "_rd_linux_entry_sign",
+        "_ml_check_signed_state": "_rd_linux_entry_check"
+      },
+      "instruction_and_relocation_bytes_unchanged": true,
+      "other_members_byte_identical": true
+    },
+    "assembly": {
+      "control_definitions": 336,
+      "existing_definitions_unchanged": true,
+      "native_thread_size": "1696"
+    },
+    "linked_entry": {
+      "entry_calls": {
+        "0x1de8": "_rd_linux_entry_sign",
+        "0x22f8": "_rd_linux_entry_check"
+      },
+      "original_apple_helpers_retained": true
+    },
+    "boot_installed": true,
+    "runtime_pass": true,
+    "runtime_status": "TLS startup passed; systemd clock backend missing",
+    "boot_log_sha256": "61a273f56cb4cf8ddf09099d1a934c727fe45e3d83cd82f41f42aa92ef259a21",
+    "proof_log": "out/startup/runtime-proof/tls-boot.log"
+  },
+  "systemd_version_runtime_pass": true,
+  "clock_candidate": {
+    "kernel_uuid": "19096E49-FD42-3D4E-AFC4-95F315780A47",
+    "kernel_sha256": "59a67755af6636aee09cfe2b282ab65eb27dcfe0c8fff0bbfd5c09dcd4688f66",
+    "collection_sha256": "12c0925f843636b9b399903810ce17f298868cef3498080482366fb9d3ebc489",
+    "staged_name": "startup-kdk-bridge-19096e49-f2372686",
+    "source_restored": true,
+    "linked_entry": {
+      "entry_calls": {
+        "0x1de8": "_rd_linux_entry_sign",
+        "0x22f8": "_rd_linux_entry_check"
+      },
+      "original_apple_helpers_retained": true
+    },
+    "linux_reference": {
+      "linux_elf_sha256": "befce56c65b6daec695e99e4a45d0b631f878e58e5e797330feb833bbaad2957",
+      "xnu_runtime_proven": false,
+      "linux_image": "sha256:0151e70bd01e7e4c891e903edf1dacba81656f04c6150bfce78d5a570e4df443",
+      "linux_reference": "LINUX_STARTUP_RESULT status=0 native_parent=1 output=STARTUP_READY\nLINUX_STARTUP_PASS\nXNU_STARTUP_PERSONALITY_PASS: heap growth/shrink/collision, TLS/x18 through blocking read, signal ignore, native clocks, libc support; native parent intact\n"
+    },
+    "runtime_pass": true,
+    "runtime_status": "Passed live startup/clocks and exact systemd version comparison",
+    "initial_staged_name": "startup-kdk-bridge-19096e49-1416da63",
+    "runtime_verification": {
+      "kernel_uuid": "19096E49-FD42-3D4E-AFC4-95F315780A47",
+      "collection_sha256": "12c0925f843636b9b399903810ce17f298868cef3498080482366fb9d3ebc489",
+      "staged_name": "startup-kdk-bridge-19096e49-f2372686",
+      "startup_runtime_pass": true,
+      "systemd_version_runtime_pass": true,
+      "native_parent": 673,
+      "linux_child": 674,
+      "systemd_version": "systemd 262 (262.2-1-arch)",
+      "stderr_present": true,
+      "stderr": "Failed to chase and open directory '/root/.config/systemd/user.conf.d', ignoring: Operation not supported\nFailed to chase and open directory '/etc/systemd/user.conf.d', ignoring: Operation not supported\nFailed to chase and open directory '/run/systemd/user.conf.d', ignoring: Operation not supported\nFailed to chase and open directory '/usr/local/lib/systemd/user.conf.d', ignoring: Operation not supported\nFailed to chase and open directory '/usr/lib/systemd/user.conf.d', ignoring: Operation not supported\nFailed to open /root/.config/systemd/user.conf: Operation not supported\n",
+      "proof_logs": {
+        "boot": {
+          "path": "out/startup/runtime-proof/startup-kdk-bridge-19096e49-f2372686-boot.log",
+          "sha256": "945cf7b6be3efe452518fdba3a423e3a58dd12313254446f60f16aa2f107c770"
+        },
+        "stdout": {
+          "path": "out/startup/runtime-proof/startup-kdk-bridge-19096e49-f2372686-stdout.log",
+          "sha256": "a9de94c5b2ccb7a4dd0007b977acc31ec40f7de45dadc64c6bfeace38eee0fd9"
+        },
+        "stderr": {
+          "path": "out/startup/runtime-proof/startup-kdk-bridge-19096e49-f2372686-stderr.log",
+          "sha256": "671abb8d23fe710114ac4eca208e708d777103ca5becb6dbe488cbce4af66799"
+        }
+      },
+      "limits": "Single-thread startup and systemd --version only; no PID 1, service-manager, rootfs isolation, or physical-driver qualification"
+    }
+  },
+  "systemd_version_scope": "Version command only; exact version/feature lines match reference; unsupported configuration-path warnings remain",
+  "systemd_reference": {
+    "image": "sha256:0151e70bd01e7e4c891e903edf1dacba81656f04c6150bfce78d5a570e4df443",
+    "packages": [
+      "systemd 262.2-1",
+      "glibc 2.43+r22+g8362e8ce10b2-2",
+      "gcc-libs 16.1.1+r12+g301eb08fa2c5-1"
+    ],
+    "files": {
+      "usr/lib/ld-linux-aarch64.so.1": "b1f2738bdb51e6419d7062f96c8a44bd68853698dc5ac624fa6ca9f9b03d456d",
+      "usr/lib/libc.so.6": "6ab264fb4e8df9942b0fb75b48fcd5c30b2f081d8dfaa6c25d7be1d3fce5b2ab",
+      "usr/lib/libgcc_s.so.1": "ac598673a4bf67c0295b6609e46b1fafd0d4adf3f80a513d61ac49ecff772e48",
+      "usr/lib/libm.so.6": "71ed8de709c40acd4fd0177258fc71251a5acdb1d075122409ad42529d6c7a4e",
+      "usr/lib/systemd/libsystemd-core-262.2-1.so": "d5cd707fb041747a74821a94c02fff63f58733b5937adfecedc6df772c239a82",
+      "usr/lib/systemd/libsystemd-shared-262.2-1.so": "ecbd239a8516c7d4c2767e6dfe1549a1564fded185a10ca84e4a40c68bc31868",
+      "usr/lib/systemd/systemd": "004fff95f0c063820367d1f2276f7034604735b4e177a5c38d3ddb02a44139c2"
+    },
+    "version_output": "systemd 262 (262.2-1-arch)\n+PAM +AUDIT -SELINUX +APPARMOR -IMA +IPE +SMACK +SECCOMP +GNUTLS +OPENSSL +ACL +BLKID +CURL +ELFUTILS +FIDO2 +IDN2 +KMOD +LIBCRYPTSETUP +LIBCRYPTSETUP_PLUGINS +LIBFDISK +PCRE2 +PWQUALITY +P11KIT +QRENCODE +TPM2 +BZIP2 +LZ4 +XZ +ZLIB +ZSTD +BPF_FRAMEWORK -BTF +XKBCOMMON +UTMP +LIBARCHIVE\n"
+  }
+}

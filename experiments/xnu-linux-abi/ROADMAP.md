@@ -7,13 +7,17 @@ The hosted Linux-core prototype remains a separate subsystem experiment; its
 memory bootstrap is not a dependency for the shell. Anonymous and private-file
 mapping gates now pass on XNU. The immediate application target is the original
 Arch systemd package; see [systemd/README.md](systemd/README.md) for gates and
-the existing shim reuse map. Arch Bash and systemd remain unproven on XNU.
+the existing shim reuse map. The unchanged systemd version command now passes
+on XNU; Arch Bash and systemd manager/service startup remain unproven.
 Keep XNU, personality and Arch package updates independently versioned and
 promote tested combinations under [UPDATE-POLICY.md](UPDATE-POLICY.md).
 
 The next file-operation gate also passes on Linux and live XNU; see
-[files/README.md](files/README.md). Heap growth and libc/TLS/signal startup
-remain next for the original systemd binary.
+[files/README.md](files/README.md). Heap growth, bounded libc/signal startup,
+native TLS/x18 preservation and clocks now pass the live startup fixture;
+see [startup/README.md](startup/README.md). The next systemd gate is manager
+startup and real child-service lifecycle, with required paths/events/process
+contracts implemented from recorded failures.
 
 
 Current plan, 26 November 2026. This is the implementation sequence; STATUS.md

@@ -75,6 +75,21 @@ long probe_main(void)
     stage=117;
     char byte=0;
     CHECK(SC(63,3,&byte,1,0)==1 && byte=='T' && tls_valid());
+    stage=119;
+    struct stamp { long sec,nsec; } wall,mono,raw,boot,res,previous_time;
+    CHECK(SC(113,0,&wall,0,0)==0 && wall.sec>1700000000 && wall.nsec>=0 && wall.nsec<1000000000);
+    CHECK(SC(113,1,&mono,0,0)==0 && mono.sec>=0 && mono.nsec>=0 && mono.nsec<1000000000);
+    CHECK(SC(113,4,&raw,0,0)==0 && raw.sec>=0 && raw.nsec>=0 && raw.nsec<1000000000);
+    CHECK(SC(113,7,&boot,0,0)==0 && (boot.sec>mono.sec || (boot.sec==mono.sec && boot.nsec>=mono.nsec)));
+    CHECK(SC(114,1,&res,0,0)==0 && res.sec>=0 && res.nsec>=0 && res.nsec<1000000000 && (res.sec || res.nsec));
+    CHECK(SC(114,1,0,0,0)==0 && SC(114,1,1,0,0)==-14);
+    CHECK(SC(113,1,0,0,0)==-14 && SC(113,1,1,0,0)==-14);
+    CHECK(SC(113,123456,0,0,0)==-22 && SC(114,123456,0,0,0)==-22);
+    for(unsigned i=0;i<128;i++){
+        previous_time=mono;
+        CHECK(SC(113,1,&mono,0,0)==0 && tls_valid());
+        CHECK(mono.sec>previous_time.sec || (mono.sec==previous_time.sec && mono.nsec>=previous_time.nsec));
+    }
     static const char pass[]="LINUX_STARTUP_PASS\n";
     stage=118;
     CHECK(SC(64,1,pass,sizeof(pass)-1,0)==sizeof(pass)-1 && tls_valid());

@@ -33,6 +33,14 @@ def stage(name, candidate, core=False, memory=False, filemap=False, files=False,
         raise ValueError('unexpected Linux startup build profile')
     if not report['exact_control_driver_uuids'] or not report['bti_enforcement_disabled'] or report['configuration'] != 'DEVELOPMENT':
         raise ValueError('expected diagnostic VM driver-preserving candidate')
+    if startup:
+        # macOS virtiofs may cache overwritten host files in Recovery. Give
+        # each kernel, fixture, and staging recipe a distinct host filename.
+        material=Path(__file__).read_bytes()
+        for filename in ('startup-probe','startup-run'):
+            material+=(ABI/'out/startup'/filename).read_bytes()
+        token=hashlib.sha256(material).hexdigest()[:8]
+        name+=f'-{report["kernel_uuid"][:8].lower()}-{token}'
     results = OUT / 'results'
     results.mkdir(exist_ok=True)
     shutil.copy2(report['collection'], results / f'{name}.kc')
@@ -102,9 +110,10 @@ def stage(name, candidate, core=False, memory=False, filemap=False, files=False,
         for filename in ('startup-probe','startup-run'):
             artifact=ABI/'out/startup'/filename
             digest=hashlib.sha256(artifact.read_bytes()).hexdigest()
-            shutil.copy2(artifact,results/filename)
-            extra_files+=f'[ "$("$directory/sha256" "$share/{filename}")" = {digest} ] || exit 1\n'
-            extra_files+=f'cp "$share/{filename}" "$data/Library/RDXNU-P0/{filename}"\nchmod 755 "$data/Library/RDXNU-P0/{filename}"\nchown root:wheel "$data/Library/RDXNU-P0/{filename}"\n'
+            staged_name=f'{name}-{filename}'
+            shutil.copy2(artifact,results/staged_name)
+            extra_files+=f'[ "$("$directory/sha256" "$share/{staged_name}")" = {digest} ] || exit 1\n'
+            extra_files+=f'cp "$share/{staged_name}" "$data/Library/RDXNU-P0/{filename}"\nchmod 755 "$data/Library/RDXNU-P0/{filename}"\nchown root:wheel "$data/Library/RDXNU-P0/{filename}"\n'
         reference=json.loads((ABI/'out/systemd/reference.json').read_text())
         if not reference['linux_reference_pass']:raise ValueError('systemd Linux reference missing')
         for relative,digest in reference['files'].items():
@@ -118,7 +127,8 @@ def stage(name, candidate, core=False, memory=False, filemap=False, files=False,
         extra_files+='cp "$share/systemd-expected-version.txt" "$data/Library/RDXNU-P0/systemd-expected-version.txt"\n'
         systemd_test='''"$base/startup-run" "$base/startup-probe"
 systemdlog=/var/tmp/rdxnu-systemd-version.log
-if "$base/run-arch" "$base/systemd/usr/lib/ld-linux-aarch64.so.1" --inhibit-cache --library-path "$base/systemd/usr/lib/systemd:$base/systemd/usr/lib" "$base/systemd/usr/lib/systemd/systemd" --version > "$systemdlog" 2>&1; then
+systemderr=/var/tmp/rdxnu-systemd-version-stderr.log
+if "$base/run-arch" "$base/systemd/usr/lib/ld-linux-aarch64.so.1" --inhibit-cache --library-path "$base/systemd/usr/lib/systemd:$base/systemd/usr/lib" "$base/systemd/usr/lib/systemd/systemd" --version > "$systemdlog" 2> "$systemderr"; then
     head -n 2 "$systemdlog" > /var/tmp/rdxnu-systemd-version-only.log
     if cmp -s /var/tmp/rdxnu-systemd-version-only.log "$base/systemd-expected-version.txt"; then
         echo XNU_SYSTEMD_VERSION_PASS
@@ -129,10 +139,44 @@ else
     echo XNU_SYSTEMD_VERSION_NOT_YET
 fi
 cat "$systemdlog"
+cat "$systemderr"
 "$base/display-output" /bin/cat "$systemdlog"'''
         boot=boot.replace('"$base/display-output" "$base/files-run" "$base/files-probe"',systemd_test)
         boot=boot.replace('    if [ -d "$shared" ]; then',
-            '    if [ -d "$shared" ]; then\n        cp /var/tmp/rdxnu-systemd-version.log "$shared/systemd-version.log" 2>/dev/null || true')
+            '    if [ -d "$shared" ]; then\n        cp /var/tmp/rdxnu-systemd-version.log "$shared/systemd-version.log" 2>/dev/null || true\n        cp /var/tmp/rdxnu-systemd-version-stderr.log "$shared/systemd-version-stderr.log" 2>/dev/null || true')
+    if startup:
+        # A leftover directory is not proof the host share is mounted.
+        old_mount='''    shared='/Volumes/My Shared Files/results'
+    if [ ! -d "$shared" ]; then
+        mkdir -p /var/tmp/rdxnu-results
+        /sbin/mount_virtiofs com.apple.virtio-fs.automount /var/tmp/rdxnu-results || true
+        shared=/var/tmp/rdxnu-results/results
+    fi'''
+        new_mount=r'''    shared_root=$(/sbin/mount | /usr/bin/sed -n 's/^.* on \(.*\) (AppleVirtIOFS.*$/\1/p' | /usr/bin/head -n 1)
+    if [ -z "$shared_root" ]; then
+        mkdir -p /private/var/tmp/rdxnu-results
+        /sbin/mount_virtiofs com.apple.virtio-fs.automount /private/var/tmp/rdxnu-results || return 0
+        shared_root=/private/var/tmp/rdxnu-results
+    fi
+    shared="$shared_root/results"
+    [ -d "$shared" ] || shared="$shared_root"'''
+        if boot.count(old_mount)!=1:raise ValueError('startup share mount anchor changed')
+        boot=boot.replace(old_mount,new_mount)
+        # Export identity and each finished gate even if a later kernel call hangs.
+        boot=boot.replace('trap export_logs EXIT\n', 'trap export_logs EXIT\n: > /var/tmp/rdxnu-systemd-version.log\n: > /var/tmp/rdxnu-systemd-version-stderr.log\n')
+        boot=boot.replace('sysctl kern.uuid kern.kernelcacheuuid kern.bootargs\n',
+                          'sysctl kern.uuid kern.kernelcacheuuid kern.bootargs\nexport_logs\n')
+        gates=('"$base/probe" --expect-kernel',
+               '"$base/elf-run-probe" "$base/elf-probe"',
+               '"$base/run-arch" "$base/arch-ld.so" --help',
+               '"$base/run-pty" "$base/read-probe"',
+               '"$base/memory-run" "$base/memory-probe"',
+               '"$base/filemap-run" "$base/filemap-probe"',
+               '"$base/files-run" "$base/files-probe"',
+               '"$base/startup-run" "$base/startup-probe"')
+        for gate in gates:
+            if boot.count(gate)!=1:raise ValueError(f'missing/duplicate startup log gate: {gate}')
+            boot=boot.replace(gate,gate+'\nexport_logs')
     boot = boot.replace('terminal.log', f'{name}.log').replace('terminal-boot.log', f'{name}-boot.log')
     boot = boot.replace('rdxnu-terminal-display.log', f'rdxnu-{name}-display.log')
     boot = boot.replace('"$shared/terminal-display.log"', f'"$shared/{name}-display.log"')
@@ -197,7 +241,7 @@ def main(kind='core'):
         candidate = stage('files', OUT / (BASELINE + '-memory-filemap-files'), memory=True, filemap=True, files=True)
     elif kind == 'startup':
         candidate = stage('startup', OUT / (BASELINE + '-memory-filemap-files-startup'), memory=True, filemap=True, files=True, startup=True)
-    elif kind in ('startup-stock','startup-source-control'):
+    elif kind in ('startup-stock','startup-source-control','startup-kdk-bridge'):
         suffix=kind.removeprefix('startup-')
         candidate = stage(kind, OUT / (BASELINE + '-memory-filemap-files-startup-' + suffix), memory=True, filemap=True, files=True, startup=True)
     else:
@@ -208,5 +252,5 @@ def main(kind='core'):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('kind',choices=('core','memory','filemap','files','startup','startup-stock','startup-source-control'))
+    parser.add_argument('kind',choices=('core','memory','filemap','files','startup','startup-stock','startup-source-control','startup-kdk-bridge'))
     main(parser.parse_args().kind)

@@ -27,7 +27,7 @@ def main():
     parser.add_argument('--with-linux-filemap', action='store_true')
     parser.add_argument('--with-linux-files', action='store_true')
     parser.add_argument('--with-linux-startup', action='store_true')
-    parser.add_argument('--startup-entry-mode', choices=('patched','stock','source-control'), default='patched')
+    parser.add_argument('--startup-entry-mode', choices=('kdk-bridge','stock'), default='kdk-bridge')
     args = parser.parse_args()
     if args.with_linux_startup:
         args.with_linux_files = True
@@ -98,6 +98,9 @@ def main():
     kernel = Path(report['kernel'])
     if hashlib.sha256(kernel.read_bytes()).hexdigest() != report['kernel_sha256']:
         raise ValueError('baseline kernel changed')
+    if args.with_linux_startup and args.startup_entry_mode == 'kdk-bridge':
+        from startup_archive import verify_linked
+        entry_verification = verify_linked(kernel.with_name(kernel.name + '.unstripped'))
     command = json.loads((OUT / 'collection-command.json').read_text())
     command[command.index('--variant-suffix') + 1] = 'release'
     command[command.index('--kernel') + 1] = str(kernel)
@@ -133,6 +136,8 @@ def main():
         'startup_entry_mode': report.get('startup_entry_mode'),
         'bti_disabled': report.get('bti_disabled', False),
         'bti_enforcement_disabled': report.get('bti_enforcement_disabled', False)}
+    if args.with_linux_startup and args.startup_entry_mode == 'kdk-bridge':
+        result['startup_linked_entry'] = entry_verification
     (target / 'collection-result.json').write_text(json.dumps(result, indent=2) + '\n')
     if args.stack_probe_bti:
         corrected = target / 'baseline-release-drivers-bti.kc'

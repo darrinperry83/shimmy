@@ -14,8 +14,8 @@ file, execution from an RX file mapping, offsets, fixed file/anonymous
 replacement with intact neighboring memory, and Linux error behavior. Native
 Darwin's directory-mapping error remains unchanged. All earlier controls pass,
 and the result is visible without WindowServer. Evidence:
-[memory/filemap-evidence.json](memory/filemap-evidence.json). Heap growth,
-Linux file-open/metadata support, full dynamic linking and Bash remain work.
+[memory/filemap-evidence.json](memory/filemap-evidence.json). Later file and
+startup gates below extend this checkpoint; Bash remains unproven.
 
 The file-open/metadata checkpoint now passes on live XNU kernel
 `2A795DD5-D68C-30A6-84B0-7237329792AC`: the unchanged Linux fixture opens its
@@ -25,15 +25,27 @@ after closing its descriptor. The result is visible through the Apple display
 path. Earlier ELF, Arch loader, PTY and memory/filemap controls pass on the same
 boot with WindowServer absent. See [files/README.md](files/README.md) and
 [files/evidence.json](files/evidence.json). This uses the native filesystem
-namespace; Arch rootfs policy, heap/TLS/signal startup and systemd remain work.
+namespace; Arch rootfs policy and complete manager/service behavior remain work.
 
-The immediate application target is now original Arch systemd; see
-[systemd/README.md](systemd/README.md). Its captured binary/library closure
-passes the version command on reference Linux, with a syscall entry/return
-trace in `out/systemd/reference.json`. Systemd has not run on XNU yet. Port the
-shim's existing behavior/tests to native kernel backends and keep XNU,
-personality and Arch package updates independently versioned under
-[UPDATE-POLICY.md](UPDATE-POLICY.md).
+The original Arch systemd 262.2-1 version command now executes on XNU kernel
+`19096E49-FD42-3D4E-AFC4-95F315780A47`, exits zero, and prints the same version
+and feature lines as the Linux reference. Native and previous Linux regression
+gates pass; WindowServer is absent. The startup fixture also passes heap,
+TLS/x18 through repeated syscalls and a blocking read, signal ignore, bounded
+libc support, and clocks. Evidence: [startup/evidence.json](startup/evidence.json).
+
+The TLS bridge preserves the KDK entry instructions and redirects two helper
+imports in a private archive copy. Linux metadata has owned uthread tail storage;
+Apple's private machine fields and state-authentication helpers remain intact.
+The earlier public-source entry replacement failed native boot; the stock-entry
+control passed earlier gates and failed exactly at the TLS check.
+
+This is a loader/libc application gate, not PID 1 or a service-manager pass.
+Systemd still reports unsupported config-directory/path operations. Threading,
+caught Linux signals, futex/event semantics, coherent init lifecycle, rootfs
+isolation and interactive hardware input remain work. See
+[systemd/README.md](systemd/README.md) and keep XNU, personality and Arch updates
+independently versioned under [UPDATE-POLICY.md](UPDATE-POLICY.md).
 
 The earlier [Linux source-port investigation](../linux-on-xnu/README.md) is
 preserved as an optional subsystem experiment rather than the shell dependency.
@@ -44,8 +56,8 @@ Mach-O and passed pipe/epoll/VFS tests in a Darwin host process without a VM; se
 [XNU host backend](../linux-on-xnu/xnu-host/README.md) now builds and links the
 freestanding ARM64e Linux core into a separate custom kernel. That kernel boots
 and passes the existing controls; its first Linux-core trigger stalled and
-startup tracing is under test. Arch process support, systemd and a converted
-Arch kernel remain unimplemented. Existing VM execution/display/
+startup tracing is under test. In that separate Linux-core variant, Arch
+process support, systemd and a converted Arch kernel remain unimplemented. Existing VM execution/display/
 PTY evidence below remains valid. Reuse its kernel personality and the shim's
 tested ABI contracts with native XNU backends.
 

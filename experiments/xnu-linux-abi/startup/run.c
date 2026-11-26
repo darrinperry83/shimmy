@@ -47,6 +47,6 @@ int main(int argc,char **argv)
     alarm(0);
     printf("LINUX_STARTUP_RESULT status=%d native_parent=%d output=%s",status,getpid(),buffer);
     if(getpid()!=parent||!WIFEXITED(status)||WEXITSTATUS(status)||strcmp(buffer,expected))return 1;
-    puts("XNU_STARTUP_PERSONALITY_PASS: heap growth/shrink/collision, TLS/x18 through blocking read, signal ignore, libc support; native parent intact");
+    puts("XNU_STARTUP_PERSONALITY_PASS: heap growth/shrink/collision, TLS/x18 through blocking read, signal ignore, native clocks, libc support; native parent intact");
     return 0;
 }

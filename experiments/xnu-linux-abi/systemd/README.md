@@ -1,4 +1,4 @@
-# Arch systemd is the next application target
+# Arch systemd on XNU
 
 The target is the original Arch Linux ARM systemd package running through the
 XNU Linux personality. Keep its binary and libraries unchanged. The existing
@@ -50,11 +50,20 @@ thread/TLS initialization, signal operations and resource queries beyond the
 current XNU filemap checkpoint. `rseq` and other optional calls must be assessed
 by their result and caller fallback, not implemented solely to silence a list.
 
-The subsequent [file-operation checkpoint](../files/README.md) now passes on
-live XNU, including Linux-opened data files and native metadata conversion.
-The reference manifest now identifies syscall numbers that have backends in
-that candidate. This does not prove every flag or usage from systemd's startup
-trace works; heap/TLS/signal and other startup operations remain unimplemented.
+The [startup checkpoint](../startup/README.md) now runs the unchanged systemd
+262.2-1 version command on live XNU kernel 19096E49-FD42-3D4E-AFC4-95F315780A47.
+It exits zero and its version/feature text matches the Linux reference. Native
+Darwin parent controls and earlier ELF, loader, PTY, memory and file gates pass;
+WindowServer is absent. See [runtime evidence](../startup/evidence.json).
+
+This proves gate 1 only. It does not establish PID 1 or a running manager.
+Directory-chasing/config reads still emit Operation not supported warnings;
+O_PATH/general path semantics and Arch rootfs isolation remain work. These
+warnings are retained on stderr, separately from the version comparison.
+Printed build features describe the package, not implemented kernel facilities.
+Heap, bounded signal operations, native TLS/x18 preservation and native clock
+backends now exist; caught signal frames, thread creation, futexes, event
+interfaces and service lifecycle remain incomplete.
 
 ## Reuse and port boundaries
 

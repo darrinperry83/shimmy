@@ -1,16 +1,17 @@
-/* Compiled in pcb.c: BSD code keeps struct thread opaque. */
+/* BSD-owned tail follows the unchanged native thread and uthread fields. */
+#include <sys/user.h>
 void rd_linux_machine_exec(thread_t thread, bool linux, uint64_t mask)
 {
-    thread->machine.reserved4=thread->machine.reserved5=0;
-    thread->machine.reserved6=mask;
-    thread->machine.arm_machine_flags &= ~ARM_MACHINE_THREAD_RDXNU_LINUX;
-    if (linux) thread->machine.arm_machine_flags |= ARM_MACHINE_THREAD_RDXNU_LINUX;
+    struct uthread *ut = get_bsdthread_info(thread);
+    ut->rd_linux_tls = ut->rd_linux_clear_tid = 0;
+    ut->rd_linux_mask = mask;
+    ut->rd_linux_enabled = linux;
 }
 void rd_linux_machine_set_clear_tid(thread_t thread, uint64_t address)
-{ thread->machine.reserved5=address; }
+{ get_bsdthread_info(thread)->rd_linux_clear_tid=address; }
 uint64_t rd_linux_machine_clear_tid(thread_t thread)
-{ return thread->machine.reserved5; }
+{ return get_bsdthread_info(thread)->rd_linux_clear_tid; }
 void rd_linux_machine_set_mask(thread_t thread, uint64_t mask)
-{ thread->machine.reserved6=mask; }
+{ get_bsdthread_info(thread)->rd_linux_mask=mask; }
 uint64_t rd_linux_machine_mask(thread_t thread)
-{ return thread->machine.reserved6; }
+{ return get_bsdthread_info(thread)->rd_linux_mask; }
