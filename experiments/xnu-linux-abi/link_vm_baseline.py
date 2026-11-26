@@ -27,6 +27,7 @@ def main():
     parser.add_argument('--with-linux-filemap', action='store_true')
     parser.add_argument('--with-linux-files', action='store_true')
     parser.add_argument('--with-linux-paths', action='store_true', help='native O_PATH descriptors and statx')
+    parser.add_argument('--with-linux-launch', action='store_true', help='native service launch controls')
     parser.add_argument('--with-linux-reactor', action='store_true', help='native epoll/timerfd/signalfd batch')
     parser.add_argument('--with-linux-events', action='store_true', help='native eventfd counter and bounded ppoll')
     parser.add_argument('--with-linux-interp', action='store_true', help='native direct ELF PT_INTERP execution')
@@ -34,6 +35,8 @@ def main():
     parser.add_argument('--with-linux-startup', action='store_true')
     parser.add_argument('--startup-entry-mode', choices=('kdk-bridge','stock'), default='kdk-bridge')
     args = parser.parse_args()
+    if args.with_linux_launch:
+        args.with_linux_reactor = True
     if args.with_linux_reactor:
         args.with_linux_events = True
     if args.with_linux_events:
@@ -105,6 +108,8 @@ def main():
         target = target.with_name(target.name + '-events')
     if args.with_linux_reactor:
         target = target.with_name(target.name + '-reactor')
+    if args.with_linux_launch:
+        target = target.with_name(target.name + '-launch')
     report = json.loads((target / 'build-result.json').read_text())
     if report.get('linux_core_experiment', False) != args.with_linux_core:
         raise ValueError('Linux core build option mismatch')
@@ -118,6 +123,8 @@ def main():
         raise ValueError('Linux startup build option mismatch')
     if report.get('linux_paths_experiment',False) != args.with_linux_paths:
         raise ValueError('Linux paths build option mismatch')
+    if report.get('linux_launch_experiment',False) != args.with_linux_launch:
+        raise ValueError('Linux launch build option mismatch')
     if report.get('linux_reactor_experiment',False) != args.with_linux_reactor:
         raise ValueError('Linux reactor build option mismatch')
     if report.get('linux_events_experiment',False) != args.with_linux_events:
@@ -170,6 +177,7 @@ def main():
         'linux_startup_experiment': report.get('linux_startup_experiment', False),
         'startup_entry_mode': report.get('startup_entry_mode'),
         'linux_paths_experiment': report.get('linux_paths_experiment',False),
+        'linux_launch_experiment': report.get('linux_launch_experiment',False),
         'linux_reactor_experiment': report.get('linux_reactor_experiment',False),
         'linux_events_experiment': report.get('linux_events_experiment',False),
         'linux_interp_experiment': report.get('linux_interp_experiment',False),

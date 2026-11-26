@@ -38,6 +38,14 @@ on that custom XNU boot. The next manager boundary is a coherent Linux
 init/runtime context and required proc/cgroup/rootfs views. Full thread/futex
 semantics remain separate work; the library loop is not a manager/PID 1 pass.
 
+The 27 November [service-launch batch](launch/README.md) now passes native
+pipes/dup remapping, sessions/groups, umask, bounded limit mutation/enforcement,
+wait4/rusage and direct Arch child exec after service setup. Both forced peer
+waits and every earlier gate pass on the live custom kernel. This completes
+another manager prerequisite while preserving its real startup guard. Next
+work must establish Linux init/adoption and required runtime/filesystem views;
+the service-launch test is not itself a manager or interactive-shell pass.
+
 
 Current plan, 26 November 2026. This is the implementation sequence; STATUS.md
 retains the chronological investigation history. Advance a milestone only with

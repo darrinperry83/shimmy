@@ -15,7 +15,7 @@ OUT = ABI / 'out/vmapple'
 BASELINE = 'baseline-no-lto-no-bti-svc-probe-elf-arch-loader-linux-console-terminal'
 
 
-def stage(name, candidate, core=False, memory=False, filemap=False, files=False, startup=False, paths=False, process=False, interp=False, events=False, reactor=False):
+def stage(name, candidate, core=False, memory=False, filemap=False, files=False, startup=False, paths=False, process=False, interp=False, events=False, reactor=False, launch=False):
     report = json.loads((candidate / 'collection-result.json').read_text())
     build = json.loads((candidate / 'build-result.json').read_text())
     data = Path(report['collection']).read_bytes()
@@ -39,6 +39,8 @@ def stage(name, candidate, core=False, memory=False, filemap=False, files=False,
         raise ValueError('unexpected Linux interpreter build profile')
     if report.get('linux_events_experiment',False) != events:
         raise ValueError('unexpected Linux event build profile')
+    if report.get('linux_launch_experiment',False) != launch:
+        raise ValueError('unexpected Linux launch build profile')
     if report.get('linux_reactor_experiment',False) != reactor:
         raise ValueError('unexpected Linux reactor build profile')
     if not report['exact_control_driver_uuids'] or not report['bti_enforcement_disabled'] or report['configuration'] != 'DEVELOPMENT':
@@ -66,6 +68,9 @@ def stage(name, candidate, core=False, memory=False, filemap=False, files=False,
             material+=(ABI/'out/reactor/verification.json').read_bytes()
             for filename in ('reactor-probe','reactor-run','sd-event-run'):
                 material+=(ABI/'out/reactor'/filename).read_bytes()
+        if launch:
+            material+=(ABI/'out/launch/verification.json').read_bytes()
+            material+=(ABI/'out/launch/launch-run').read_bytes()
         token=hashlib.sha256(material).hexdigest()[:8]
         name+=f'-{report["kernel_uuid"][:8].lower()}-{token}'
     results = OUT / 'results'
@@ -263,6 +268,24 @@ cat "$systemderr"
         boot=boot.replace('"$base/events-run" "$base/events-probe"','"$base/events-run" "$base/events-probe"\n"$base/reactor-run" "$base/reactor-probe"\nif "$base/sd-event-run" "$base/reactor-root" > /var/tmp/rdxnu-sd-event.log 2> /var/tmp/rdxnu-sd-event-stderr.log; then\n    echo XNU_SD_EVENT_NATIVE_PARENT_RESULT=0\nelse\n    echo XNU_SD_EVENT_NATIVE_PARENT_RESULT=$?\nfi\ncat /var/tmp/rdxnu-sd-event.log\ncat /var/tmp/rdxnu-sd-event-stderr.log\nexport_logs')
         boot=boot.replace('    if [ -d "$shared" ]; then',
             '    if [ -d "$shared" ]; then\n        for suffix in "" -stderr; do\n            if [ -f "/var/tmp/rdxnu-sd-event${suffix}.log" ]; then cp "/var/tmp/rdxnu-sd-event${suffix}.log" "$shared/'+name+'-sd-event${suffix}.log"; fi\n        done')
+    if launch:
+        verification=json.loads((ABI/'out/launch/verification.json').read_text())
+        if 'XNU_LAUNCH_PERSONALITY_PASS' not in verification.get('linux_reference',''):
+            raise ValueError('Linux service launch reference must pass')
+        artifact=ABI/'out/launch/launch-run';digest=hashlib.sha256(artifact.read_bytes()).hexdigest()
+        staged_name=f'{name}-launch-run';shutil.copy2(artifact,results/staged_name)
+        extra_files+=f'[ "$("$directory/sha256" "$share/{staged_name}")" = {digest} ] || exit 1\n'
+        extra_files+=f'cp "$share/{staged_name}" "$data/Library/RDXNU-P0/launch-run"\nchmod 755 "$data/Library/RDXNU-P0/launch-run"\nchown root:wheel "$data/Library/RDXNU-P0/launch-run"\n'
+        root='$data/Library/RDXNU-P0/launch-root'
+        for relative,digest in verification['files'].items():
+            artifact=ABI/'out/launch/rootfs'/relative
+            if hashlib.sha256(artifact.read_bytes()).hexdigest()!=digest:raise ValueError(f'launch root changed: {relative}')
+            staged_name=f'{name}-launch-root/{relative}';staged=results/staged_name
+            staged.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(artifact,staged)
+            extra_files+=f'[ "$("$directory/sha256" "$share/{staged_name}")" = {digest} ] || exit 1\n'
+            extra_files+=f'mkdir -p "{root}/{Path(relative).parent}"\ncp "$share/{staged_name}" "{root}/{relative}"\nchmod 755 "{root}/{relative}"\nchown root:wheel "{root}/{relative}"\n'
+        extra_files+=f'ln -sfn usr/lib "{root}/lib"\nmkdir -p "{root}/work"\n'
+        boot=boot.replace('systemdlog=/var/tmp/rdxnu-systemd-version.log','"$base/launch-run" "$base/launch-root"\nexport_logs\nsystemdlog=/var/tmp/rdxnu-systemd-version.log')
     if startup:
         # A leftover directory is not proof the host share is mounted.
         old_mount='''    shared='/Volumes/My Shared Files/results'
@@ -375,6 +398,8 @@ def main(kind='core'):
         candidate = stage('filemap', OUT / (BASELINE + '-memory-filemap'), memory=True, filemap=True)
     elif kind == 'files':
         candidate = stage('files', OUT / (BASELINE + '-memory-filemap-files'), memory=True, filemap=True, files=True)
+    elif kind == 'launch':
+        candidate = stage('launch', OUT / (BASELINE + '-memory-filemap-files-startup-kdk-bridge-paths-process-interp-events-reactor-launch'), memory=True, filemap=True, files=True, startup=True, paths=True, process=True, interp=True, events=True, reactor=True, launch=True)
     elif kind == 'reactor':
         candidate = stage('reactor', OUT / (BASELINE + '-memory-filemap-files-startup-kdk-bridge-paths-process-interp-events-reactor'), memory=True, filemap=True, files=True, startup=True, paths=True, process=True, interp=True, events=True, reactor=True)
     elif kind == 'events':
@@ -398,5 +423,5 @@ def main(kind='core'):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('kind',choices=('core','memory','filemap','files','paths','process','interp','events','reactor','startup','startup-stock','startup-source-control','startup-kdk-bridge'))
+    parser.add_argument('kind',choices=('core','memory','filemap','files','paths','process','interp','events','reactor','launch','startup','startup-stock','startup-source-control','startup-kdk-bridge'))
     main(parser.parse_args().kind)

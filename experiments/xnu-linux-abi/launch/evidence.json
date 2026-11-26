@@ -1,0 +1,120 @@
+{
+  "state": "native_service_launch_controls_and_direct_arch_child_live_xnu_pass",
+  "linux_reference": {
+    "linux_image": "sha256:0151e70bd01e7e4c891e903edf1dacba81656f04c6150bfce78d5a570e4df443",
+    "linux_kernel": "6.8.0-117-generic",
+    "linux_reference": "NATIVE_LAUNCH_CONTROL_PASS\nLINUX_LAUNCH_RESULT status=0 native_parent=1 releases=2 output=LINUX_LAUNCH_DESCRIPTORS_PASS\nLINUX_LAUNCH_LIMITS_PASS\nLAUNCH_GROUP_CHILD_READY\nLAUNCH_GROUP_WAIT\nLINUX_LAUNCH_WAIT_PASS\nLAUNCH_EXEC_CHILD_READY\nLAUNCH_EXEC_WAIT\nARCH_LAUNCH_CHILD_PASS\nLINUX_LAUNCH_PASS\nXNU_LAUNCH_PERSONALITY_PASS: native pipes, descriptor remap, sessions/groups, limits, wait4/rusage and direct Arch child exec; native parent intact\n",
+    "files": {
+      "usr/bin/launch-probe": "bd7e292bbb62d109fcf11edf55f4e89abf7b8d7f17fd0a650d8474e4534b133b",
+      "usr/bin/printf": "61d8c99214afa144e0c0b922798adadbf00ef08d7635c3ca1fb62ade854be51f",
+      "usr/lib/ld-linux-aarch64.so.1": "b1f2738bdb51e6419d7062f96c8a44bd68853698dc5ac624fa6ca9f9b03d456d",
+      "usr/lib/libc.so.6": "6ab264fb4e8df9942b0fb75b48fcd5c30b2f081d8dfaa6c25d7be1d3fce5b2ab"
+    }
+  },
+  "xnu_runtime": {
+    "kernel_uuid": "1E73AC27-14B3-3EDD-9F8B-4B31342E0A85",
+    "collection_sha256": "393222db1a627aba3b7c0260a80ea050cd0518a1233272ee31166e47a97b880e",
+    "staged_name": "launch-1e73ac27-a03ae8a5",
+    "launch_runtime_pass": true,
+    "reactor_runtime_pass": true,
+    "arch_sd_event_loop_runtime_pass": true,
+    "events_runtime_pass": true,
+    "interp_runtime_pass": true,
+    "startup_runtime_pass": true,
+    "paths_runtime_pass": true,
+    "process_runtime_pass": true,
+    "arch_child_exec_runtime_pass": true,
+    "systemd_version_runtime_pass": true,
+    "native_parent": 821,
+    "linux_child": 822,
+    "manager_native_parent_result": 1,
+    "manager_runtime_pass": false,
+    "systemd_version": "systemd 262 (262.2-1-arch)",
+    "stderr_present": false,
+    "stderr": "",
+    "proof_logs": {
+      "boot": {
+        "path": "out/launch/runtime-proof/launch-1e73ac27-a03ae8a5-boot.log",
+        "sha256": "a477226f71648d3c403f1bfafa4803f7f3bb9a4b481c272264a34d29c3138fbf"
+      },
+      "stdout": {
+        "path": "out/launch/runtime-proof/launch-1e73ac27-a03ae8a5-stdout.log",
+        "sha256": "3e265154867475adb1ad2561bf68d8bcd28053d521250ad63ca2d99e87e110a5"
+      },
+      "stderr": {
+        "path": "out/launch/runtime-proof/launch-1e73ac27-a03ae8a5-stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "interp": {
+        "path": "out/launch/runtime-proof/launch-1e73ac27-a03ae8a5-interp.log",
+        "sha256": "b9201f90e6efc2f9bf3060a09819694cf861e5226c407548a026d535cc591c4c"
+      },
+      "interp-stderr": {
+        "path": "out/launch/runtime-proof/launch-1e73ac27-a03ae8a5-interp-stderr.log",
+        "sha256": "ba338deec5d8b7843a7f561fbe026977fed2fbfbab933df6a0294bae318540d0"
+      },
+      "sd-event": {
+        "path": "out/launch/runtime-proof/launch-1e73ac27-a03ae8a5-sd-event.log",
+        "sha256": "8b54ce7a8d6f22560424070ec386e608dee89341a875d7bcedd3a575d8271c9c"
+      },
+      "sd-event-stderr": {
+        "path": "out/launch/runtime-proof/launch-1e73ac27-a03ae8a5-sd-event-stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "manager-attempt": {
+        "path": "out/launch/runtime-proof/launch-1e73ac27-a03ae8a5-manager-attempt.log",
+        "sha256": "bb937fcf13b7b85a68e5599a270e04e766e60732241c9e932480dd4a1d2ed813"
+      }
+    },
+    "limits": "Single-thread-per-process fork/exec/wait and systemd --version; no PID 1, service-manager, complete filesystem isolation, or physical-driver qualification",
+    "kernel_sha256": "2cce152d9d90e7a75df8bffd8c1b804f929c67b3e3dad7390808a0eaa7f05513",
+    "compiled_source_sha256": {
+      "bsd/kern/kern_exec.c": "3c2fe75959536e44b66628214e3f86ab3d7bd8b5f38e85532f2c17cf1863a616",
+      "bsd/kern/kern_fork.c": "124ce50e2237f08bacfa658331c1c9222d14b4ad23b5b6b78d39defff679cd18",
+      "bsd/sys/proc_internal.h": "390652f03c6f1fea018b4a0231f00b8b5bda39b62ee285479bfd2f9a21f62725",
+      "bsd/kern/rdxnu_elf_plan.h": "6179ed2ec315f8e215ea79285a2de56060dc43091588577691f1894ff4f00428",
+      "bsd/kern/rdxnu_linux_exec.h": "5fb20e99e249676ab57043d9672a72160db67eace9aeeab1cc70b9c056594853",
+      "osfmk/console/video_console.c": "97a88233315edb1c82be9ffc4c63458c4b5751a8b593b58f5a0c16985059d1c1",
+      "bsd/kern/kern_mman.c": "4482bcef867679b030d0c521c54e6c99ef75ad32f7e8148b520b8f6e1baada04",
+      "bsd/kern/kern_descrip.c": "7068d79b3a99261da02c82877cc49c66d9f33e2417babf70ec530b52d44f0ad0",
+      "bsd/vfs/vfs_syscalls.c": "2e44425fcf4687b55595d49d1b9ddde81944c245dc2f82ad63e0703886276ec1",
+      "bsd/kern/rdxnu_linux_stat.h": "e652b1151cfacbacf2e9d3f5d62f4000eaa165ae75997872e2f3287740793e67",
+      "bsd/vfs/rdxnu_linux_stat.h": "e652b1151cfacbacf2e9d3f5d62f4000eaa165ae75997872e2f3287740793e67",
+      "bsd/kern/kern_exit.c": "f4f9510104fcab9059e89eaaca0f41b4273cab86fae2d68ad993286fbcbd6cde",
+      "bsd/sys/resourcevar.h": "1c8390e42ecc05834d73fb2b4436af13b9aff86c7e5e0c2a0af1c61f85334fda",
+      "bsd/sys/user.h": "5c1c4f0f14fe2ad55cf073fe68e137451f4326a21426c7c28d3a63b4e445d4ec",
+      "osfmk/arm64/genassym.c": "a58d32b559b81b7d7a4421bf29d2465aca0ec125ffcb09736a5c87c8bd1f83cc",
+      "osfmk/conf/files.arm64": "1d0c6a5aa6c3b3d825605123b8d7282710724f21c31e0a3c87c234698dbb95ba",
+      "makedefs/MakeInc.def": "fb2036284f689edb88006d5e293aa955b97d164e597f772d2ade4f5b5e2e9fae",
+      "osfmk/arm64/rdxnu_linux_entry.s": "8a0a820bb2466ad174da83bb528354803565f7677b0f15e18ad905e692ae17de",
+      "bsd/kern/rdxnu_linux_machine.inc": "4cbcb5bea86b20c4bcd738d3e8574680c92202c575e96fe4639ec94967957722",
+      "bsd/kern/rdxnu_linux_state.h": "7a6fcf14f9fd6b893a8cfc3074f0e80dfd1781b52f4ad12d849da70536f18815",
+      "bsd/kern/rdxnu_linux_statx.h": "8f15282d8c3881bd127f9c658146225e9b614fc48d3287b04d5f24f395df1fd7",
+      "bsd/vfs/rdxnu_linux_statx.h": "8f15282d8c3881bd127f9c658146225e9b614fc48d3287b04d5f24f395df1fd7",
+      "bsd/kern/rdxnu_interp_image.h": "7f2e1e71bf0758655a5884799852d1b444bfef687626fdbe0e57c967f64363f1",
+      "bsd/sys/file_internal.h": "ec235045612a75e9c7de7e6ac85e9c4436b298cb821e5ff896ed25577f6f7a78",
+      "bsd/sys/event_private.h": "1b9283a3c113704f42d417b22b73cc787f4adb22600a8dca6e1e408fb4ada2c6",
+      "bsd/kern/kern_event.c": "fcef0bb4003c151acc9c524530cedb93e990087c934b520f6e1792541ef9cffb",
+      "bsd/kern/sys_generic.c": "0b5bd5ab9facf375adfe9c0f2e0f513a712276ac67b55743c8a9d5be3b504ff9",
+      "bsd/kern/kern_proc.c": "c255309cd35653e370934d1740e9b7cca25a30dcc6a4cad5fca3cae15424309b",
+      "bsd/kern/kern_sig.c": "e7ed5f401a9648f0c7a786afcab73479b191f554bef8bb519283b8d543311281",
+      "bsd/kern/kern_resource.c": "ba41e02d8b509c2c33f18997c7bf589828f6e10a9e8e01b116b34ad00dcf8b88"
+    },
+    "source_restored": true,
+    "startup_assembly_offsets": {
+      "control_definitions": 336,
+      "existing_definitions_unchanged": true,
+      "native_thread_size": "1696"
+    },
+    "compiled_overlay_matches_current_sources": true
+  },
+  "launch_runtime_output": "NATIVE_LAUNCH_CONTROL_PASS\nLINUX_LAUNCH_RESULT status=0 native_parent=802 releases=2 output=LINUX_LAUNCH_DESCRIPTORS_PASS\nLINUX_LAUNCH_LIMITS_PASS\nLAUNCH_GROUP_CHILD_READY\nLAUNCH_GROUP_WAIT\nLINUX_LAUNCH_WAIT_PASS\nLAUNCH_EXEC_CHILD_READY\nLAUNCH_EXEC_WAIT\nARCH_LAUNCH_CHILD_PASS\nLINUX_LAUNCH_PASS\nXNU_LAUNCH_PERSONALITY_PASS: native pipes, descriptor remap, sessions/groups, limits, wait4/rusage and direct Arch child exec; native parent intact\n",
+  "source_revision": "ac9718fb1af618d5ce8678d0dc6e8a58f252216f",
+  "limits": [
+    "Pipe2/dup3 flag publication requires one native thread; atomic multithread publication remains work.",
+    "F_SETFL is bounded to append/nonblock; unknown modes return unsupported.",
+    "Resource mutation covers CORE/NOFILE in the current process; other-process mutation and comprehensive resource compatibility remain unsupported.",
+    "Wait4 covers exited children, WNOHANG and tested Linux status/rusage output. Stopped/continued events and complete output-fault/reap races remain unqualified.",
+    "Native PID/session/group identities remain. No Linux init identity, namespace, orphan adoption, proc/cgroup filesystem, manager/PID 1, full shell, physical driver or performance pass."
+  ]
+}

@@ -52,3 +52,12 @@ callbacks complete with zero exit and empty stderr. See
 loop; the separate manager diagnostic still exits one at the unbooted-context
 guard. The next boundary is the coherent Linux init/runtime context and required
 proc/cgroup/rootfs views, with complete thread/signal/futex semantics still work.
+
+The [service-launch batch](../launch/README.md) now adds qualified native pipe
+and descriptor setup, sessions/groups, bounded resource enforcement and wait4
+accounting. An unchanged Arch executable runs through PT_INTERP after that
+setup; a native supervisor forces both waits and checks zero exit. Earlier
+event-loop and process controls pass on the same boot. The separate manager
+diagnostic still reports the unbooted-context guard. See
+[launch evidence](../launch/evidence.json); init/adoption and runtime filesystem
+views remain separate requirements.

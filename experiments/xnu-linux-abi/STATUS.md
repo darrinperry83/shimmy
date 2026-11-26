@@ -1,4 +1,19 @@
-# Status — current checkpoint 26 November 2026
+# Status — current checkpoint 27 November 2026
+
+The native service-launch batch now passes on custom XNU kernel
+`1E73AC27-14B3-3EDD-9F8B-4B31342E0A85`: pipe2/dup/dup3 and bounded fcntl,
+sessions/process groups, umask, native resource-limit updates/enforcement, and
+wait4 with Linux exit/signal status and rusage. The same Linux fixture passes
+descriptor alias/CLOEXEC behavior, real file mode creation, child-only NOFILE
+limits, blocked child waiting and direct exec of original Arch printf after
+session creation and output remapping. Its native supervisor forces two peer
+releases and preserves the native wait/rusage control. All earlier controls,
+original libsystemd's event loop and clean systemd --version pass on that boot
+with WindowServer absent. See [launch/README.md](launch/README.md) and
+[launch/evidence.json](launch/evidence.json). This supplies service launch
+infrastructure; systemd's separate manager attempt still exits one at its
+unbooted-context guard. Linux init/adoption and proc/cgroup/rootfs views remain
+work, as do full threading, caught signals and interactive shell/input.
 
 The native event-loop batch now passes on custom XNU kernel
 `CF899E7A-3A07-3D2B-A660-0C052D0F00D4`: bounded epoll with one-shot rearming,

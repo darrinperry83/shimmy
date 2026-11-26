@@ -117,3 +117,12 @@ requirement; the native sleep/wake implementation resolves it. Earlier gates
 also pass. Exact package hashes, runtime results and unsupported modes are in
 [reactor/evidence.json](../reactor/evidence.json). The manager diagnostic remains
 at the unbooted-context guard; no PID 1 or service-manager success is claimed.
+
+The next [service-launch checkpoint](../launch/README.md) now passes on XNU
+1E73AC27-14B3-3EDD-9F8B-4B31342E0A85. It adds native pipe/dup remapping,
+session/group setup, umask, bounded resource-limit mutation and real enforcement,
+and wait4 status/rusage. A Linux parent sets up and directly executes unchanged
+Arch printf in its native chroot, then verifies exact redirected output and
+reaping after a forced peer release. All earlier gates pass. These controls
+are prerequisites for service executors; the manager/init-context boundary is
+unchanged. See [launch/evidence.json](../launch/evidence.json).
