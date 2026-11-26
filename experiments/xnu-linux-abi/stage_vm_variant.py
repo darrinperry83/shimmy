@@ -15,7 +15,7 @@ OUT = ABI / 'out/vmapple'
 BASELINE = 'baseline-no-lto-no-bti-svc-probe-elf-arch-loader-linux-console-terminal'
 
 
-def stage(name, candidate, core=False, memory=False, filemap=False, files=False, startup=False, paths=False, process=False, interp=False, events=False):
+def stage(name, candidate, core=False, memory=False, filemap=False, files=False, startup=False, paths=False, process=False, interp=False, events=False, reactor=False):
     report = json.loads((candidate / 'collection-result.json').read_text())
     build = json.loads((candidate / 'build-result.json').read_text())
     data = Path(report['collection']).read_bytes()
@@ -39,6 +39,8 @@ def stage(name, candidate, core=False, memory=False, filemap=False, files=False,
         raise ValueError('unexpected Linux interpreter build profile')
     if report.get('linux_events_experiment',False) != events:
         raise ValueError('unexpected Linux event build profile')
+    if report.get('linux_reactor_experiment',False) != reactor:
+        raise ValueError('unexpected Linux reactor build profile')
     if not report['exact_control_driver_uuids'] or not report['bti_enforcement_disabled'] or report['configuration'] != 'DEVELOPMENT':
         raise ValueError('expected diagnostic VM driver-preserving candidate')
     if startup:
@@ -60,6 +62,10 @@ def stage(name, candidate, core=False, memory=False, filemap=False, files=False,
         if events:
             for filename in ('events-probe','events-run'):
                 material+=(ABI/'out/events'/filename).read_bytes()
+        if reactor:
+            material+=(ABI/'out/reactor/verification.json').read_bytes()
+            for filename in ('reactor-probe','reactor-run','sd-event-run'):
+                material+=(ABI/'out/reactor'/filename).read_bytes()
         token=hashlib.sha256(material).hexdigest()[:8]
         name+=f'-{report["kernel_uuid"][:8].lower()}-{token}'
     results = OUT / 'results'
@@ -234,6 +240,29 @@ cat "$systemderr"
             extra_files+=f'[ "$("$directory/sha256" "$share/{staged_name}")" = {digest} ] || exit 1\n'
             extra_files+=f'cp "$share/{staged_name}" "$data/Library/RDXNU-P0/{filename}"\nchmod 755 "$data/Library/RDXNU-P0/{filename}"\nchown root:wheel "$data/Library/RDXNU-P0/{filename}"\n'
         boot=boot.replace('"$base/process-run" "$base/process-probe"','"$base/process-run" "$base/process-probe"\n"$base/events-run" "$base/events-probe"')
+    if reactor:
+        verification=json.loads((ABI/'out/reactor/verification.json').read_text())
+        if 'XNU_REACTOR_PERSONALITY_PASS' not in verification.get('linux_reference','') or 'ARCH_SD_EVENT_LOOP_PASS' not in verification.get('sd_event_reference',''):
+            raise ValueError('Linux reactor and original libsystemd references must pass')
+        if hashlib.sha256((ABI/'out/reactor/reactor-probe').read_bytes()).hexdigest()!=verification['linux_elf_sha256']:
+            raise ValueError('Linux reactor fixture changed')
+        for filename in ('reactor-probe','reactor-run','sd-event-run'):
+            artifact=ABI/'out/reactor'/filename;digest=hashlib.sha256(artifact.read_bytes()).hexdigest()
+            staged_name=f'{name}-{filename}';shutil.copy2(artifact,results/staged_name)
+            extra_files+=f'[ "$("$directory/sha256" "$share/{staged_name}")" = {digest} ] || exit 1\n'
+            extra_files+=f'cp "$share/{staged_name}" "$data/Library/RDXNU-P0/{filename}"\nchmod 755 "$data/Library/RDXNU-P0/{filename}"\nchown root:wheel "$data/Library/RDXNU-P0/{filename}"\n'
+        root='$data/Library/RDXNU-P0/reactor-root'
+        for relative,digest in verification['files'].items():
+            artifact=ABI/'out/reactor/rootfs'/relative
+            if hashlib.sha256(artifact.read_bytes()).hexdigest()!=digest:raise ValueError(f'reactor root changed: {relative}')
+            staged_name=f'{name}-root/{relative}';staged=results/staged_name
+            staged.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(artifact,staged)
+            extra_files+=f'[ "$("$directory/sha256" "$share/{staged_name}")" = {digest} ] || exit 1\n'
+            extra_files+=f'mkdir -p "{root}/{Path(relative).parent}"\ncp "$share/{staged_name}" "{root}/{relative}"\nchmod 755 "{root}/{relative}"\nchown root:wheel "{root}/{relative}"\n'
+        extra_files+=f'ln -sfn usr/lib "{root}/lib"\n'
+        boot=boot.replace('"$base/events-run" "$base/events-probe"','"$base/events-run" "$base/events-probe"\n"$base/reactor-run" "$base/reactor-probe"\nif "$base/sd-event-run" "$base/reactor-root" > /var/tmp/rdxnu-sd-event.log 2> /var/tmp/rdxnu-sd-event-stderr.log; then\n    echo XNU_SD_EVENT_NATIVE_PARENT_RESULT=0\nelse\n    echo XNU_SD_EVENT_NATIVE_PARENT_RESULT=$?\nfi\ncat /var/tmp/rdxnu-sd-event.log\ncat /var/tmp/rdxnu-sd-event-stderr.log\nexport_logs')
+        boot=boot.replace('    if [ -d "$shared" ]; then',
+            '    if [ -d "$shared" ]; then\n        for suffix in "" -stderr; do\n            if [ -f "/var/tmp/rdxnu-sd-event${suffix}.log" ]; then cp "/var/tmp/rdxnu-sd-event${suffix}.log" "$shared/'+name+'-sd-event${suffix}.log"; fi\n        done')
     if startup:
         # A leftover directory is not proof the host share is mounted.
         old_mount='''    shared='/Volumes/My Shared Files/results'
@@ -267,6 +296,7 @@ cat "$systemderr"
         if paths:gates+=('"$base/paths-run" "$base/paths-probe"',)
         if process:gates+=('"$base/process-run" "$base/process-probe"',)
         if events:gates+=('"$base/events-run" "$base/events-probe"',)
+        if reactor:gates+=('"$base/reactor-run" "$base/reactor-probe"',)
         for gate in gates:
             if boot.count(gate)!=1:raise ValueError(f'missing/duplicate startup log gate: {gate}')
             boot=boot.replace(gate,gate+'\nexport_logs')
@@ -345,6 +375,8 @@ def main(kind='core'):
         candidate = stage('filemap', OUT / (BASELINE + '-memory-filemap'), memory=True, filemap=True)
     elif kind == 'files':
         candidate = stage('files', OUT / (BASELINE + '-memory-filemap-files'), memory=True, filemap=True, files=True)
+    elif kind == 'reactor':
+        candidate = stage('reactor', OUT / (BASELINE + '-memory-filemap-files-startup-kdk-bridge-paths-process-interp-events-reactor'), memory=True, filemap=True, files=True, startup=True, paths=True, process=True, interp=True, events=True, reactor=True)
     elif kind == 'events':
         candidate = stage('events', OUT / (BASELINE + '-memory-filemap-files-startup-kdk-bridge-paths-process-interp-events'), memory=True, filemap=True, files=True, startup=True, paths=True, process=True, interp=True, events=True)
     elif kind == 'interp':
@@ -366,5 +398,5 @@ def main(kind='core'):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('kind',choices=('core','memory','filemap','files','paths','process','interp','events','startup','startup-stock','startup-source-control','startup-kdk-bridge'))
+    parser.add_argument('kind',choices=('core','memory','filemap','files','paths','process','interp','events','reactor','startup','startup-stock','startup-source-control','startup-kdk-bridge'))
     main(parser.parse_args().kind)

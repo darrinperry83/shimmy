@@ -43,3 +43,12 @@ The first native event-loop primitive is now qualified separately in
 [events/README.md](../events/README.md): eventfd2 plus bounded ppoll, with
 real kqueue readiness and native descriptor lifetime. This is not an epoll
 implementation and does not change the manager's unbooted-context result.
+
+The subsequent [native batch](../reactor/README.md) now passes bounded epoll,
+timerfd, signalfd and private futex controls on XNU, followed by a callback
+application using unchanged Arch libsystemd. Its one-shot IO, signal and timer
+callbacks complete with zero exit and empty stderr. See
+[batch evidence](../reactor/evidence.json). This qualifies the library event
+loop; the separate manager diagnostic still exits one at the unbooted-context
+guard. The next boundary is the coherent Linux init/runtime context and required
+proc/cgroup/rootfs views, with complete thread/signal/futex semantics still work.

@@ -106,3 +106,14 @@ blocking readiness, empty-counter read and saturated-counter write wakeups,
 and checks dup/fork/exec counter lifetime. Earlier gates also pass on that
 boot. Epoll, timerfd, signalfd and coherent init/runtime views remain work;
 this does not advance the manager/service acceptance gate.
+
+The [native event-loop batch](../reactor/README.md) now passes on XNU kernel
+CF899E7A-3A07-3D2B-A660-0C052D0F00D4: bounded epoll with one-shot rearm,
+timerfd, signalfd, and private futex mismatch/timeout/empty-wake controls.
+An application linked to the original Arch libsystemd completes the IO,
+signal and timer callbacks inside the native chroot, exiting zero with empty
+stderr. The first candidate exposed libc's FUTEX_WAKE_PRIVATE initialization
+requirement; the native sleep/wake implementation resolves it. Earlier gates
+also pass. Exact package hashes, runtime results and unsupported modes are in
+[reactor/evidence.json](../reactor/evidence.json). The manager diagnostic remains
+at the unbooted-context guard; no PID 1 or service-manager success is claimed.

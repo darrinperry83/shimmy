@@ -1,5 +1,20 @@
 # Status — current checkpoint 26 November 2026
 
+The native event-loop batch now passes on custom XNU kernel
+`CF899E7A-3A07-3D2B-A660-0C052D0F00D4`: bounded epoll with one-shot rearming,
+scheduled monotonic/boottime timerfd, blocked-pending signalfd and private futex
+wait/wake. The unchanged Linux fixture passes value/timeout/error checks,
+descriptor lifetime, service fork/exec and two forced peer wakeups. A callback
+application linked to the original Arch libsystemd also runs directly through
+PT_INTERP in the native chroot: IO one-shot, signal and timer callbacks all fire,
+exit is zero and stderr is empty. Earlier controls and clean systemd --version
+pass with WindowServer absent. See [reactor/README.md](reactor/README.md) and
+[reactor/evidence.json](reactor/evidence.json) for exact scope and limitations.
+This qualifies the library event loop; the manager attempt still exits one at
+its unbooted-context guard. Linux init/runtime context and proc/cgroup/rootfs
+views remain the next manager boundary. Threads and positive multi-waiter futex
+wake races remain unqualified; this is not a PID 1 or full shell pass.
+
 Selected direction: [XNU serves Arch's Linux ABI](LINUX-PERSONALITY.md), following
 the user's explicit decision that XNU should handle memory and other operations.
 The existing shim supplies substantial compatibility contracts to reuse. The

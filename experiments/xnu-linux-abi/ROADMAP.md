@@ -30,8 +30,13 @@ PT_INTERP and unchanged Arch printf/systemd execute by ordinary paths. See
 [interp/README.md](interp/README.md). This remains separate from a Linux
 init/runtime context or manager pass. Native eventfd
 counters and bounded ppoll readiness now pass as the first event-loop
-checkpoint; see [events/README.md](events/README.md). Epoll, timerfd and signal
-descriptors remain separate work before a manager event loop is qualified.
+checkpoint; see [events/README.md](events/README.md). The next
+[event-loop batch](reactor/README.md) now passes bounded native epoll, timerfd,
+signalfd and private futex controls, plus an application using original Arch
+libsystemd's one-shot IO, signal and timer callbacks. All earlier controls pass
+on that custom XNU boot. The next manager boundary is a coherent Linux
+init/runtime context and required proc/cgroup/rootfs views. Full thread/futex
+semantics remain separate work; the library loop is not a manager/PID 1 pass.
 
 
 Current plan, 26 November 2026. This is the implementation sequence; STATUS.md

@@ -1,0 +1,130 @@
+{
+  "state": "native_epoll_timerfd_signalfd_private_futex_and_arch_libsystemd_event_loop_live_xnu_pass",
+  "linux_reference": {
+    "linux_elf_sha256": "956cc3da9eee257c695fb0aeb7720603634781b354b2e6c45c86a5c80954e8f5",
+    "linux_image": "sha256:0151e70bd01e7e4c891e903edf1dacba81656f04c6150bfce78d5a570e4df443",
+    "linux_reference": "LINUX_REACTOR_RESULT status=0 native_parent=1 releases=2 output=LINUX_PRIVATE_FUTEX_PASS\nREACTOR_EPOLL_WAIT\nREACTOR_CHILD_READY\nLINUX_EPOLL_PASS\nLINUX_TIMERFD_PASS\nREACTOR_SIGNAL_WAIT\nREACTOR_SIGNAL_CHILD_READY\nLINUX_SIGNALFD_PASS\nLINUX_REACTOR_PASS\nXNU_REACTOR_PERSONALITY_PASS: native epoll, scheduled timers, pending-signal reads, service fork/exec and two forced peer wakeups; native parent intact\n",
+    "linux_kernel": "6.8.0-117-generic",
+    "sd_event_reference": "ARCH_SD_EVENT_LOOP_PASS: original libsystemd IO oneshot, signal and timer callbacks\n",
+    "files": {
+      "usr/bin/sd-event-probe": "4244c5d06fc90ea5debc253074ff0d67b43342b669db0aca0dec8c0d8b4e9e92",
+      "usr/lib/ld-linux-aarch64.so.1": "b1f2738bdb51e6419d7062f96c8a44bd68853698dc5ac624fa6ca9f9b03d456d",
+      "usr/lib/libc.so.6": "6ab264fb4e8df9942b0fb75b48fcd5c30b2f081d8dfaa6c25d7be1d3fce5b2ab",
+      "usr/lib/libgcc_s.so.1": "ac598673a4bf67c0295b6609e46b1fafd0d4adf3f80a513d61ac49ecff772e48",
+      "usr/lib/libsystemd.so.0": "9dc37013ca5954ae024708333299b500112d4b0beb6b31ee6e7cd0199e5dfeab"
+    }
+  },
+  "xnu_runtime": {
+    "kernel_uuid": "CF899E7A-3A07-3D2B-A660-0C052D0F00D4",
+    "collection_sha256": "e78951e120eefc4d628e664ab384465fa1e669cba6f4b7390e7fac77d0cc5222",
+    "staged_name": "reactor-cf899e7a-3c0a175c",
+    "reactor_runtime_pass": true,
+    "arch_sd_event_loop_runtime_pass": true,
+    "events_runtime_pass": true,
+    "interp_runtime_pass": true,
+    "startup_runtime_pass": true,
+    "paths_runtime_pass": true,
+    "process_runtime_pass": true,
+    "arch_child_exec_runtime_pass": true,
+    "systemd_version_runtime_pass": true,
+    "native_parent": 803,
+    "linux_child": 804,
+    "manager_native_parent_result": 1,
+    "manager_runtime_pass": false,
+    "systemd_version": "systemd 262 (262.2-1-arch)",
+    "stderr_present": false,
+    "stderr": "",
+    "proof_logs": {
+      "boot": {
+        "path": "out/reactor/runtime-proof/reactor-cf899e7a-3c0a175c-boot.log",
+        "sha256": "03d5d1194dcff5a54efb06d2226cff440fd6bce8803dc5f05d040e8270526938"
+      },
+      "stdout": {
+        "path": "out/reactor/runtime-proof/reactor-cf899e7a-3c0a175c-stdout.log",
+        "sha256": "b284223c38f578390f0879a509f515508280a03d6dddc6b0d5d2235440aaf909"
+      },
+      "stderr": {
+        "path": "out/reactor/runtime-proof/reactor-cf899e7a-3c0a175c-stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "interp": {
+        "path": "out/reactor/runtime-proof/reactor-cf899e7a-3c0a175c-interp.log",
+        "sha256": "b9201f90e6efc2f9bf3060a09819694cf861e5226c407548a026d535cc591c4c"
+      },
+      "interp-stderr": {
+        "path": "out/reactor/runtime-proof/reactor-cf899e7a-3c0a175c-interp-stderr.log",
+        "sha256": "ba338deec5d8b7843a7f561fbe026977fed2fbfbab933df6a0294bae318540d0"
+      },
+      "sd-event": {
+        "path": "out/reactor/runtime-proof/reactor-cf899e7a-3c0a175c-sd-event.log",
+        "sha256": "75aa7beeec9a6814cc0194f205f7588c101eb2e908b83b8995c20af60d7d2238"
+      },
+      "sd-event-stderr": {
+        "path": "out/reactor/runtime-proof/reactor-cf899e7a-3c0a175c-sd-event-stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "manager-attempt": {
+        "path": "out/reactor/runtime-proof/reactor-cf899e7a-3c0a175c-manager-attempt.log",
+        "sha256": "95bf4cdbafac09c93d58a7ffc6da755c9274d6ed98b09e16caf127a922767691"
+      }
+    },
+    "limits": "Single-thread-per-process fork/exec/wait and systemd --version; no PID 1, service-manager, complete filesystem isolation, or physical-driver qualification",
+    "kernel_sha256": "92a1b4ec7bd3ddf4d57b53314eca12cf36f6f222ab779fda4331f76342346b90",
+    "compiled_source_sha256": {
+      "bsd/kern/kern_exec.c": "3c2fe75959536e44b66628214e3f86ab3d7bd8b5f38e85532f2c17cf1863a616",
+      "bsd/kern/kern_fork.c": "124ce50e2237f08bacfa658331c1c9222d14b4ad23b5b6b78d39defff679cd18",
+      "bsd/sys/proc_internal.h": "390652f03c6f1fea018b4a0231f00b8b5bda39b62ee285479bfd2f9a21f62725",
+      "bsd/kern/rdxnu_elf_plan.h": "6179ed2ec315f8e215ea79285a2de56060dc43091588577691f1894ff4f00428",
+      "bsd/kern/rdxnu_linux_exec.h": "0de95099975831f9e358311c7e61b3574bdce3ab8d9dc9e0d30160e8b41301d8",
+      "osfmk/console/video_console.c": "97a88233315edb1c82be9ffc4c63458c4b5751a8b593b58f5a0c16985059d1c1",
+      "bsd/kern/kern_mman.c": "4482bcef867679b030d0c521c54e6c99ef75ad32f7e8148b520b8f6e1baada04",
+      "bsd/kern/kern_descrip.c": "6d25c7b5d26e23f287e84dace693a6ea11b42bb85169cd7e22270c3dd67bbc2e",
+      "bsd/vfs/vfs_syscalls.c": "2e44425fcf4687b55595d49d1b9ddde81944c245dc2f82ad63e0703886276ec1",
+      "bsd/kern/rdxnu_linux_stat.h": "e652b1151cfacbacf2e9d3f5d62f4000eaa165ae75997872e2f3287740793e67",
+      "bsd/vfs/rdxnu_linux_stat.h": "e652b1151cfacbacf2e9d3f5d62f4000eaa165ae75997872e2f3287740793e67",
+      "bsd/kern/kern_exit.c": "39f47d063749ee133b9ab2dd6e97834919d3ba5d23e320f47c21a004e8e7e155",
+      "bsd/sys/resourcevar.h": "1c8390e42ecc05834d73fb2b4436af13b9aff86c7e5e0c2a0af1c61f85334fda",
+      "bsd/sys/user.h": "5c1c4f0f14fe2ad55cf073fe68e137451f4326a21426c7c28d3a63b4e445d4ec",
+      "osfmk/arm64/genassym.c": "a58d32b559b81b7d7a4421bf29d2465aca0ec125ffcb09736a5c87c8bd1f83cc",
+      "osfmk/conf/files.arm64": "1d0c6a5aa6c3b3d825605123b8d7282710724f21c31e0a3c87c234698dbb95ba",
+      "makedefs/MakeInc.def": "fb2036284f689edb88006d5e293aa955b97d164e597f772d2ade4f5b5e2e9fae",
+      "osfmk/arm64/rdxnu_linux_entry.s": "8a0a820bb2466ad174da83bb528354803565f7677b0f15e18ad905e692ae17de",
+      "bsd/kern/rdxnu_linux_machine.inc": "4cbcb5bea86b20c4bcd738d3e8574680c92202c575e96fe4639ec94967957722",
+      "bsd/kern/rdxnu_linux_state.h": "7a6fcf14f9fd6b893a8cfc3074f0e80dfd1781b52f4ad12d849da70536f18815",
+      "bsd/kern/rdxnu_linux_statx.h": "8f15282d8c3881bd127f9c658146225e9b614fc48d3287b04d5f24f395df1fd7",
+      "bsd/vfs/rdxnu_linux_statx.h": "8f15282d8c3881bd127f9c658146225e9b614fc48d3287b04d5f24f395df1fd7",
+      "bsd/kern/rdxnu_interp_image.h": "7f2e1e71bf0758655a5884799852d1b444bfef687626fdbe0e57c967f64363f1",
+      "bsd/sys/file_internal.h": "ec235045612a75e9c7de7e6ac85e9c4436b298cb821e5ff896ed25577f6f7a78",
+      "bsd/sys/event_private.h": "1b9283a3c113704f42d417b22b73cc787f4adb22600a8dca6e1e408fb4ada2c6",
+      "bsd/kern/kern_event.c": "fcef0bb4003c151acc9c524530cedb93e990087c934b520f6e1792541ef9cffb",
+      "bsd/kern/sys_generic.c": "0b5bd5ab9facf375adfe9c0f2e0f513a712276ac67b55743c8a9d5be3b504ff9",
+      "bsd/kern/kern_proc.c": "c255309cd35653e370934d1740e9b7cca25a30dcc6a4cad5fca3cae15424309b",
+      "bsd/kern/kern_sig.c": "e7ed5f401a9648f0c7a786afcab73479b191f554bef8bb519283b8d543311281"
+    },
+    "source_restored": true,
+    "startup_assembly_offsets": {
+      "control_definitions": 336,
+      "existing_definitions_unchanged": true,
+      "native_thread_size": "1696"
+    },
+    "compiled_overlay_matches_current_sources": true
+  },
+  "raw_runtime_output": "XNU_REACTOR_CONSTRAINTS_PASS\nLINUX_REACTOR_RESULT status=0 native_parent=768 releases=2 output=LINUX_PRIVATE_FUTEX_PASS\nREACTOR_EPOLL_WAIT\nREACTOR_CHILD_READY\nLINUX_EPOLL_PASS\nLINUX_TIMERFD_PASS\nREACTOR_SIGNAL_WAIT\nREACTOR_SIGNAL_CHILD_READY\nLINUX_SIGNALFD_PASS\nLINUX_REACTOR_PASS\nXNU_REACTOR_PERSONALITY_PASS: native epoll, scheduled timers, pending-signal reads, service fork/exec and two forced peer wakeups; native parent intact\n",
+  "arch_sd_event_runtime_output": "ARCH_SD_EVENT_LOOP_PASS: original libsystemd IO oneshot, signal and timer callbacks\nSD_EVENT_NATIVE_RESULT status=0 parent=787\nARCH_SD_EVENT_NATIVE_PARENT_PASS\n",
+  "source_revision": "ac9718fb1af618d5ce8678d0dc6e8a58f252216f",
+  "previous_candidate": {
+    "kernel_uuid": "F4585CDB-ED43-33CE-91E4-9593BD1A1273",
+    "raw_epoll_timerfd_signalfd_pass": true,
+    "arch_sd_event_loop_pass": false,
+    "native_parent_result": 124,
+    "stderr": "The futex facility returned an unexpected error code.\n",
+    "diagnosis": "Original library initialization calls FUTEX_WAKE_PRIVATE; implementing native private wait/wake resolves the failure."
+  },
+  "limits": [
+    "Epoll has 32 interests/events, owner-only ctl/wait, level and one-shot readiness; edge, nesting, temporary pwait masks and complete shared/alias lifetime are unsupported.",
+    "Timerfd covers monotonic/boottime relative/absolute scheduling; realtime/alarm/cancel-on-set and physical suspend are unqualified.",
+    "Signalfd covers blocked mapped standard process signals and tested sender/child metadata; caught frames, realtime and complete multithread semantics remain work.",
+    "Private futex fixture covers mismatch, bad pointers/alignment, empty wake, timed wait and fork isolation. Positive multi-waiter wake races require later thread qualification; shared/PI/requeue/bitset/robust futexes are unsupported.",
+    "Original Arch libsystemd runs the callback application. No systemd PID 1, manager/service pass, complete rootfs/proc/cgroup view, interactive shell, physical driver or performance qualification."
+  ]
+}
