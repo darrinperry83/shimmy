@@ -15,7 +15,7 @@ OUT = ABI / 'out/vmapple'
 BASELINE = 'baseline-no-lto-no-bti-svc-probe-elf-arch-loader-linux-console-terminal'
 
 
-def stage(name, candidate, core=False, memory=False, filemap=False, files=False, startup=False, paths=False):
+def stage(name, candidate, core=False, memory=False, filemap=False, files=False, startup=False, paths=False, process=False):
     report = json.loads((candidate / 'collection-result.json').read_text())
     build = json.loads((candidate / 'build-result.json').read_text())
     data = Path(report['collection']).read_bytes()
@@ -33,6 +33,8 @@ def stage(name, candidate, core=False, memory=False, filemap=False, files=False,
         raise ValueError('unexpected Linux startup build profile')
     if report.get('linux_paths_experiment',False) != paths:
         raise ValueError('unexpected Linux paths build profile')
+    if report.get('linux_process_experiment',False) != process:
+        raise ValueError('unexpected Linux process build profile')
     if not report['exact_control_driver_uuids'] or not report['bti_enforcement_disabled'] or report['configuration'] != 'DEVELOPMENT':
         raise ValueError('expected diagnostic VM driver-preserving candidate')
     if startup:
@@ -44,6 +46,10 @@ def stage(name, candidate, core=False, memory=False, filemap=False, files=False,
         if paths:
             for filename in ('paths-probe','paths-run'):
                 material+=(ABI/'out/paths'/filename).read_bytes()
+        if process:
+            for filename in ('process-probe','process-run'):
+                material+=(ABI/'out/process'/filename).read_bytes()
+            material+=(ABI/'out/process/arch-printf').read_bytes()
         token=hashlib.sha256(material).hexdigest()[:8]
         name+=f'-{report["kernel_uuid"][:8].lower()}-{token}'
     results = OUT / 'results'
@@ -164,6 +170,28 @@ cat "$systemderr"
             extra_files+=f'cp "$share/{staged_name}" "$data/Library/RDXNU-P0/{filename}"\nchmod 755 "$data/Library/RDXNU-P0/{filename}"\nchown root:wheel "$data/Library/RDXNU-P0/{filename}"\n'
         boot=boot.replace('"$base/startup-run" "$base/startup-probe"',
             '"$base/startup-run" "$base/startup-probe"\n"$base/paths-run" "$base/paths-probe"')
+    if process:
+        verification=json.loads((ABI/'out/process/verification.json').read_text())
+        if 'XNU_PROCESS_PERSONALITY_PASS' not in verification.get('linux_reference',''):
+            raise ValueError('Linux process reference must pass before staging')
+        if hashlib.sha256((ABI/'out/process/process-probe').read_bytes()).hexdigest()!=verification['linux_elf_sha256']:
+            raise ValueError('Linux process fixture changed')
+        for filename in ('process-probe','process-run'):
+            artifact=ABI/'out/process'/filename
+            digest=hashlib.sha256(artifact.read_bytes()).hexdigest()
+            staged_name=f'{name}-{filename}'
+            shutil.copy2(artifact,results/staged_name)
+            extra_files+=f'[ "$("$directory/sha256" "$share/{staged_name}")" = {digest} ] || exit 1\n'
+            extra_files+=f'cp "$share/{staged_name}" "$data/Library/RDXNU-P0/{filename}"\nchmod 755 "$data/Library/RDXNU-P0/{filename}"\nchown root:wheel "$data/Library/RDXNU-P0/{filename}"\n'
+        artifact=ABI/'out/process/arch-printf'
+        digest=hashlib.sha256(artifact.read_bytes()).hexdigest()
+        if digest!=verification['arch_printf_sha256']:raise ValueError('Arch printf changed')
+        staged_name=f'{name}-arch-printf'
+        shutil.copy2(artifact,results/staged_name)
+        extra_files+=f'[ "$("$directory/sha256" "$share/{staged_name}")" = {digest} ] || exit 1\n'
+        extra_files+=f'cp "$share/{staged_name}" "$data/Library/RDXNU-P0/arch-printf"\nchmod 755 "$data/Library/RDXNU-P0/arch-printf"\nchown root:wheel "$data/Library/RDXNU-P0/arch-printf"\n'
+        boot=boot.replace('"$base/paths-run" "$base/paths-probe"',
+            '"$base/paths-run" "$base/paths-probe"\n"$base/process-run" "$base/process-probe"')
     if startup:
         # A leftover directory is not proof the host share is mounted.
         old_mount='''    shared='/Volumes/My Shared Files/results'
@@ -195,9 +223,23 @@ cat "$systemderr"
                '"$base/files-run" "$base/files-probe"',
                '"$base/startup-run" "$base/startup-probe"')
         if paths:gates+=('"$base/paths-run" "$base/paths-probe"',)
+        if process:gates+=('"$base/process-run" "$base/process-probe"',)
         for gate in gates:
             if boot.count(gate)!=1:raise ValueError(f'missing/duplicate startup log gate: {gate}')
             boot=boot.replace(gate,gate+'\nexport_logs')
+        if process:
+            boot=boot.replace('"$base/process-run" "$base/process-probe"','"$base/process-run" "$base/process-probe" "$base/systemd/usr/lib/ld-linux-aarch64.so.1" "$base/systemd/usr/lib" "$base/arch-printf"')
+    if process:
+        boot=boot.replace('trap export_logs EXIT\n','trap export_logs EXIT\n: > /var/tmp/rdxnu-systemd-manager-attempt.log\n')
+        boot=boot.replace('cat "$systemderr"',            'cat "$systemderr"\nmanagerlog=/var/tmp/rdxnu-systemd-manager-attempt.log\n'
+            'if "$base/run-arch" "$base/systemd/usr/lib/ld-linux-aarch64.so.1" --inhibit-cache --library-path "$base/systemd/usr/lib/systemd:$base/systemd/usr/lib" "$base/systemd/usr/lib/systemd/systemd" --user --log-target=console --log-level=debug > "$managerlog" 2>&1; then\n'
+            '    managerresult=0\nelse\n    managerresult=$?\nfi\n'
+            'echo XNU_MANAGER_ATTEMPT_NATIVE_PARENT_RESULT=$managerresult\nexport_logs')
+        boot=boot.replace('    if [ -d "$shared" ]; then',
+            '    if [ -d "$shared" ]; then\n        if [ -f /var/tmp/rdxnu-systemd-manager-attempt.log ]; then cp /var/tmp/rdxnu-systemd-manager-attempt.log "$shared/'+name+'-manager-attempt.log"; fi')
+    if process:
+        boot=boot.replace('"$base/display-output" /bin/cat "$systemdlog"',
+            'tail -n 18 "$log" > /var/tmp/rdxnu-process-console.log\n"$base/display-output" /bin/cat /var/tmp/rdxnu-process-console.log')
     boot = boot.replace('terminal.log', f'{name}.log').replace('terminal-boot.log', f'{name}-boot.log')
     boot = boot.replace('rdxnu-terminal-display.log', f'rdxnu-{name}-display.log')
     boot = boot.replace('"$shared/terminal-display.log"', f'"$shared/{name}-display.log"')
@@ -260,6 +302,8 @@ def main(kind='core'):
         candidate = stage('filemap', OUT / (BASELINE + '-memory-filemap'), memory=True, filemap=True)
     elif kind == 'files':
         candidate = stage('files', OUT / (BASELINE + '-memory-filemap-files'), memory=True, filemap=True, files=True)
+    elif kind == 'process':
+        candidate = stage('process', OUT / (BASELINE + '-memory-filemap-files-startup-kdk-bridge-paths-process'), memory=True, filemap=True, files=True, startup=True, paths=True, process=True)
     elif kind == 'paths':
         candidate = stage('paths', OUT / (BASELINE + '-memory-filemap-files-startup-kdk-bridge-paths'), memory=True, filemap=True, files=True, startup=True, paths=True)
     elif kind == 'startup':
@@ -275,5 +319,5 @@ def main(kind='core'):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('kind',choices=('core','memory','filemap','files','paths','startup','startup-stock','startup-source-control','startup-kdk-bridge'))
+    parser.add_argument('kind',choices=('core','memory','filemap','files','paths','process','startup','startup-stock','startup-source-control','startup-kdk-bridge'))
     main(parser.parse_args().kind)

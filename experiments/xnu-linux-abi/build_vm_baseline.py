@@ -34,10 +34,13 @@ def main():
     parser.add_argument('--with-linux-filemap', action='store_true', help='private file mapping and fixed replacement test')
     parser.add_argument('--with-linux-files', action='store_true', help='native descriptor/path and Linux stat ABI test')
     parser.add_argument('--with-linux-paths', action='store_true', help='native O_PATH descriptors and statx')
+    parser.add_argument('--with-linux-process', action='store_true', help='native Linux fork and waitid lifecycle')
     parser.add_argument('--with-linux-startup', action='store_true', help='heap, native TLS preservation and libc startup')
     parser.add_argument('--startup-entry-mode', choices=('kdk-bridge','stock'), default='kdk-bridge',
                         help='startup diagnostic: preserve KDK entry with TLS hooks or use stock calls')
     args = parser.parse_args()
+    if args.with_linux_process:
+        args.with_linux_paths = True
     if args.with_linux_paths:
         args.with_linux_startup = True
     if args.with_linux_startup:
@@ -91,6 +94,8 @@ def main():
             target = target.with_name(target.name + '-' + args.startup_entry_mode)
     if args.with_linux_paths:
         target = target.with_name(target.name + '-paths')
+    if args.with_linux_process:
+        target = target.with_name(target.name + '-process')
     target.mkdir(parents=True, exist_ok=True)
     with (OUT / 'kernel-build.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -125,6 +130,9 @@ def main():
             if args.with_linux_paths:
                 import paths_prepare
                 extra_edits = paths_prepare.overlay(XNU, extra_edits)
+            if args.with_linux_process:
+                import process_prepare
+                extra_edits = process_prepare.overlay(XNU, extra_edits)
             build_source = build_source.replace(b'if (p && rdxnu_linux_probe(state, p))',
                 b'if (p && (rdxnu_linux_dispatch(state, p) || rdxnu_linux_probe(state, p)))')
             build_source = build_source.replace(b'#include \"rdxnu_linux_probe.h\"',
@@ -169,6 +177,7 @@ def main():
         report['linux_files_experiment'] = args.with_linux_files
         report['linux_startup_experiment'] = args.with_linux_startup
         report['linux_paths_experiment'] = args.with_linux_paths
+        report['linux_process_experiment'] = args.with_linux_process
         report['startup_entry_mode'] = args.startup_entry_mode if args.with_linux_startup else None
         if args.with_linux_startup and args.startup_entry_mode != 'stock':
             report['startup_support_archive'] = support_report

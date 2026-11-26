@@ -62,8 +62,7 @@ including RX execution and fixed replacement; see `memory/filemap-evidence.json`
 Its file descriptors are inherited from a native controller. A separate
 [file-operation checkpoint](files/README.md) now passes on Linux and live XNU:
 Linux opens its own data file, obtains Linux-layout metadata through native
-XNU lookup, and preserves the mapping after closing the descriptor. Full
-dynamic loading remains unproven.
+XNU lookup, and preserves the mapping after closing the descriptor. Automatic PT_INTERP loading and Arch rootfs policy remain unproven.
 
 The immediate application target is now original Arch systemd, beginning with
 its loader/libc startup and then a minimal service-manager target. Heap growth,
@@ -72,3 +71,8 @@ are prerequisites shared with the shell. See [systemd/README.md](systemd/README.
 for measurable gates and the shim implementation/test reuse map. Each stage
 must preserve the current ELF, loader, PTY and Darwin-parent controls. Follow
 [UPDATE-POLICY.md](UPDATE-POLICY.md) for independent XNU/personality/Arch updates.
+
+The [process checkpoint](process/README.md) now proves native XNU fork/COW,
+Linux exec through the existing ELF/Arch-loader route, and real wait/reap and
+signal status. It retains native PID/parent identities. Linux init/PID/rootfs
+views and manager event interfaces remain separate gates, not a getpid override.

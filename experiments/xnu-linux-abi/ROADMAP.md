@@ -19,7 +19,12 @@ see [startup/README.md](startup/README.md). Native path descriptors, statx and
 mount identity now pass as well; systemd --version has empty stderr. See
 [paths/README.md](paths/README.md). The next systemd gate is manager
 startup and real child-service lifecycle, with required paths/events/process
-contracts implemented from recorded failures.
+contracts implemented from recorded failures. Native fork/exec/wait now passes,
+including an unchanged Arch child and a native Darwin wait control; see
+[process/README.md](process/README.md). A real Linux manager success/failure
+reference is recorded in [manager/README.md](manager/README.md). The current
+XNU manager attempt stops at the unbooted-context guard, so its init/runtime
+context must be established before claiming a service-manager pass.
 
 
 Current plan, 26 November 2026. This is the implementation sequence; STATUS.md

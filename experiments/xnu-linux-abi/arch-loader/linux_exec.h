@@ -183,7 +183,7 @@ bool rdxnu_linux_dispatch(arm_saved_state_t *state, struct proc *p)
         value = error ? -rd_linux_errno(error) : amount;
     } else if (nr == 93 || nr == 94) {
         struct exit_args args = {};
-        args.rval = (int)get_saved_state_reg(state, 0);
+        args.rval = (int)get_saved_state_reg(state, 0) & 0xff; /* Linux exit status is eight bits. */
         int unused = 0;
         exit(p, &args, &unused);
     }

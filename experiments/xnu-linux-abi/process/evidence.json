@@ -1,0 +1,137 @@
+{
+  "schema": 1,
+  "scope": "VMAPPLE single-thread-per-process lifecycle; not a systemd manager or PID 1 pass",
+  "kernel_sha256": "410e728dc9bbf9fa7167784d248e6cc6deba0cd967659251ebff32a2326beae7",
+  "linux_reference": {
+    "linux_elf_sha256": "f9856d8f2dc495c3cf945908a98edb82d4bd4930977aea4d959bd5f20658f034",
+    "xnu_runtime_proven": false,
+    "arch_printf_sha256": "61d8c99214afa144e0c0b922798adadbf00ef08d7635c3ca1fb62ade854be51f",
+    "linux_image": "sha256:0151e70bd01e7e4c891e903edf1dacba81656f04c6150bfce78d5a570e4df443",
+    "linux_reference": "NATIVE_WAITID_CONTROL_PASS\nLINUX_PROCESS_RESULT status=0 native_parent=1 output=PARENT_WAIT\nCHILD_READY\nARCH_CHILD_EXEC_PASS\nLINUX_PROCESS_PASS\nXNU_PROCESS_PERSONALITY_PASS: native fork/COW, heap/TLS, blocking waitid, WNOHANG/WNOWAIT, exact reap/signal status and unchanged Arch child exec; native parent intact\n"
+  },
+  "runtime": {
+    "kernel_uuid": "65B0EF6B-910A-3305-A3A2-2AD23BDAC70A",
+    "collection_sha256": "b3792249caf07ef8176d04cae4e8204232f9c8b06560dd4fd5258bccad3c9775",
+    "staged_name": "process-65b0ef6b-5adbccb6",
+    "startup_runtime_pass": true,
+    "paths_runtime_pass": true,
+    "process_runtime_pass": true,
+    "arch_child_exec_runtime_pass": true,
+    "systemd_version_runtime_pass": true,
+    "native_parent": 708,
+    "linux_child": 709,
+    "manager_native_parent_result": 1,
+    "manager_runtime_pass": false,
+    "systemd_version": "systemd 262 (262.2-1-arch)",
+    "stderr_present": false,
+    "stderr": "",
+    "proof_logs": {
+      "boot": {
+        "path": "out/process/runtime-proof/process-65b0ef6b-5adbccb6-boot.log",
+        "sha256": "08f87f51e60db78a51079c285335584135ce4f3deebb99517dffd05886b2e54f"
+      },
+      "stdout": {
+        "path": "out/process/runtime-proof/process-65b0ef6b-5adbccb6-stdout.log",
+        "sha256": "51221987c1ae290a82d9d0c13c34b4d0105fdbeb82d2324e1217a0c07148eaf0"
+      },
+      "stderr": {
+        "path": "out/process/runtime-proof/process-65b0ef6b-5adbccb6-stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "manager-attempt": {
+        "path": "out/process/runtime-proof/process-65b0ef6b-5adbccb6-manager-attempt.log",
+        "sha256": "30e780b9f8820da64d9059e9b8b73fbab521d50ff61942fbdb11560abfad99e4"
+      }
+    },
+    "limits": "Single-thread-per-process fork/exec/wait and systemd --version; no PID 1, service-manager, rootfs isolation, or physical-driver qualification"
+  },
+  "source_restored": true,
+  "native_assembly": {
+    "control_definitions": 336,
+    "existing_definitions_unchanged": true,
+    "native_thread_size": "1696"
+  },
+  "exact_control_driver_uuids": true,
+  "driver_entry_count": 218,
+  "visible_console_verified": true,
+  "linux_exit_low_eight_bits_proven": true,
+  "darwin_wide_exit_control_pass": true,
+  "fork_only_predecessor": {
+    "kernel_uuid": "7992801E-D140-3181-9F5F-E1310E589FE1",
+    "collection_sha256": "c70e9c14a12a5f918c8683b5dcf19a9804b6dea8e748018b5d8cf712bb9dfd1d",
+    "staged_name": "process-7992801e-05467dc5",
+    "startup_runtime_pass": true,
+    "paths_runtime_pass": true,
+    "process_runtime_pass": true,
+    "systemd_version_runtime_pass": true,
+    "native_parent": 704,
+    "linux_child": 705,
+    "systemd_version": "systemd 262 (262.2-1-arch)",
+    "stderr_present": false,
+    "stderr": "",
+    "proof_logs": {
+      "boot": {
+        "path": "out/process/runtime-proof/process-7992801e-05467dc5-boot.log",
+        "sha256": "61a319996772ab0a381aa6442a6d2152321eebaa63eaabd70fa54f553890d5e6"
+      },
+      "stdout": {
+        "path": "out/process/runtime-proof/process-7992801e-05467dc5-stdout.log",
+        "sha256": "5edbe1a9f9851c7379b9d1e526f8419dae79ce53231bf366f6cb96fa979d9714"
+      },
+      "stderr": {
+        "path": "out/process/runtime-proof/process-7992801e-05467dc5-stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "limits": "Single-thread startup and systemd --version only; no PID 1, service-manager, rootfs isolation, or physical-driver qualification"
+  },
+  "first_exec_predecessor": {
+    "kernel_uuid": "A8F25A0E-0C8C-3C6C-B51C-2A6F7E9F3246",
+    "collection_sha256": "11185c41d17aa7ee9031e332ba17d61f5b7773c630aedf4ad56fa4e8eee83500",
+    "staged_name": "process-a8f25a0e-960f1599",
+    "startup_runtime_pass": true,
+    "paths_runtime_pass": true,
+    "process_runtime_pass": true,
+    "arch_child_exec_runtime_pass": true,
+    "systemd_version_runtime_pass": true,
+    "native_parent": 707,
+    "linux_child": 708,
+    "manager_native_parent_result": 1,
+    "manager_runtime_pass": false,
+    "systemd_version": "systemd 262 (262.2-1-arch)",
+    "stderr_present": false,
+    "stderr": "",
+    "proof_logs": {
+      "boot": {
+        "path": "out/process/runtime-proof/process-a8f25a0e-960f1599-boot.log",
+        "sha256": "58a7957883561e6d628042fb787d3ebe4fb9457647a294588510e3a292b37792"
+      },
+      "stdout": {
+        "path": "out/process/runtime-proof/process-a8f25a0e-960f1599-stdout.log",
+        "sha256": "91c21ac918c0b564e3251f0059481fe3aa351518d5b8b3dd6e630a884bce2f71"
+      },
+      "stderr": {
+        "path": "out/process/runtime-proof/process-a8f25a0e-960f1599-stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "manager-attempt": {
+        "path": "out/process/runtime-proof/process-a8f25a0e-960f1599-manager-attempt.log",
+        "sha256": "6a895ae8dfb43a8b0453c4bb9d65b87ee7faf8825a1dcce4ea7d1731cfbd10af"
+      }
+    },
+    "limits": "Single-thread-per-process fork/exec/wait and systemd --version; no PID 1, service-manager, rootfs isolation, or physical-driver qualification"
+  },
+  "manager_context_guard_matches_linux": true,
+  "limits": [
+    "Clone accepts only SIGCHLD with null optional arguments; no threads/shared VM/vfork/clone3/tid flags",
+    "Exec uses original Arch loader explicitly; automatic PT_INTERP/rootfs resolution unqualified",
+    "Waitid exit events only, P_PID/P_ALL, no rusage/pidfd/group/stop/continue waits",
+    "Native PID and filesystem views; no Linux init/PID/rootfs namespace",
+    "Caught Linux signals, manager event interfaces, physical drivers and hardware input unqualified"
+  ],
+  "staged_fixtures": {
+    "process-probe": "f9856d8f2dc495c3cf945908a98edb82d4bd4930977aea4d959bd5f20658f034",
+    "process-run": "1071a3f2961ed76a3ea21ed2c98d13df4a7a07e2b046e39a5b69bef52bfd6f60",
+    "arch-printf": "61d8c99214afa144e0c0b922798adadbf00ef08d7635c3ca1fb62ade854be51f"
+  }
+}

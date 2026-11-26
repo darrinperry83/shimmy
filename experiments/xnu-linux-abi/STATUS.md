@@ -52,6 +52,20 @@ isolation and interactive hardware input remain work. See
 [systemd/README.md](systemd/README.md) and keep XNU, personality and Arch updates
 independently versioned under [UPDATE-POLICY.md](UPDATE-POLICY.md).
 
+The native process checkpoint now passes on kernel
+`65B0EF6B-910A-3305-A3A2-2AD23BDAC70A`: Linux fork/COW, independent heap/TLS,
+real signal termination, blocking/nonblocking waitid, WNOWAIT and exact reap,
+plus Linux exec of the unchanged Arch loader/printf. Linux exit status is
+correctly truncated to eight bits; a native Darwin wide-exit/wait control passes.
+All prior checks and clean systemd --version pass on the same boot. See
+[process/README.md](process/README.md) and [process/evidence.json](process/evidence.json).
+
+The [manager reference](manager/README.md) runs real Arch systemd as Linux
+container PID 1 and verifies both successful and failed children. The XNU
+manager attempt stops at systemd's unbooted-context guard, exactly as its Linux
+control does. A coherent Linux init/runtime context and manager event interfaces
+remain work; no XNU manager or PID 1 pass is claimed.
+
 The earlier [Linux source-port investigation](../linux-on-xnu/README.md) is
 preserved as an optional subsystem experiment rather than the shell dependency.
 Source candidates and update inputs are pinned and audited; the intake tool passes

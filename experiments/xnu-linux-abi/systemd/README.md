@@ -68,6 +68,13 @@ Heap, bounded signal operations, native TLS/x18 preservation and native clock
 backends now exist; caught signal frames, thread creation, futexes, event
 interfaces and service lifecycle remain incomplete.
 
+The [process checkpoint](../process/README.md) now proves native fork/COW,
+exec of original Arch printf through the original loader, and Linux wait/reap
+semantics on XNU, with a native Darwin wait control. The
+[minimal manager reference](../manager/README.md) passes successful and failed
+services on Linux. XNU's direct manager-start attempt exits at the normal
+unbooted-context guard; gate 2 remains unproven on XNU.
+
 ## Reuse and port boundaries
 
 | Area | Existing implementation and regression sources | XNU port responsibility |

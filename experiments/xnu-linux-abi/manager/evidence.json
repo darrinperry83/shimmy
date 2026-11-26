@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "linux_reference": {
+    "linux_reference_pass": true,
+    "image": "sha256:0151e70bd01e7e4c891e903edf1dacba81656f04c6150bfce78d5a570e4df443",
+    "packages_and_hashes": "warning: database file for 'core' does not exist (use '-Sy' to download)\nwarning: database file for 'extra' does not exist (use '-Sy' to download)\nwarning: database file for 'alarm' does not exist (use '-Sy' to download)\nwarning: database file for 'aur' does not exist (use '-Sy' to download)\nsystemd 262.2-1\nglibc 2.43+r22+g8362e8ce10b2-2\n004fff95f0c063820367d1f2276f7034604735b4e177a5c38d3ddb02a44139c2  /usr/lib/systemd/systemd\n61d8c99214afa144e0c0b922798adadbf00ef08d7635c3ca1fb62ade854be51f  /usr/bin/printf\n04884f3bf5d5f8c44030778169138863213b443f9e452778af726d8db3ed0f69  /usr/bin/false\n",
+    "controls": {
+      "success": {
+        "manager_exit_status": 0,
+        "child_pid": 10,
+        "child_exit_status": 0,
+        "received_sigchld": true,
+        "child_output": "RDXNU_MANAGER_CHILD_PASS\n",
+        "manager_log_sha256": "a032b7ee477caec09f23e8850ea51464802559cd4ecda19469bc1019d3abfd10"
+      },
+      "failure": {
+        "manager_exit_status": 23,
+        "child_pid": 9,
+        "child_exit_status": 1,
+        "received_sigchld": true,
+        "child_output": "",
+        "manager_log_sha256": "7dabcdb053572fcdf56ba50166033f5a4590c675d5a054583f7a7d68614746c2"
+      }
+    },
+    "unbooted_user_control": {
+      "exit_status": 1,
+      "message": "Trying to run as user instance, but the system has not been booted with systemd.\n"
+    },
+    "xnu_manager_runtime_pass": false,
+    "scope": "Linux PID 1 container reference; no XNU manager or init-namespace claim"
+  },
+  "xnu_kernel_uuid": "65B0EF6B-910A-3305-A3A2-2AD23BDAC70A",
+  "xnu_manager_runtime_pass": false,
+  "xnu_attempt_exit_status": 1,
+  "xnu_attempt_message": "Trying to run as user instance, but the system has not been booted with systemd.\n",
+  "context_guard_matches_linux": true,
+  "proof_log": {
+    "path": "out/process/runtime-proof/process-65b0ef6b-5adbccb6-manager-attempt.log",
+    "sha256": "30e780b9f8820da64d9059e9b8b73fbab521d50ff61942fbdb11560abfad99e4"
+  },
+  "scope": "Linux actual PID 1 manager controls pass; XNU user-manager stops at unbooted-context guard"
+}

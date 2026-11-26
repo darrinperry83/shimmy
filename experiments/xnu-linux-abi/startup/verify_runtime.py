@@ -32,6 +32,16 @@ def verify(name):
     if paths:
         if 'XNU_PATHS_PERSONALITY_PASS' not in boot or 'LINUX_PATHS_RESULT status=0 ' not in boot:
             raise ValueError('path-descriptor fixture did not pass')
+    process=staged.get('linux_process_experiment',False)
+    if process and ('XNU_PROCESS_PERSONALITY_PASS' not in boot or 'LINUX_PROCESS_RESULT status=0 ' not in boot):
+        raise ValueError('process-lifecycle fixture did not pass')
+    if process and ('ARCH_CHILD_EXEC_PASS' not in boot or 'NATIVE_WAITID_CONTROL_PASS' not in boot):
+        raise ValueError('unchanged Arch child exec marker missing')
+    manager_result=None
+    if process:
+        diagnostic=re.search(r'^XNU_MANAGER_ATTEMPT_NATIVE_PARENT_RESULT=(\d+)$',boot,re.M)
+        if not diagnostic:raise ValueError('manager-start diagnostic has not completed')
+        manager_result=int(diagnostic[1])
     stdout_path=RESULTS/'systemd-version.log';stderr_path=RESULTS/'systemd-version-stderr.log'
     stdout=stdout_path.read_text();stderr=stderr_path.read_text()
     if paths and stderr:raise ValueError(f'path profile systemd stderr is not empty: {stderr}')
@@ -40,24 +50,29 @@ def verify(name):
     if not stdout.startswith(expected):raise ValueError('systemd stdout differs from Linux reference')
     match=re.fullmatch(r'ARCH_ELF_RESULT child=([1-9][0-9]*) status=0 parent=([1-9][0-9]*)\nARCH_ELF_COMMAND_PASS\n',stdout[len(expected):])
     if not match:raise ValueError('missing successful native-parent result or unexpected stdout')
-    proof=ABI/'out'/('paths' if paths else 'startup')/'runtime-proof';proof.mkdir(exist_ok=True)
+    if stdout not in boot:raise ValueError('systemd stdout does not match the named boot log')
+    proof=ABI/'out'/('process' if process else 'paths' if paths else 'startup')/'runtime-proof';proof.mkdir(exist_ok=True)
     evidence={}
-    for label,path in (('boot',boot_path),('stdout',stdout_path),('stderr',stderr_path)):
+    logs=[('boot',boot_path),('stdout',stdout_path),('stderr',stderr_path)]
+    if process:logs.append(('manager-attempt',RESULTS/f'{name}-manager-attempt.log'))
+    for label,path in logs:
         frozen=proof/f'{name}-{label}.log';shutil.copy2(path,frozen)
         evidence[label]=dict(path=str(frozen.relative_to(ABI)),sha256=digest(frozen))
     return dict(kernel_uuid=staged['kernel_uuid'],collection_sha256=staged['sha256'],
-        staged_name=name,startup_runtime_pass=True,paths_runtime_pass=bool(paths),systemd_version_runtime_pass=True,
+        staged_name=name,startup_runtime_pass=True,paths_runtime_pass=bool(paths),process_runtime_pass=bool(process),arch_child_exec_runtime_pass=bool(process),systemd_version_runtime_pass=True,
         native_parent=int(match[2]),linux_child=int(match[1]),
+        manager_native_parent_result=manager_result,manager_runtime_pass=False,
         systemd_version=expected.splitlines()[0],stderr_present=bool(stderr),
         stderr=stderr,proof_logs=evidence,
-        limits='Single-thread startup and systemd --version only; no PID 1, service-manager, rootfs isolation, or physical-driver qualification')
+        limits=('Single-thread-per-process fork/exec/wait and systemd --version' if process else 'Single-thread startup and systemd --version only')+'; no PID 1, service-manager, rootfs isolation, or physical-driver qualification')
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('staged_name')
     args=parser.parse_args()
     result=verify(args.staged_name)
-    (ABI/'out/startup/runtime-verification.json').write_text(json.dumps(result,indent=2)+'\n')
+    directory=ABI/'out'/('process' if result['process_runtime_pass'] else 'startup')
+    (directory/'runtime-verification.json').write_text(json.dumps(result,indent=2)+'\n')
     print(json.dumps(result,indent=2))
 
 if __name__=='__main__':main()
