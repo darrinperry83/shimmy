@@ -1,0 +1,127 @@
+{
+  "bash_package": "5.3.20-1",
+  "glibc_package": "2.43+r22+g8362e8ce10b2-2",
+  "bash_sha256": "d120d580a7fa09f22742a9648b836c32cdd321d56b0fd622f18016b092ffa3a1",
+  "command": "bash --noprofile --norc -c 'printf ARCH_SHELL_REFERENCE_PASS; pwd; test 2 -eq 2'",
+  "linux_reference_pass": true,
+  "reference_kind": "noninteractive startup and builtins under GDB; not full interactive coverage",
+  "observed_syscalls": [
+    {
+      "number": 29,
+      "name": "ioctl"
+    },
+    {
+      "number": 48,
+      "name": "faccessat"
+    },
+    {
+      "number": 56,
+      "name": "openat"
+    },
+    {
+      "number": 57,
+      "name": "close"
+    },
+    {
+      "number": 61,
+      "name": "getdents64"
+    },
+    {
+      "number": 62,
+      "name": "lseek"
+    },
+    {
+      "number": 63,
+      "name": "read"
+    },
+    {
+      "number": 64,
+      "name": "write"
+    },
+    {
+      "number": 79,
+      "name": "newfstatat"
+    },
+    {
+      "number": 80,
+      "name": "fstat"
+    },
+    {
+      "number": 94,
+      "name": "exit_group"
+    },
+    {
+      "number": 96,
+      "name": "set_tid_address"
+    },
+    {
+      "number": 98,
+      "name": "futex"
+    },
+    {
+      "number": 99,
+      "name": "set_robust_list"
+    },
+    {
+      "number": 134,
+      "name": "rt_sigaction"
+    },
+    {
+      "number": 135,
+      "name": "rt_sigprocmask"
+    },
+    {
+      "number": 148,
+      "name": "getresuid"
+    },
+    {
+      "number": 150,
+      "name": "getresgid"
+    },
+    {
+      "number": 155,
+      "name": "getpgid"
+    },
+    {
+      "number": 160,
+      "name": "uname"
+    },
+    {
+      "number": 172,
+      "name": "getpid"
+    },
+    {
+      "number": 173,
+      "name": "getppid"
+    },
+    {
+      "number": 214,
+      "name": "brk"
+    },
+    {
+      "number": 215,
+      "name": "munmap"
+    },
+    {
+      "number": 222,
+      "name": "mmap"
+    },
+    {
+      "number": 226,
+      "name": "mprotect"
+    },
+    {
+      "number": 261,
+      "name": "prlimit64"
+    },
+    {
+      "number": 278,
+      "name": "getrandom"
+    },
+    {
+      "number": 293,
+      "name": "rseq"
+    }
+  ],
+  "xnu_bash_execution_proven": false
+}

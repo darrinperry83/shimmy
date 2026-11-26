@@ -9,6 +9,22 @@ and Apple's linker accepts it with the complete stock driver set. The linked
 collection has exactly the stock collection's 357 entry IDs and our kernel UUID.
 It is not installed, encoded/personalized for a new boot identity, or booted.
 
+## Linux terminal input checkpoint — 26 November 2026
+
+Console/ELF foundation is published as `bb4af5d` on development. The next isolated
+VM candidate adds Linux read through XNU's descriptor/tty path and boots as UUID
+`713AB341-1CF9-3E1A-8601-E2D8F75E1EAF`. The unchanged Linux ELF input fixture passes
+on real Linux and XNU: bad descriptor, bad pointer, zero count, canonical erase,
+and Ctrl-D EOF. The native PTY parent survives and requires zero child status.
+P0/M1/Arch-loader regressions pass, and the PTY transcript is visible without
+WindowServer. Evidence: `terminal/evidence.json` and `out/vmapple/results/terminal-boot.log`.
+
+Input is scripted through a native PTY. Physical keyboard routing, streaming/VT
+rendering, Linux terminal ioctl translation, and Arch Bash remain unfinished.
+`terminal/bash-reference.json` records the original Arch Bash package and observed
+startup/builtin syscalls to guide subsequent implementation; Bash has not run on
+XNU. The bitmap host still does not interpret echo control characters.
+
 ## Visible Linux output checkpoint — 26 November 2026
 
 The VM now visibly displays the original Arch glibc loader's `--help` output,

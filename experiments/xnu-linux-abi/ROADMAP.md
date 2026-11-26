@@ -10,7 +10,8 @@ runtime compatibility pass.
 Visible output now passes in the disposable VM: an unchanged Arch Linux loader
 runs through the kernel Linux ABI, and its stdout/stderr is rendered through the
 AppleParavirtDisplay driver without WindowServer. See [console/README.md](console/README.md).
-Next console steps are streaming output and scrolling, Apple HID keyboard input,
+Linux read from a native PTY now passes a scripted input/erase/EOF test on both
+Linux and XNU. Next console steps are streaming output and scrolling, Apple HID keyboard input,
 a real Linux tty descriptor with read/termios behavior, and then an Arch shell as
 the ELF/dynamic-linker syscall subset becomes sufficient. Output proof alone does
 not complete any interactive-console or Arch-boot milestone.

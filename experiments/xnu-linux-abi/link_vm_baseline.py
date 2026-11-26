@@ -21,7 +21,10 @@ def main():
     parser.add_argument('--with-elf', action='store_true')
     parser.add_argument('--with-arch-loader', action='store_true')
     parser.add_argument('--with-linux-console', action='store_true')
+    parser.add_argument('--with-linux-terminal', action='store_true')
     args = parser.parse_args()
+    if args.with_linux_terminal:
+        args.with_linux_console = True
     if args.with_linux_console:
         args.with_arch_loader = True
     if args.with_arch_loader:
@@ -47,6 +50,8 @@ def main():
         target = target.with_name(target.name + '-arch-loader')
     if args.with_linux_console:
         target = target.with_name(target.name + '-linux-console')
+    if args.with_linux_terminal:
+        target = target.with_name(target.name + '-terminal')
     report = json.loads((target / 'build-result.json').read_text())
     if report['state'] != 'built' or report['svc_probe_present'] != args.with_svc_probe or not report['source_restored']:
         raise ValueError('baseline build did not complete with restored sources')
@@ -79,6 +84,7 @@ def main():
         'elf_experiment': report.get('elf_experiment', False),
         'arch_loader_experiment': report.get('arch_loader_experiment', False),
         'linux_console_experiment': report.get('linux_console_experiment', False),
+        'linux_terminal_experiment': report.get('linux_terminal_experiment', False),
         'bti_disabled': report.get('bti_disabled', False),
         'bti_enforcement_disabled': report.get('bti_enforcement_disabled', False)}
     (target / 'collection-result.json').write_text(json.dumps(result, indent=2) + '\n')

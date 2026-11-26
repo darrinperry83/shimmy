@@ -28,7 +28,10 @@ def main():
     parser.add_argument('--with-elf', action='store_true', help='isolated DEVELOPMENT M1 ELF experiment')
     parser.add_argument('--with-arch-loader', action='store_true')
     parser.add_argument('--with-linux-console', action='store_true')
+    parser.add_argument('--with-linux-terminal', action='store_true')
     args = parser.parse_args()
+    if args.with_linux_terminal:
+        args.with_linux_console = True
     if args.with_linux_console:
         args.with_arch_loader = True
     if args.with_arch_loader:
@@ -52,6 +55,8 @@ def main():
         target = target.with_name(target.name + '-arch-loader')
     if args.with_linux_console:
         target = target.with_name(target.name + '-linux-console')
+    if args.with_linux_terminal:
+        target = target.with_name(target.name + '-terminal')
     target.mkdir(parents=True, exist_ok=True)
     with (OUT / 'kernel-build.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -68,6 +73,9 @@ def main():
             if args.with_linux_console:
                 import console_prepare
                 extra_edits = console_prepare.overlay(XNU, extra_edits)
+            if args.with_linux_terminal:
+                import terminal_prepare
+                extra_edits = terminal_prepare.overlay(XNU, extra_edits)
             build_source = build_source.replace(b'if (p && rdxnu_linux_probe(state, p))',
                 b'if (p && (rdxnu_linux_dispatch(state, p) || rdxnu_linux_probe(state, p)))')
             build_source = build_source.replace(b'#include \"rdxnu_linux_probe.h\"',
@@ -98,6 +106,7 @@ def main():
         report['elf_experiment'] = args.with_elf
         report['arch_loader_experiment'] = args.with_arch_loader
         report['linux_console_experiment'] = args.with_linux_console
+        report['linux_terminal_experiment'] = args.with_linux_terminal
         report['elf_source_sha256'] = {str(path.relative_to(XNU)): hashlib.sha256(after).hexdigest()
                                      for path, (before, after) in extra_edits.items()}
         result = target / 'build-result.json'
