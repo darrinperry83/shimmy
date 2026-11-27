@@ -1,0 +1,133 @@
+{
+  "objective": "Native XNU Linux init lifecycle toward full Arch installer boot",
+  "linux_reference": {
+    "linux_elf_sha256": "585f3c23c640de182cf2ecf3ed0075349994d0d31f1daa0efa62dfef8af21375",
+    "xnu_init_domain_pass": false,
+    "xnu_full_init_boot_pass": false,
+    "linux_image": "sha256:0151e70bd01e7e4c891e903edf1dacba81656f04c6150bfce78d5a570e4df443",
+    "reference": [
+      {
+        "mode": "lifecycle",
+        "exit_status": 0,
+        "output": "LINUX_INIT_LIFECYCLE_PASS\n",
+        "container_stopped": true,
+        "oom_killed": false
+      },
+      {
+        "mode": "not-init",
+        "exit_status": 160,
+        "output": "INIT_CHECK SC(172,0,0,0,0)==1&&SC(173,0,0,0,0)==0\n",
+        "container_stopped": true,
+        "oom_killed": false
+      },
+      {
+        "mode": "subreaper",
+        "exit_status": 0,
+        "output": "LINUX_SUBREAPER_PASS\n",
+        "container_stopped": true,
+        "oom_killed": false
+      },
+      {
+        "mode": "native-parent",
+        "exit_status": 0,
+        "output": "LINUX_SUBREAPER_RESULT status=0 output=LINUX_SUBREAPER_PASS\nXNU_SUBREAPER_PERSONALITY_PASS: native adoption, live/zombie waits, exec preservation, fork reset; native parent intact\n",
+        "container_stopped": true,
+        "oom_killed": false
+      },
+      {
+        "mode": "init-death",
+        "exit_status": 0,
+        "output": "LINUX_INIT_EXIT_WITH_LIVE_CHILD\n",
+        "container_stopped": true,
+        "oom_killed": false
+      },
+      {
+        "mode": "lifecycle",
+        "exit_status": 0,
+        "output": "LINUX_INIT_LIFECYCLE_PASS\n",
+        "container_stopped": true,
+        "oom_killed": false
+      }
+    ]
+  },
+  "native_subreaper": {
+    "kernel_uuid": "ABCA1930-9D5A-3543-84AD-2A7821C0F51D",
+    "collection_sha256": "2dfcc6b4c49894641131be1d89d67419541c7a98db94dbde0bc1f0f0f15d5c2e",
+    "staged_name": "subreaper-abca1930-e90b1a79",
+    "subreaper_runtime_pass": true,
+    "launch_runtime_pass": true,
+    "reactor_runtime_pass": true,
+    "arch_sd_event_loop_runtime_pass": true,
+    "events_runtime_pass": true,
+    "interp_runtime_pass": true,
+    "startup_runtime_pass": true,
+    "paths_runtime_pass": true,
+    "process_runtime_pass": true,
+    "arch_child_exec_runtime_pass": true,
+    "systemd_version_runtime_pass": true,
+    "native_parent": 850,
+    "linux_child": 851,
+    "manager_native_parent_result": 1,
+    "manager_runtime_pass": false,
+    "systemd_version": "systemd 262 (262.2-1-arch)",
+    "stderr_present": false,
+    "stderr": "",
+    "proof_logs": {
+      "boot": {
+        "path": "out/init/runtime-proof/subreaper-abca1930-e90b1a79-boot.log",
+        "sha256": "b4088806ded77a195e368c6f9aa9b9e23df8dbf593edc17317adb25df551ebf6"
+      },
+      "stdout": {
+        "path": "out/init/runtime-proof/subreaper-abca1930-e90b1a79-stdout.log",
+        "sha256": "44151852ba294f485065e3179584b699837bc618b7fe12a51b7a60d266019a9b"
+      },
+      "stderr": {
+        "path": "out/init/runtime-proof/subreaper-abca1930-e90b1a79-stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "interp": {
+        "path": "out/init/runtime-proof/subreaper-abca1930-e90b1a79-interp.log",
+        "sha256": "b9201f90e6efc2f9bf3060a09819694cf861e5226c407548a026d535cc591c4c"
+      },
+      "interp-stderr": {
+        "path": "out/init/runtime-proof/subreaper-abca1930-e90b1a79-interp-stderr.log",
+        "sha256": "ba338deec5d8b7843a7f561fbe026977fed2fbfbab933df6a0294bae318540d0"
+      },
+      "sd-event": {
+        "path": "out/init/runtime-proof/subreaper-abca1930-e90b1a79-sd-event.log",
+        "sha256": "94fac06b3ce5526ffd1d1e1f9ef149812e05dc8d8ab319681a079740ec812da8"
+      },
+      "sd-event-stderr": {
+        "path": "out/init/runtime-proof/subreaper-abca1930-e90b1a79-sd-event-stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "manager-attempt": {
+        "path": "out/init/runtime-proof/subreaper-abca1930-e90b1a79-manager-attempt.log",
+        "sha256": "565a0be897ff666ef04eddcbb2990603fa63305ccd2bf7be8fcc263edf9e098a"
+      }
+    },
+    "limits": "Single-thread-per-process fork/exec/wait and systemd --version; no PID 1, service-manager, complete filesystem isolation, or physical-driver qualification"
+  },
+  "kernel_sha256": "758cbe19c7effa87662ca3bc723f0b1af675e876157195da3ea5a4866f89a52d",
+  "source_restored": true,
+  "compiled_overlay_count": 30,
+  "assembly_offsets": {
+    "control_definitions": 336,
+    "existing_definitions_unchanged": true,
+    "native_thread_size": "1696"
+  },
+  "stock_release_driver_uuids_preserved": true,
+  "source_sha256": {
+    "init/probe.c": "dd07e57fc148f043a4364f00c7f0fa52b076a4556d3d423f26ec333a27d9d00b",
+    "init/run.c": "91500240ca3c04a8a84d70f07b5fac1a361cf14cd98ea4a8708600bfe39387a6",
+    "init/verify.py": "a8bc1787e286446c07146faa30f89425544109976843952b2faa4c21fe30b1cf",
+    "init/subreaper.inc": "aeb0d34dc7ec1ce8f8799005d77a9300d3910c24d3099b2412d8b154b9384776",
+    "init_prepare.py": "54f20c70e8f0e71e9902b87cdb5efbbc5c015fa952a475f0fdc3145b7282ad6b"
+  },
+  "xnu_init_domain_pass": false,
+  "xnu_full_init_boot_pass": false,
+  "interactive_installer_pass": false,
+  "network_package_transaction_pass": false,
+  "directory_install_round_trip_pass": false,
+  "limits": "Subreaper lineage test only: native IDs, single-thread processes, no traced-child adoption qualification. Explicit domains, PID mapping, init death isolation, runtime filesystems and full unit boot remain pending."
+}

@@ -276,5 +276,334 @@
   "native_full_init_boot_pass": false,
   "native_installer_pass": false,
   "native_install_roundtrip_pass": false,
-  "next_kernel_gate": "Coherent native Linux init domain: identity translation, orphan adoption, wait/signal ownership, exec continuity and init-death teardown; retain native Darwin services."
+  "next_kernel_gate": "Coherent native Linux init domain: identity translation, orphan adoption, wait/signal ownership, exec continuity and init-death teardown; retain native Darwin services.",
+  "directory_filename_preflight": {
+    "archive_sha256": "647f73a696cfd7a0c364303ee383ba22a92dea1e0db0c95e5c4b0a636cc181ae",
+    "collision_candidate_count": 64,
+    "ascii_case_pair_count": 64,
+    "collisions": [
+      {
+        "first": "usr/include/linux/netfilter/xt_CONNMARK.h",
+        "second": "usr/include/linux/netfilter/xt_connmark.h",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/include/linux/netfilter/xt_DSCP.h",
+        "second": "usr/include/linux/netfilter/xt_dscp.h",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/include/linux/netfilter/xt_MARK.h",
+        "second": "usr/include/linux/netfilter/xt_mark.h",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/include/linux/netfilter/xt_RATEEST.h",
+        "second": "usr/include/linux/netfilter/xt_rateest.h",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/include/linux/netfilter/xt_TCPMSS.h",
+        "second": "usr/include/linux/netfilter/xt_tcpmss.h",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/include/linux/netfilter_ipv4/ipt_ECN.h",
+        "second": "usr/include/linux/netfilter_ipv4/ipt_ecn.h",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/include/linux/netfilter_ipv4/ipt_TTL.h",
+        "second": "usr/include/linux/netfilter_ipv4/ipt_ttl.h",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/include/linux/netfilter_ipv6/ip6t_HL.h",
+        "second": "usr/include/linux/netfilter_ipv6/ip6t_hl.h",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/lib/xtables/libip6t_HL.so",
+        "second": "usr/lib/xtables/libip6t_hl.so",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/lib/xtables/libipt_TTL.so",
+        "second": "usr/lib/xtables/libipt_ttl.so",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/lib/xtables/libxt_CONNMARK.so",
+        "second": "usr/lib/xtables/libxt_connmark.so",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/lib/xtables/libxt_DSCP.so",
+        "second": "usr/lib/xtables/libxt_dscp.so",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/lib/xtables/libxt_MARK.so",
+        "second": "usr/lib/xtables/libxt_mark.so",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/lib/xtables/libxt_RATEEST.so",
+        "second": "usr/lib/xtables/libxt_rateest.so",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/lib/xtables/libxt_SET.so",
+        "second": "usr/lib/xtables/libxt_set.so",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/lib/xtables/libxt_TCPMSS.so",
+        "second": "usr/lib/xtables/libxt_tcpmss.so",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/lib/xtables/libxt_TOS.so",
+        "second": "usr/lib/xtables/libxt_tos.so",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/man/man3/OPENSSL_VERSION_BUILD_METADATA.3ssl.gz",
+        "second": "usr/share/man/man3/OPENSSL_version_build_metadata.3ssl.gz",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/man/man3/OPENSSL_VERSION_MAJOR.3ssl.gz",
+        "second": "usr/share/man/man3/OPENSSL_version_major.3ssl.gz",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/man/man3/OPENSSL_VERSION_MINOR.3ssl.gz",
+        "second": "usr/share/man/man3/OPENSSL_version_minor.3ssl.gz",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/man/man3/OPENSSL_VERSION_PATCH.3ssl.gz",
+        "second": "usr/share/man/man3/OPENSSL_version_patch.3ssl.gz",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/man/man3/OPENSSL_VERSION_PRE_RELEASE.3ssl.gz",
+        "second": "usr/share/man/man3/OPENSSL_version_pre_release.3ssl.gz",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/man/man3/OSSL_TRACE_BEGIN.3ssl.gz",
+        "second": "usr/share/man/man3/OSSL_trace_begin.3ssl.gz",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/man/man3/OSSL_TRACE_ENABLED.3ssl.gz",
+        "second": "usr/share/man/man3/OSSL_trace_enabled.3ssl.gz",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/man/man3/OSSL_TRACE_END.3ssl.gz",
+        "second": "usr/share/man/man3/OSSL_trace_end.3ssl.gz",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/man/man3/OSSL_TRACE_STRING.3ssl.gz",
+        "second": "usr/share/man/man3/OSSL_trace_string.3ssl.gz",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/man/man3/SD_BUS_ERROR_MAP.3.gz",
+        "second": "usr/share/man/man3/sd_bus_error_map.3.gz",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/man/man3/SD_ID128_TO_STRING.3.gz",
+        "second": "usr/share/man/man3/sd_id128_to_string.3.gz",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/man/man3/SD_ID128_TO_UUID_STRING.3.gz",
+        "second": "usr/share/man/man3/sd_id128_to_uuid_string.3.gz",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/man/man8/PAM.8.gz",
+        "second": "usr/share/man/man8/pam.8.gz",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/perl5/core_perl/Pod",
+        "second": "usr/share/perl5/core_perl/pod",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/2/2621A",
+        "second": "usr/share/terminfo/2/2621a",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/A",
+        "second": "usr/share/terminfo/a",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/E",
+        "second": "usr/share/terminfo/e",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/E/Eterm",
+        "second": "usr/share/terminfo/e/eterm",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/E/Eterm-color",
+        "second": "usr/share/terminfo/e/eterm-color",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/h/hp2621A",
+        "second": "usr/share/terminfo/h/hp2621a",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/h/hp70092A",
+        "second": "usr/share/terminfo/h/hp70092a",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/L",
+        "second": "usr/share/terminfo/l",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/L/LFT-PC850",
+        "second": "usr/share/terminfo/l/lft-pc850",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/M",
+        "second": "usr/share/terminfo/m",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/N",
+        "second": "usr/share/terminfo/n",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/N/NCR260VT300WPP",
+        "second": "usr/share/terminfo/n/ncr260vt300wpp",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/N/NCRVT100WPP",
+        "second": "usr/share/terminfo/n/ncrvt100wpp",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/P",
+        "second": "usr/share/terminfo/p",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/P/P12",
+        "second": "usr/share/terminfo/p/p12",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/P/P12-M",
+        "second": "usr/share/terminfo/p/p12-m",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/P/P12-M-W",
+        "second": "usr/share/terminfo/p/p12-m-w",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/P/P12-W",
+        "second": "usr/share/terminfo/p/p12-w",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/P/P14",
+        "second": "usr/share/terminfo/p/p14",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/P/P14-M",
+        "second": "usr/share/terminfo/p/p14-m",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/P/P14-M-W",
+        "second": "usr/share/terminfo/p/p14-m-w",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/P/P14-W",
+        "second": "usr/share/terminfo/p/p14-w",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/P/P4",
+        "second": "usr/share/terminfo/p/p4",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/P/P5",
+        "second": "usr/share/terminfo/p/p5",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/P/P7",
+        "second": "usr/share/terminfo/p/p7",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/P/P8",
+        "second": "usr/share/terminfo/p/p8",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/P/P8-W",
+        "second": "usr/share/terminfo/p/p8-w",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/P/P9",
+        "second": "usr/share/terminfo/p/p9",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/P/P9-8",
+        "second": "usr/share/terminfo/p/p9-8",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/P/P9-8-W",
+        "second": "usr/share/terminfo/p/p9-8-w",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/P/P9-W",
+        "second": "usr/share/terminfo/p/p9-w",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/Q",
+        "second": "usr/share/terminfo/q",
+        "ascii_case_pair": true
+      },
+      {
+        "first": "usr/share/terminfo/X",
+        "second": "usr/share/terminfo/x",
+        "ascii_case_pair": true
+      }
+    ],
+    "plain_case_insensitive_root_qualified": false,
+    "scope": "Filename preflight only; absence of collisions does not qualify filesystem or permission semantics."
+  }
 }

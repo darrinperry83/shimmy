@@ -1,0 +1,120 @@
+{
+  "objective": "Owned native XNU domains as a prerequisite for Linux PID namespace and full Arch init boot",
+  "linux_reference": {
+    "linux_elf_sha256": "58625709cb7ce0828ef6165fe8069de8b2432b9ccb990003d8b6928d56197990",
+    "subreaper_elf_sha256": "585f3c23c640de182cf2ecf3ed0075349994d0d31f1daa0efa62dfef8af21375",
+    "native_supervisor_sha256": "5e6e8dd315127c4ddd4ea2e3ba1ffd550cb534b2541ac53dde3caba9ae5c1dfb",
+    "xnu_domain_membership_pass": false,
+    "xnu_init_domain_pass": false,
+    "xnu_full_init_boot_pass": false,
+    "scope": "Linux reference tests lifecycle with PID 1 and an unavailable PID target. Live cross-domain target rejection, privileged admission, reference lifetime and native restart require the XNU supervisor gate. XNU uses native IDs at this checkpoint.",
+    "linux_image": "sha256:0151e70bd01e7e4c891e903edf1dacba81656f04c6150bfce78d5a570e4df443",
+    "reference": [
+      {
+        "ordinary_process": false,
+        "exit_status": 0,
+        "output": "LINUX_SUBREAPER_PASS\nLINUX_DOMAIN_LIFECYCLE_PASS\n",
+        "container_stopped": true,
+        "oom_killed": false
+      },
+      {
+        "ordinary_process": true,
+        "exit_status": 170,
+        "output": "DOMAIN_CHECK root>0&&SC(173,0,0,0,0)==0\n",
+        "container_stopped": true,
+        "oom_killed": false
+      },
+      {
+        "ordinary_process": false,
+        "exit_status": 0,
+        "output": "LINUX_SUBREAPER_PASS\nLINUX_DOMAIN_LIFECYCLE_PASS\n",
+        "container_stopped": true,
+        "oom_killed": false
+      }
+    ]
+  },
+  "native_domain": {
+    "kernel_uuid": "9D058C98-E237-3F12-9ACF-3E18D6604B37",
+    "collection_sha256": "cb9d0a024d976e7aabf7051e9f9f4c8e9a40ae7a9e45322948b662ee60e08aff",
+    "staged_name": "domain-9d058c98-17bd994b",
+    "domain_membership_runtime_pass": true,
+    "subreaper_runtime_pass": true,
+    "launch_runtime_pass": true,
+    "reactor_runtime_pass": true,
+    "arch_sd_event_loop_runtime_pass": true,
+    "events_runtime_pass": true,
+    "interp_runtime_pass": true,
+    "startup_runtime_pass": true,
+    "paths_runtime_pass": true,
+    "process_runtime_pass": true,
+    "arch_child_exec_runtime_pass": true,
+    "systemd_version_runtime_pass": true,
+    "native_parent": 889,
+    "linux_child": 890,
+    "manager_native_parent_result": 1,
+    "manager_runtime_pass": false,
+    "systemd_version": "systemd 262 (262.2-1-arch)",
+    "stderr_present": false,
+    "stderr": "",
+    "proof_logs": {
+      "boot": {
+        "path": "out/init/runtime-proof/domain-9d058c98-17bd994b-boot.log",
+        "sha256": "bba44bde3092f8405c1e7d510fb02c01f884cf72f09ab52e2437d0262e606ca2"
+      },
+      "stdout": {
+        "path": "out/init/runtime-proof/domain-9d058c98-17bd994b-stdout.log",
+        "sha256": "504e290b6fd0aa16f9ccb524b8f649e18736858d222024c0ee802f4bd775366d"
+      },
+      "stderr": {
+        "path": "out/init/runtime-proof/domain-9d058c98-17bd994b-stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "interp": {
+        "path": "out/init/runtime-proof/domain-9d058c98-17bd994b-interp.log",
+        "sha256": "b9201f90e6efc2f9bf3060a09819694cf861e5226c407548a026d535cc591c4c"
+      },
+      "interp-stderr": {
+        "path": "out/init/runtime-proof/domain-9d058c98-17bd994b-interp-stderr.log",
+        "sha256": "ba338deec5d8b7843a7f561fbe026977fed2fbfbab933df6a0294bae318540d0"
+      },
+      "sd-event": {
+        "path": "out/init/runtime-proof/domain-9d058c98-17bd994b-sd-event.log",
+        "sha256": "796173a0303d3bae9b67274a252534ee85f1ee79e648e21011b377e705e97a3f"
+      },
+      "sd-event-stderr": {
+        "path": "out/init/runtime-proof/domain-9d058c98-17bd994b-sd-event-stderr.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "manager-attempt": {
+        "path": "out/init/runtime-proof/domain-9d058c98-17bd994b-manager-attempt.log",
+        "sha256": "5240dc143938c0cb4b60999effe8b2aa8a7963b0e369864d1ddc5bbba3f4051f"
+      }
+    },
+    "limits": "Single-thread-per-process fork/exec/wait and systemd --version; no PID 1, service-manager, complete filesystem isolation, or physical-driver qualification"
+  },
+  "kernel_sha256": "e4368be18426a66c5ecc2d573502f798ea567119cd015993946491394938bc4d",
+  "source_restored": true,
+  "compiled_overlay_count": 30,
+  "assembly_offsets": {
+    "control_definitions": 336,
+    "existing_definitions_unchanged": true,
+    "native_thread_size": "1696"
+  },
+  "stock_release_driver_uuids_preserved": true,
+  "source_sha256": {
+    "domain_prepare.py": "64ff049cbf078e0c03afc20a555f270006be98c99324aae7d71de3a476a922a6",
+    "init/domain.h": "82de5e3b7a5db508ee65aec86204e42f74e32c2b547ba5985efa729a55672b5d",
+    "init/domain.inc": "9c6d5b3c591edecd7f85cf3d4057983fbb8a119dbb380c8fc91e9fcbe5b0c9a8",
+    "init/domain_probe.c": "a3ee51356b48ecba3baae1a7ec358acf45a46a1f5fe2807d72d0ac810d8f0595",
+    "init/domain_run.c": "2d88decfca5946cca15369a1c07100b41e9858935df0bd9f2a9ad3e30ece5941",
+    "init/verify_domain.py": "ec27ba80fd6cad6ba81172e9b7cadec19df5a90a649be21339687337b5c6fee3"
+  },
+  "native_domain_membership_pass": true,
+  "linux_pid_namespace_pass": false,
+  "xnu_init_domain_pass": false,
+  "xnu_full_init_boot_pass": false,
+  "interactive_installer_pass": false,
+  "network_package_transaction_pass": false,
+  "directory_install_round_trip_pass": false,
+  "limits": "Native process IDs, single-thread processes and selected positive-PID targeting only. Not a complete namespace/security boundary. PID 1 mapping, complete identity views, group signalling, concurrent transition stress, runtime filesystems and full systemd unit boot remain pending."
+}

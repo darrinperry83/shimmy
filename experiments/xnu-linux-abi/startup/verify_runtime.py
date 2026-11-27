@@ -80,6 +80,17 @@ def verify(name):
         for phase in ('GROUP','EXEC'):
             for label in ('CHILD_READY','WAIT'):
                 if boot.count(f'LAUNCH_{phase}_{label}\n')!=1:raise ValueError('launch blocking handshake mismatch')
+    subreaper=staged.get('linux_subreaper_experiment',False)
+    if subreaper:
+        if boot.count('XNU_SUBREAPER_PERSONALITY_PASS')!=1 or boot.count('LINUX_SUBREAPER_RESULT status=0 output=LINUX_SUBREAPER_PASS\n')!=1:
+            raise ValueError('native subreaper lifecycle fixture did not pass')
+    domain=staged.get('linux_domain_experiment',False)
+    if domain:
+        if boot.count('XNU_DOMAIN_PERSONALITY_PASS')!=1:
+            raise ValueError('native domain lifecycle fixture did not pass')
+        cycles=re.findall(r'^NATIVE_DOMAIN_CYCLE_PASS cycle=([12]) key=([1-9][0-9]*)$',boot,re.M)
+        if len(cycles)!=2 or [cycle for cycle,key in cycles]!=['1','2'] or cycles[0][1]==cycles[1][1]:
+            raise ValueError('domain admission/restart identities are missing or reused')
     manager_result=None
     if process:
         diagnostic=re.search(r'^XNU_MANAGER_ATTEMPT_NATIVE_PARENT_RESULT=(\d+)$',boot,re.M)
@@ -94,7 +105,7 @@ def verify(name):
     match=re.fullmatch(r'ARCH_ELF_RESULT child=([1-9][0-9]*) status=0 parent=([1-9][0-9]*)\nARCH_ELF_COMMAND_PASS\n',stdout[len(expected):])
     if not match:raise ValueError('missing successful native-parent result or unexpected stdout')
     if stdout not in boot:raise ValueError('systemd stdout does not match the named boot log')
-    proof=ABI/'out'/('launch' if launch else 'reactor' if reactor else 'events' if events else 'interp' if interp else 'process' if process else 'paths' if paths else 'startup')/'runtime-proof';proof.mkdir(exist_ok=True)
+    proof=ABI/'out'/('init' if subreaper else 'launch' if launch else 'reactor' if reactor else 'events' if events else 'interp' if interp else 'process' if process else 'paths' if paths else 'startup')/'runtime-proof';proof.mkdir(exist_ok=True)
     evidence={}
     logs=[('boot',boot_path),('stdout',stdout_path),('stderr',stderr_path)]+interp_logs+reactor_logs
     if process:logs.append(('manager-attempt',RESULTS/f'{name}-manager-attempt.log'))
@@ -102,7 +113,7 @@ def verify(name):
         frozen=proof/f'{name}-{label}.log';shutil.copy2(path,frozen)
         evidence[label]=dict(path=str(frozen.relative_to(ABI)),sha256=digest(frozen))
     return dict(kernel_uuid=staged['kernel_uuid'],collection_sha256=staged['sha256'],
-        staged_name=name,launch_runtime_pass=bool(launch),reactor_runtime_pass=bool(reactor),arch_sd_event_loop_runtime_pass=bool(reactor),events_runtime_pass=bool(events),interp_runtime_pass=bool(interp),startup_runtime_pass=True,paths_runtime_pass=bool(paths),process_runtime_pass=bool(process),arch_child_exec_runtime_pass=bool(process),systemd_version_runtime_pass=True,
+        staged_name=name,domain_membership_runtime_pass=bool(domain),subreaper_runtime_pass=bool(subreaper),launch_runtime_pass=bool(launch),reactor_runtime_pass=bool(reactor),arch_sd_event_loop_runtime_pass=bool(reactor),events_runtime_pass=bool(events),interp_runtime_pass=bool(interp),startup_runtime_pass=True,paths_runtime_pass=bool(paths),process_runtime_pass=bool(process),arch_child_exec_runtime_pass=bool(process),systemd_version_runtime_pass=True,
         native_parent=int(match[2]),linux_child=int(match[1]),
         manager_native_parent_result=manager_result,manager_runtime_pass=False,
         systemd_version=expected.splitlines()[0],stderr_present=bool(stderr),
@@ -114,7 +125,7 @@ def main():
     parser.add_argument('staged_name')
     args=parser.parse_args()
     result=verify(args.staged_name)
-    directory=ABI/'out'/('launch' if result['launch_runtime_pass'] else 'reactor' if result['reactor_runtime_pass'] else 'events' if result['events_runtime_pass'] else 'interp' if result['interp_runtime_pass'] else 'process' if result['process_runtime_pass'] else 'startup')
+    directory=ABI/'out'/('init' if result['subreaper_runtime_pass'] else 'launch' if result['launch_runtime_pass'] else 'reactor' if result['reactor_runtime_pass'] else 'events' if result['events_runtime_pass'] else 'interp' if result['interp_runtime_pass'] else 'process' if result['process_runtime_pass'] else 'startup')
     (directory/'runtime-verification.json').write_text(json.dumps(result,indent=2)+'\n')
     print(json.dumps(result,indent=2))
 

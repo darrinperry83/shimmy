@@ -28,6 +28,8 @@ def main():
     parser.add_argument('--with-linux-files', action='store_true')
     parser.add_argument('--with-linux-paths', action='store_true', help='native O_PATH descriptors and statx')
     parser.add_argument('--with-linux-launch', action='store_true', help='native service launch controls')
+    parser.add_argument('--with-linux-subreaper', action='store_true', help='native orphan adoption; not an init domain')
+    parser.add_argument('--with-linux-domain', action='store_true', help='owned domain lifetime and boundaries on native IDs')
     parser.add_argument('--with-linux-reactor', action='store_true', help='native epoll/timerfd/signalfd batch')
     parser.add_argument('--with-linux-events', action='store_true', help='native eventfd counter and bounded ppoll')
     parser.add_argument('--with-linux-interp', action='store_true', help='native direct ELF PT_INTERP execution')
@@ -35,6 +37,10 @@ def main():
     parser.add_argument('--with-linux-startup', action='store_true')
     parser.add_argument('--startup-entry-mode', choices=('kdk-bridge','stock'), default='kdk-bridge')
     args = parser.parse_args()
+    if args.with_linux_domain:
+        args.with_linux_subreaper = True
+    if args.with_linux_subreaper:
+        args.with_linux_launch = True
     if args.with_linux_launch:
         args.with_linux_reactor = True
     if args.with_linux_reactor:
@@ -110,7 +116,15 @@ def main():
         target = target.with_name(target.name + '-reactor')
     if args.with_linux_launch:
         target = target.with_name(target.name + '-launch')
+    if args.with_linux_subreaper:
+        target = target.with_name(target.name + '-subreaper')
+    if args.with_linux_domain:
+        target = target.with_name(target.name + '-domain')
     report = json.loads((target / 'build-result.json').read_text())
+    if report.get('linux_domain_experiment', False) != args.with_linux_domain:
+        raise ValueError('Linux domain build option mismatch')
+    if report.get('linux_subreaper_experiment', False) != args.with_linux_subreaper:
+        raise ValueError('Linux subreaper build option mismatch')
     if report.get('linux_core_experiment', False) != args.with_linux_core:
         raise ValueError('Linux core build option mismatch')
     if report.get('linux_memory_experiment', False) != args.with_linux_memory:
@@ -178,6 +192,8 @@ def main():
         'startup_entry_mode': report.get('startup_entry_mode'),
         'linux_paths_experiment': report.get('linux_paths_experiment',False),
         'linux_launch_experiment': report.get('linux_launch_experiment',False),
+        'linux_subreaper_experiment': report.get('linux_subreaper_experiment',False),
+        'linux_domain_experiment': report.get('linux_domain_experiment',False),
         'linux_reactor_experiment': report.get('linux_reactor_experiment',False),
         'linux_events_experiment': report.get('linux_events_experiment',False),
         'linux_interp_experiment': report.get('linux_interp_experiment',False),

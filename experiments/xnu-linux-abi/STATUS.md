@@ -1,5 +1,32 @@
 # Status — current checkpoint 27 November 2026
 
+Owned native domain membership now passes on kernel
+`9D058C98-E237-3F12-9ACF-3E18D6604B37`, staged as
+`domain-9d058c98-17bd994b`. Native IDs remain unchanged. The gate proves
+privileged admission/reentry checks, fork/exec membership, same-UID external
+target rejection, domain-leader adoption of live and zombie orphans, nested
+subreapers, leader-death descendant termination, release at reap and fresh
+restart, while preserving the native supervisor. Membership uses a small index
+of native unique IDs and domain references because XNU frees pstats before
+zombie publication; native child lists/status/wait remain authoritative.
+All previous gates pass on this boot, including systemd --version with empty
+stderr. Thirty compiled overlays match current source; the 336 existing assembly
+definitions and control driver UUIDs are preserved. See
+[init/domain-evidence.json](init/domain-evidence.json). The next kernel step is
+coherent Linux PID 1 mapping across every identity/target interface. No complete
+PID namespace, systemd manager or installer boot pass is claimed.
+
+The native subreaper step now passes on XNU kernel
+`ABCA1930-9D5A-3543-84AD-2A7821C0F51D`. An unprivileged Linux lineage uses
+XNU child lists to adopt and reap living and zombie orphan descendants. The
+subreaper property survives exec/native proc replacement, resets on ordinary
+fork, supports Linux's nonzero-value rule, and leaves the native supervisor's
+identity and wait behavior intact. All previous launch/reactor/interpreter and
+earlier gates pass; systemd --version has empty stderr. Thirty compiled overlays
+match current source, all 336 existing assembly definitions are unchanged, and
+the control Apple driver UUIDs are preserved. See [init/evidence.json](init/evidence.json).
+This is not a Linux init domain or systemd manager boot.
+
 The active user milestone is now **full systemd init boot into an Arch installer**.
 A complete, independently pinned installer root is prepared: 172 packages,
 including Bash, pacman and arch-install-scripts, the full package database, and
@@ -12,7 +39,10 @@ target root remain unproven. See [installer/README.md](installer/README.md) and
 [installer/evidence.json](installer/evidence.json). The next kernel work is the
 coherent init lifecycle in [LINUX-INIT.md](LINUX-INIT.md), followed by the runtime
 filesystem contracts needed to boot this same package environment. The existing
-XNU runtime kernel and regression package pins are unchanged.
+regression package pins are unchanged. The installation target is a location on
+the existing macOS Data storage. The archive preflight found 64 ASCII case
+collisions, so a plain directory on case-insensitive APFS would lose files; the
+choice of case-sensitive backing storage remains separate from init boot.
 
 The native service-launch batch now passes on custom XNU kernel
 `1E73AC27-14B3-3EDD-9F8B-4B31342E0A85`: pipe2/dup/dup3 and bounded fcntl,

@@ -4,8 +4,10 @@
 Arch Linux ARM installer, then install/reboot into a persistent target root.
 The [installer root and Linux reference](installer/README.md) are prepared and
 the complete target reaches 114 active units with no failures under real Linux
-PID 1. Native XNU init/installer gates remain false. The next implementation
-batch must establish the [native Linux init domain](LINUX-INIT.md), then connect
+PID 1. Native XNU init/installer gates remain false. Owned native domain
+membership/lifetime now passes its [native gate](init/domain-evidence.json).
+The next implementation batch must add consistent Linux PID 1 identity to the
+[native Linux init domain](LINUX-INIT.md), then connect
 the full root to truthful runtime filesystem/device interfaces. Require native
 unit boot, interactive console, networking/package transactions and a disposable
 installation round trip before calling the installer working. Keep individual

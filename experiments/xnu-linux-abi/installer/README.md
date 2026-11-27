@@ -5,6 +5,29 @@ into a usable installer on the XNU Linux personality. Individual syscall tests,
 a callback loop, a tiny service target or an exported package root do not satisfy
 that target. They remain regressions and preparation steps.
 
+The immediate installation layout is a directory on the existing macOS Data
+volume. The installer root and installed Arch root have separate paths.
+XNU binds the selected directory as the Linux domain's root. Preserve
+numeric ownership and modes, and use actual XNU credentials/VFS enforcement.
+There is a concrete constraint on a plain directory: `check_directory.py` found
+64 filename collision candidates in the pinned archive, including ASCII pairs
+`usr/include/linux/netfilter/xt_CONNMARK.h` and `xt_connmark.h`, and distinct
+xtables libraries. A plain case-insensitive APFS directory cannot preserve this
+root. Keeping storage on the existing partition is still possible using a
+case-sensitive filesystem image stored there and mounted at the chosen root
+directory; a case-sensitive APFS volume in the same container is another option.
+Neither storage mechanism is implemented or selected by this preflight. Do not
+extract the full archive over a case-insensitive directory and silently lose
+files. Reproduce with `python3 experiments/xnu-linux-abi/installer/check_directory.py`.
+
+The usable milestone requires all of: full native systemd unit boot, interactive
+console input and job control, working network/DNS/HTTPS, a verified package
+transaction into the selected directory, and a subsequent boot of that installed
+root. Neither an unpacked root nor active network services alone count. Reuse
+the shim's behavioral tests where applicable, while selecting implementations
+around XNU's native facilities. Ordinary installed package updates remain pacman
+transactions; downloaded root archives serve live installation and recovery.
+
 The first root capture contains 172 packages and 381 packaged systemd unit
 files. Its real Linux PID 1 reference reaches the installer target with 114
 active units and no failures, including journald, D-Bus, logind, udevd, console

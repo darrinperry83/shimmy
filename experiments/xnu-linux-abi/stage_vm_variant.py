@@ -15,7 +15,7 @@ OUT = ABI / 'out/vmapple'
 BASELINE = 'baseline-no-lto-no-bti-svc-probe-elf-arch-loader-linux-console-terminal'
 
 
-def stage(name, candidate, core=False, memory=False, filemap=False, files=False, startup=False, paths=False, process=False, interp=False, events=False, reactor=False, launch=False):
+def stage(name, candidate, core=False, memory=False, filemap=False, files=False, startup=False, paths=False, process=False, interp=False, events=False, reactor=False, launch=False, subreaper=False, domain=False):
     report = json.loads((candidate / 'collection-result.json').read_text())
     build = json.loads((candidate / 'build-result.json').read_text())
     data = Path(report['collection']).read_bytes()
@@ -41,6 +41,10 @@ def stage(name, candidate, core=False, memory=False, filemap=False, files=False,
         raise ValueError('unexpected Linux event build profile')
     if report.get('linux_launch_experiment',False) != launch:
         raise ValueError('unexpected Linux launch build profile')
+    if report.get('linux_subreaper_experiment',False) != subreaper:
+        raise ValueError('unexpected Linux subreaper build profile')
+    if report.get('linux_domain_experiment',False) != domain:
+        raise ValueError('unexpected Linux domain build profile')
     if report.get('linux_reactor_experiment',False) != reactor:
         raise ValueError('unexpected Linux reactor build profile')
     if not report['exact_control_driver_uuids'] or not report['bti_enforcement_disabled'] or report['configuration'] != 'DEVELOPMENT':
@@ -71,6 +75,14 @@ def stage(name, candidate, core=False, memory=False, filemap=False, files=False,
         if launch:
             material+=(ABI/'out/launch/verification.json').read_bytes()
             material+=(ABI/'out/launch/launch-run').read_bytes()
+        if subreaper:
+            material+=(ABI/'out/init/verification.json').read_bytes()
+            for filename in ('init-probe','init-run'):
+                material+=(ABI/'out/init'/filename).read_bytes()
+        if domain:
+            material+=(ABI/'out/init/domain-verification.json').read_bytes()
+            for filename in ('domain-probe','domain-run'):
+                material+=(ABI/'out/init'/filename).read_bytes()
         token=hashlib.sha256(material).hexdigest()[:8]
         name+=f'-{report["kernel_uuid"][:8].lower()}-{token}'
     results = OUT / 'results'
@@ -286,6 +298,31 @@ cat "$systemderr"
             extra_files+=f'mkdir -p "{root}/{Path(relative).parent}"\ncp "$share/{staged_name}" "{root}/{relative}"\nchmod 755 "{root}/{relative}"\nchown root:wheel "{root}/{relative}"\n'
         extra_files+=f'ln -sfn usr/lib "{root}/lib"\nmkdir -p "{root}/work"\n'
         boot=boot.replace('systemdlog=/var/tmp/rdxnu-systemd-version.log','"$base/launch-run" "$base/launch-root"\nexport_logs\nsystemdlog=/var/tmp/rdxnu-systemd-version.log')
+    if subreaper:
+        verification=json.loads((ABI/'out/init/verification.json').read_text())
+        if not any('XNU_SUBREAPER_PERSONALITY_PASS' in r['output'] for r in verification.get('reference',[])):
+            raise ValueError('Linux subreaper reference must pass')
+        for filename in ('init-probe','init-run'):
+            artifact=ABI/'out/init'/filename;digest=hashlib.sha256(artifact.read_bytes()).hexdigest()
+            if filename=='init-probe' and digest!=verification['linux_elf_sha256']:
+                raise ValueError('init fixture changed')
+            staged_name=f'{name}-{filename}';shutil.copy2(artifact,results/staged_name)
+            extra_files+=f'[ "$("$directory/sha256" "$share/{staged_name}")" = {digest} ] || exit 1\n'
+            extra_files+=f'cp "$share/{staged_name}" "$data/Library/RDXNU-P0/{filename}"\nchmod 755 "$data/Library/RDXNU-P0/{filename}"\nchown root:wheel "$data/Library/RDXNU-P0/{filename}"\n'
+        boot=boot.replace('systemdlog=/var/tmp/rdxnu-systemd-version.log','"$base/init-run" "$base/init-probe"\nexport_logs\nsystemdlog=/var/tmp/rdxnu-systemd-version.log')
+    if domain:
+        verification=json.loads((ABI/'out/init/domain-verification.json').read_text())
+        if not any('LINUX_DOMAIN_LIFECYCLE_PASS' in r['output'] for r in verification.get('reference',[])):
+            raise ValueError('Linux domain lifecycle reference must pass')
+        for filename,key in (('domain-probe','linux_elf_sha256'),('domain-run','native_supervisor_sha256')):
+            artifact=ABI/'out/init'/filename;digest=hashlib.sha256(artifact.read_bytes()).hexdigest()
+            if digest!=verification[key]:raise ValueError('domain fixture changed')
+            staged_name=f'{name}-{filename}';shutil.copy2(artifact,results/staged_name)
+            extra_files+=f'[ "$("$directory/sha256" "$share/{staged_name}")" = {digest} ] || exit 1\n'
+            extra_files+=f'cp "$share/{staged_name}" "$data/Library/RDXNU-P0/{filename}"\nchmod 755 "$data/Library/RDXNU-P0/{filename}"\nchown root:wheel "$data/Library/RDXNU-P0/{filename}"\n'
+        if hashlib.sha256((ABI/'out/init/init-probe').read_bytes()).hexdigest()!=verification['subreaper_elf_sha256']:
+            raise ValueError('nested domain subreaper fixture changed')
+        boot=boot.replace('systemdlog=/var/tmp/rdxnu-systemd-version.log','"$base/domain-run" "$base/domain-probe" "$base/init-probe"\nexport_logs\nsystemdlog=/var/tmp/rdxnu-systemd-version.log')
     if startup:
         # A leftover directory is not proof the host share is mounted.
         old_mount='''    shared='/Volumes/My Shared Files/results'
@@ -400,6 +437,10 @@ def main(kind='core'):
         candidate = stage('files', OUT / (BASELINE + '-memory-filemap-files'), memory=True, filemap=True, files=True)
     elif kind == 'launch':
         candidate = stage('launch', OUT / (BASELINE + '-memory-filemap-files-startup-kdk-bridge-paths-process-interp-events-reactor-launch'), memory=True, filemap=True, files=True, startup=True, paths=True, process=True, interp=True, events=True, reactor=True, launch=True)
+    elif kind == 'subreaper':
+        candidate = stage('subreaper', OUT / (BASELINE + '-memory-filemap-files-startup-kdk-bridge-paths-process-interp-events-reactor-launch-subreaper'), memory=True, filemap=True, files=True, startup=True, paths=True, process=True, interp=True, events=True, reactor=True, launch=True, subreaper=True)
+    elif kind == 'domain':
+        candidate = stage('domain', OUT / (BASELINE + '-memory-filemap-files-startup-kdk-bridge-paths-process-interp-events-reactor-launch-subreaper-domain'), memory=True, filemap=True, files=True, startup=True, paths=True, process=True, interp=True, events=True, reactor=True, launch=True, subreaper=True, domain=True)
     elif kind == 'reactor':
         candidate = stage('reactor', OUT / (BASELINE + '-memory-filemap-files-startup-kdk-bridge-paths-process-interp-events-reactor'), memory=True, filemap=True, files=True, startup=True, paths=True, process=True, interp=True, events=True, reactor=True)
     elif kind == 'events':
@@ -423,5 +464,5 @@ def main(kind='core'):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('kind',choices=('core','memory','filemap','files','paths','process','interp','events','reactor','launch','startup','startup-stock','startup-source-control','startup-kdk-bridge'))
+    parser.add_argument('kind',choices=('core','memory','filemap','files','paths','process','interp','events','reactor','launch','subreaper','domain','startup','startup-stock','startup-source-control','startup-kdk-bridge'))
     main(parser.parse_args().kind)
